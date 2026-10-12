@@ -12,7 +12,6 @@ import socket
 import ssl
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import urllib.parse
@@ -26,6 +25,7 @@ ROOT=Path(__file__).resolve().parent
 sys.path.insert(0,str(ROOT/'tests'))
 from test_observability import fixture
 from observability import LOCK,SELF_METRICS,prometheus,require
+from fixture_cleanup import fixture_directory
 
 RAW_VALUES = {
     'sandbox_vm_memory_bytes': 4096,
@@ -62,7 +62,7 @@ def pki(path,nodes):
 
 def main():
     names=[];server=None;thread=None
-    with tempfile.TemporaryDirectory(prefix='sandbox-prometheus-pipeline-') as tmp:
+    with fixture_directory('sandbox-prometheus-pipeline-', ('receiver', 'agent-a', 'agent-b')) as tmp:
         path=Path(tmp)
         # The non-root pinned image reads /fixture through a Linux bind mount.
         # Only this ephemeral fixture root becomes traversable; file modes and

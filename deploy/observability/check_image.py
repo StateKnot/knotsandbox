@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
 import time
 import uuid
 import yaml
@@ -14,16 +13,21 @@ sys.path.insert(0,str(ROOT/'tests'))
 from test_observability import fixture
 from test_credentials import tls_fixture
 from observability import LOCK,prometheus,require
+from fixture_cleanup import fixture_directory
 
 
 def run(args):
     p=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30,check=False)
+    if p.returncode:
+        # This checker uses only public synthetic inputs, never deployment
+        # settings or cloud credentials. Keep failures bounded and diagnosable.
+        sys.stderr.buffer.write((p.stdout+p.stderr)[:8192])
     require(p.returncode==0,'PINNED_IMAGE_CHECK_FAILED')
     return p.stdout
 
 
 def main():
-    with tempfile.TemporaryDirectory(prefix='sandbox-metrics-check-') as t:
+    with fixture_directory('sandbox-metrics-check-', ('wal', 'wal-samples')) as t:
         path=Path(t)
         # Linux bind mounts preserve the root directory's mode. The pinned
         # image's non-root user must traverse this ephemeral fixture directory;
@@ -83,5 +87,5 @@ def main():
 
 if __name__=='__main__':
     try:main()
-    except (ValueError,OSError,subprocess.SubprocessError):
-        print('OBSERVABILITY_IMAGE_CHECK_FAILED',file=sys.stderr);sys.exit(1)
+    except (ValueError,OSError,subprocess.SubprocessError) as error:
+        print(f'OBSERVABILITY_IMAGE_CHECK_FAILED: {type(error).__name__}: {error}',file=sys.stderr);sys.exit(1)

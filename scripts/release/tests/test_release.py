@@ -20,12 +20,24 @@ from preflight import check, publication_policy, console_policy
 from security_packages import validate_lock, validate_dockerfile
 from console_security import validate_lock as validate_console_lock, validate_dockerfile as validate_console_dockerfile
 from console_assets import lock_packages, inventory, asset_manifest, image_files, stage_context, validate_selection, verify_previous
-from common import release_file_names
+from common import release_file_names, timevalue
 from download_previous import download
 from test_native import native_fixture, retain_historical_binaries
 from test_sqlite_build import native_trust_fixture
 
-NOW = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+def fixture_reference_time(debian_lock, console_lock):
+    locks = (debian_lock, console_lock)
+    start = max(timevalue(lock['reviewed_at']) for lock in locks)
+    end = min(timevalue(lock['review_expires_at']) for lock in locks)
+    if start >= end:
+        raise ValueError('FIXTURE_SECURITY_REVIEW_WINDOWS_DISJOINT')
+    return start + (end - start) / 2
+
+
+# Protocol fixtures follow the locks' recorded review windows, never today's
+# clock. Production validators still check the original signed-index bounds.
+FIXTURE_TIME = fixture_reference_time(load(ROOT/'debian-security.lock.json'),
+                                      load(ROOT/'console-security.lock.json'))
 REPO, TAG, COMMIT = 'test-owner/test-repository', 'v1.2.3', 'a' * 40
 NAMES = SCAN_NAMES
 VERSIONS = load(ROOT / 'tools.lock.json')['tools']
@@ -34,7 +46,7 @@ VERSIONS = load(ROOT / 'tools.lock.json')['tools']
 def database_status(built=None):
     # Synthetic protocol fixture, never a statement of an actual scanner run.
     return {'valid': True, 'schemaVersion': 'v6.1.10',
-            'built': (built or NOW-dt.timedelta(hours=1)).isoformat(),
+            'built': (built or FIXTURE_TIME-dt.timedelta(hours=1)).isoformat(),
             'from': 'https://grype.anchore.io/databases/v6/vulnerability-db_v6.1.10_2026-10-08T00:00:00Z_1791417600.tar.zst?checksum=sha256%3A'+'a'*64,
             'path': '/scanner/db/6/vulnerability.db'}
 
@@ -48,7 +60,7 @@ def reports(status=None):
 
 
 def risk():
-    return {'artifact': 'service', 'vulnerability': 'CVE-2026-12345', 'package': 'test-package', 'version': '1.0.0', 'purl': 'pkg:cargo/test-package@1.0.0', 'severity': 'High', 'approved_at': (NOW-dt.timedelta(days=1)).isoformat(), 'expires_at': (NOW+dt.timedelta(days=1)).isoformat(), 'owner': 'security-reviewer', 'ticket': 'https://example.test/review/1', 'reason': 'Reviewed exact affected package and compensating control.'}
+    return {'artifact': 'service', 'vulnerability': 'CVE-2026-12345', 'package': 'test-package', 'version': '1.0.0', 'purl': 'pkg:cargo/test-package@1.0.0', 'severity': 'High', 'approved_at': (FIXTURE_TIME-dt.timedelta(days=1)).isoformat(), 'expires_at': (FIXTURE_TIME+dt.timedelta(days=1)).isoformat(), 'owner': 'security-reviewer', 'ticket': 'https://example.test/review/1', 'reason': 'Reviewed exact affected package and compensating control.'}
 
 
 def finding():
@@ -109,8 +121,8 @@ def fixture(directory, *, historical=False):
         dump(directory/(name+('.cdx.json' if name=='proxy-source' else '.syft.json')),sbom)
         if name != 'proxy-source': dump(directory/(name+'.spdx.json'), {'fixture':True})
     dump(directory/'database.json', database_status())
-    dump(directory/'scan-gate.json', {'version':1,'evaluated_at':NOW.isoformat(),'blocked':[], 'reports':{name:sha(directory/(name+'.grype.json')) for name in NAMES}, 'policy_sha256':sha(directory/'risk-exceptions.json')})
-    with patch('build.now',return_value=NOW), patch('build.BINARIES',binaries): create_manifest(directory,REPO,TAG,COMMIT,'42',{'first_release':True,'previous':None})
+    dump(directory/'scan-gate.json', {'version':1,'evaluated_at':FIXTURE_TIME.isoformat(),'blocked':[], 'reports':{name:sha(directory/(name+'.grype.json')) for name in NAMES}, 'policy_sha256':sha(directory/'risk-exceptions.json')})
+    with patch('build.now',return_value=FIXTURE_TIME), patch('build.BINARIES',binaries): create_manifest(directory,REPO,TAG,COMMIT,'42',{'first_release':True,'previous':None})
 
 
 def rewrite(path, value):
@@ -118,29 +130,29 @@ def rewrite(path, value):
 
 
 class RiskGate(unittest.TestCase):
-    def test_clean_complete_scan(self): self.assertEqual(evaluate(reports(), {'version':1,'exceptions':[]}, VERSIONS,NOW), [])
+    def test_clean_complete_scan(self): self.assertEqual(evaluate(reports(), {'version':1,'exceptions':[]}, VERSIONS,FIXTURE_TIME), [])
     def test_every_high_critical_unknown_blocks(self):
         for severity in ('High','Critical','Unknown'):
             r=reports(); f=finding(); f['vulnerability']['severity']=severity; r['service']['matches']=[f]
-            self.assertEqual(len(evaluate(r, {'version':1,'exceptions':[]},VERSIONS,NOW)),1)
+            self.assertEqual(len(evaluate(r, {'version':1,'exceptions':[]},VERSIONS,FIXTURE_TIME)),1)
     def test_exception_is_exact_and_must_be_used(self):
         p={'version':1,'exceptions':[risk()]}; r=reports();r['service']['matches']=[finding()]
-        self.assertEqual(evaluate(r,p,VERSIONS,NOW),[])
+        self.assertEqual(evaluate(r,p,VERSIONS,FIXTURE_TIME),[])
         r['service']['matches'][0]['artifact']['version']='1.0.1'
-        with self.assertRaisesRegex(ValueError,'UNUSED'):evaluate(r,p,VERSIONS,NOW)
+        with self.assertRaisesRegex(ValueError,'UNUSED'):evaluate(r,p,VERSIONS,FIXTURE_TIME)
     def test_expired_future_long_and_wildcard_exceptions_rejected(self):
-        for key,value in [('expires_at',NOW.isoformat()),('approved_at',(NOW+dt.timedelta(hours=1)).isoformat()),('expires_at',(NOW+dt.timedelta(days=31)).isoformat()),('purl','pkg:cargo/*')]:
+        for key,value in [('expires_at',FIXTURE_TIME.isoformat()),('approved_at',(FIXTURE_TIME+dt.timedelta(hours=1)).isoformat()),('expires_at',(FIXTURE_TIME+dt.timedelta(days=31)).isoformat()),('purl','pkg:cargo/*')]:
             item=risk();item[key]=value
-            with self.assertRaises(ValueError):exceptions({'version':1,'exceptions':[item]},NOW)
+            with self.assertRaises(ValueError):exceptions({'version':1,'exceptions':[item]},FIXTURE_TIME)
     def test_missing_scan_wrong_version_ignored_and_eol_reject(self):
         mutations=[lambda r:r.pop('builder'),lambda r:r['service']['descriptor'].update(version='wrong'),lambda r:r['service'].update(ignoredMatches=[{}]),lambda r:r['runner'].update(alertsByPackage=[{}])]
         for mutate in mutations:
             r=reports();mutate(r)
-            with self.assertRaises(ValueError):evaluate(r,{'version':1,'exceptions':[]},VERSIONS,NOW)
+            with self.assertRaises(ValueError):evaluate(r,{'version':1,'exceptions':[]},VERSIONS,FIXTURE_TIME)
     def test_database_age_invalid_future_fail_closed(self):
-        validate_database({'valid':True,'built':(NOW-dt.timedelta(hours=1)).isoformat()},NOW)
-        for status in [{'valid':False}, {'valid':True,'built':(NOW-dt.timedelta(hours=25)).isoformat()}, {'valid':True,'built':(NOW+dt.timedelta(seconds=1)).isoformat()}]:
-            with self.assertRaises(ValueError):validate_database(status,NOW)
+        validate_database({'valid':True,'built':(FIXTURE_TIME-dt.timedelta(hours=1)).isoformat()},FIXTURE_TIME)
+        for status in [{'valid':False}, {'valid':True,'built':(FIXTURE_TIME-dt.timedelta(hours=25)).isoformat()}, {'valid':True,'built':(FIXTURE_TIME+dt.timedelta(seconds=1)).isoformat()}]:
+            with self.assertRaises(ValueError):validate_database(status,FIXTURE_TIME)
 
     def test_scanner_configuration_cannot_hide_findings_or_expand_database_age(self):
         changes = [(['exclude'], ['**']), (['only-fixed'], True), (['only-notfixed'], True),
@@ -162,42 +174,42 @@ class RiskGate(unittest.TestCase):
                 for key in path[:-1]: container = container[key]
                 container[path[-1]] = value
                 with self.assertRaisesRegex(ValueError, 'SCANNER_CONFIGURATION'):
-                    evaluate(r, {'version': 1, 'exceptions': []}, VERSIONS, NOW)
+                    evaluate(r, {'version': 1, 'exceptions': []}, VERSIONS, FIXTURE_TIME)
         for field in ('configuration', 'db'):
             r=reports();r['service']['descriptor'].pop(field)
-            with self.assertRaises(ValueError):evaluate(r, {'version': 1, 'exceptions': []}, VERSIONS, NOW)
+            with self.assertRaises(ValueError):evaluate(r, {'version': 1, 'exceptions': []}, VERSIONS, FIXTURE_TIME)
 
     def test_scanner_database_identity_types_source_and_paths_are_bound(self):
         changes = [('schemaVersion', 'v6.1.11'), ('valid', 1), ('path', '/other/vulnerability.db'),
             ('from', 'https://untrusted.test/db?checksum=sha256%3A'+'a'*64),
             ('from', database_status()['from']+'&checksum=sha256%3A'+'a'*64),
             ('from', database_status()['from'].replace('sha256%3A', 'sha1%3A')),
-            ('built', (NOW-dt.timedelta(hours=25)).isoformat()),
-            ('built', (NOW+dt.timedelta(seconds=1)).isoformat())]
+            ('built', (FIXTURE_TIME-dt.timedelta(hours=25)).isoformat()),
+            ('built', (FIXTURE_TIME+dt.timedelta(seconds=1)).isoformat())]
         for field, value in changes:
             with self.subTest(field=field, value=value):
                 r=reports();r['service']['descriptor']['db']['status'][field]=value
-                with self.assertRaises(ValueError):evaluate(r, {'version': 1, 'exceptions': []}, VERSIONS, NOW)
+                with self.assertRaises(ValueError):evaluate(r, {'version': 1, 'exceptions': []}, VERSIONS, FIXTURE_TIME)
         r=reports();r['service']['descriptor']['db']['status']['from']=database_status()['from'][:-64]+'b'*64
         with self.assertRaisesRegex(ValueError, 'SCANNER_DATABASE_MISMATCH'):
-            evaluate(r, {'version': 1, 'exceptions': []}, VERSIONS, NOW)
+            evaluate(r, {'version': 1, 'exceptions': []}, VERSIONS, FIXTURE_TIME)
         standalone=database_status();standalone['from']=standalone['from'][:-64]+'b'*64
         with self.assertRaisesRegex(ValueError, 'SCANNER_DATABASE_MISMATCH'):
-            evaluate(reports(), {'version': 1, 'exceptions': []}, VERSIONS, NOW, database_status=standalone)
+            evaluate(reports(), {'version': 1, 'exceptions': []}, VERSIONS, FIXTURE_TIME, database_status=standalone)
         for cache in ('relative', '/db/../other', None):
             r=reports();r['service']['descriptor']['configuration']['db']['cache-dir']=cache
             with self.assertRaisesRegex(ValueError, 'SCANNER_DATABASE_CACHE_PATH'):
-                evaluate(r, {'version': 1, 'exceptions': []}, VERSIONS, NOW)
+                evaluate(r, {'version': 1, 'exceptions': []}, VERSIONS, FIXTURE_TIME)
 
     def test_historical_database_time_does_not_change_current_risk_exception_time(self):
-        old=NOW-dt.timedelta(days=2);status=database_status(old-dt.timedelta(hours=1));r=reports(status)
+        old=FIXTURE_TIME-dt.timedelta(days=2);status=database_status(old-dt.timedelta(hours=1));r=reports(status)
         with self.assertRaisesRegex(ValueError, 'SCANNER_DATABASE_STALE'):
-            evaluate(r, {'version': 1, 'exceptions': []}, VERSIONS, NOW)
-        self.assertEqual(evaluate(r, {'version': 1, 'exceptions': []}, VERSIONS, NOW,
+            evaluate(r, {'version': 1, 'exceptions': []}, VERSIONS, FIXTURE_TIME)
+        self.assertEqual(evaluate(r, {'version': 1, 'exceptions': []}, VERSIONS, FIXTURE_TIME,
                                  database_at=old, database_status=status), [])
         r['service']['matches']=[finding()];item=risk();item.update(approved_at=(old-dt.timedelta(hours=1)).isoformat(),expires_at=(old+dt.timedelta(hours=1)).isoformat())
         with self.assertRaisesRegex(ValueError, 'RISK_REVIEW_EXPIRED'):
-            evaluate(r, {'version': 1, 'exceptions': [item]}, VERSIONS, NOW, database_at=old, database_status=status)
+            evaluate(r, {'version': 1, 'exceptions': [item]}, VERSIONS, FIXTURE_TIME, database_at=old, database_status=status)
 
     def test_scanner_environment_drops_inherited_filters_for_every_scanner(self):
         inherited={'GRYPE_EXCLUDE':'**', 'GRYPE_ONLY_FIXED':'true', 'GRYPE_IGNORE_WONTFIX':'not-fixed',
@@ -215,13 +227,13 @@ class ArtifactProtocol(unittest.TestCase):
     def setUp(self):
         self.trust=native_trust_fixture();self.trust.start();self.tmp=tempfile.TemporaryDirectory();self.directory=Path(self.tmp.name);fixture(self.directory)
     def tearDown(self):self.tmp.cleanup();self.trust.stop()
-    def verify(self):return verify_candidate(self.directory,REPO,TAG,COMMIT,NOW)
+    def verify(self):return verify_candidate(self.directory,REPO,TAG,COMMIT,FIXTURE_TIME)
     def test_unsigned_candidate_passes_only_structural_checks(self):
         self.assertEqual(self.verify()['commit'],COMMIT)
         self.assertFalse((self.directory/'deployment-lock.json').exists())
     def test_wrong_expected_repository_tag_commit(self):
         for repo,tag,commit in [('other/repo',TAG,COMMIT),(REPO,'v1.2.4',COMMIT),(REPO,TAG,'b'*40)]:
-            with self.assertRaises(ValueError):verify_candidate(self.directory,repo,tag,commit,NOW)
+            with self.assertRaises(ValueError):verify_candidate(self.directory,repo,tag,commit,FIXTURE_TIME)
     def test_actual_build_helper_local_and_oci_smoke_paths(self):
         # Exercise the real orchestration function, including both exporter paths;
         # subprocesses are mocked, not Python control flow or artifact verification.
@@ -268,16 +280,16 @@ class ArtifactProtocol(unittest.TestCase):
             v['files'][field]=old;rewrite(p,v)
     def test_native_high_and_missing_scanner_coverage_still_blocks(self):
         r=reports();r['native-components']['matches']=[finding()]
-        self.assertEqual(len(evaluate(r,{'version':1,'exceptions':[]},VERSIONS,NOW)),1)
+        self.assertEqual(len(evaluate(r,{'version':1,'exceptions':[]},VERSIONS,FIXTURE_TIME)),1)
         r.pop('native-components')
-        with self.assertRaisesRegex(ValueError,'SCAN_COVERAGE'):evaluate(r,{'version':1,'exceptions':[]},VERSIONS,NOW)
+        with self.assertRaisesRegex(ValueError,'SCAN_COVERAGE'):evaluate(r,{'version':1,'exceptions':[]},VERSIONS,FIXTURE_TIME)
     def test_known_seven_binary_previous_history_and_current_rejection(self):
         # Only protocol/signature-orchestration mocks. No real Cosign certification.
         with tempfile.TemporaryDirectory() as temporary:
             directory=Path(temporary);fixture(directory,historical=True)
-            self.assertEqual(verify_candidate(directory,REPO,TAG,COMMIT,NOW,historical=True)['binaries'],list(HISTORICAL_BINARIES))
+            self.assertEqual(verify_candidate(directory,REPO,TAG,COMMIT,FIXTURE_TIME,historical=True)['binaries'],list(HISTORICAL_BINARIES))
             with self.assertRaisesRegex(ValueError,'RELEASE_BINARY_COVERAGE'):
-                verify_candidate(directory,REPO,TAG,COMMIT,NOW)
+                verify_candidate(directory,REPO,TAG,COMMIT,FIXTURE_TIME)
             with patch('console_assets.run') as crypto, patch('verify.cosign_arguments',return_value=['current-pinned-cosign']), patch('verify.verify_statement'):
                 previous=verify_previous(directory,Path('/tools'),REPO,TAG,COMMIT)
             crypto.assert_called_once_with(['current-pinned-cosign'],timeout=60)
@@ -287,7 +299,7 @@ class ArtifactProtocol(unittest.TestCase):
             for names in [list(HISTORICAL_BINARIES[:-1])+['foreign-worker'],list(BINARIES)+['sandbox-automation'],list(reversed(BINARIES))]:
                 changed=copy.deepcopy(original);changed['binaries']=names;rewrite(directory/'release-manifest.json',changed)
                 with self.assertRaisesRegex(ValueError,'RELEASE_BINARY_COVERAGE'):
-                    verify_candidate(directory,REPO,TAG,COMMIT,NOW,historical=True)
+                    verify_candidate(directory,REPO,TAG,COMMIT,FIXTURE_TIME,historical=True)
 
     def test_legacy_v1_is_only_available_for_authenticated_previous_asset_review(self):
         manifest=load(self.directory/'release-manifest.json');manifest['version']=1
@@ -296,7 +308,7 @@ class ArtifactProtocol(unittest.TestCase):
         manifest['files']['scan-gate.json']={'sha256':sha(self.directory/'scan-gate.json'),'size':(self.directory/'scan-gate.json').stat().st_size}
         rewrite(self.directory/'release-manifest.json',manifest)
         with self.assertRaisesRegex(ValueError,'RELEASE_IDENTITY'):self.verify()
-        self.assertEqual(verify_candidate(self.directory,REPO,TAG,COMMIT,NOW,historical=True)['version'],1)
+        self.assertEqual(verify_candidate(self.directory,REPO,TAG,COMMIT,FIXTURE_TIME,historical=True)['version'],1)
     def test_native_runtime_hash_links_special_files_and_whiteouts_fail_closed(self):
         import hashlib
         from native import validate_runtime
@@ -370,22 +382,42 @@ class PublicationGuards(unittest.TestCase):
 
 class SecurityPackageLock(unittest.TestCase):
     def test_console_patch_is_signed_offline_pinned_and_installed_in_inventory(self):
-        lock = validate_console_lock(load(ROOT/'console-security.lock.json'), NOW)
+        lock = validate_console_lock(load(ROOT/'console-security.lock.json'), FIXTURE_TIME)
         dockerfile = (ROOT.parent.parent/'deploy/console/Dockerfile').read_text()
         validate_console_dockerfile(lock, dockerfile)
         for old, new, code in [(lock['packages'][0]['sha256'], '0'*64, 'DOWNLOAD_DRIFT'), ('RUN --network=none case', 'RUN case', 'OFFLINE_INSTALL_MISSING'), ('apk add --no-network', 'apk add --allow-untrusted --no-network', 'OFFLINE_INSTALL_MISSING'), ('zlib-1.3.2-r1" \\', 'zlib-1.3.2-r0" \\', 'INSTALLED_VERSION_UNCHECKED')]:
             with self.assertRaisesRegex(ValueError, code): validate_console_dockerfile(lock, dockerfile.replace(old, new))
         for kind in ('expired', 'url', 'hash', 'architecture', 'signature'):
             changed = copy.deepcopy(lock)
-            if kind == 'expired': changed['review_expires_at'] = NOW.isoformat()
+            if kind == 'expired': changed['review_expires_at'] = FIXTURE_TIME.isoformat()
             elif kind == 'url': changed['packages'][0]['url'] = 'https://evil.invalid/zlib.apk'
             elif kind == 'hash': changed['packages'][0]['sha256'] = 'missing'
             elif kind == 'architecture': changed['packages'][1]['architecture'] = 'x86_64'
             else: changed['packages'][0]['signature_key'] = 'untrusted.pub'
-            with self.assertRaises(ValueError): validate_console_lock(changed, NOW)
+            with self.assertRaises(ValueError): validate_console_lock(changed, FIXTURE_TIME)
+        expires = dt.datetime.fromisoformat(lock['review_expires_at'].replace('Z', '+00:00'))
+        with patch('console_security.now', return_value=expires), self.assertRaisesRegex(ValueError, 'CONSOLE_SECURITY_REVIEW_EXPIRED'):
+            validate_console_lock(lock)
+        with patch('console_security.now', return_value=expires - dt.timedelta(microseconds=1)):
+            self.assertEqual(validate_console_lock(lock), lock)
 
     def test_reviewed_security_downloads_match_actual_docker_build_contract(self):
-        lock = validate_lock(load(ROOT/'debian-security.lock.json'), NOW)
+        lock = validate_lock(load(ROOT/'debian-security.lock.json'), FIXTURE_TIME)
+        # A legitimate review refresh moves the fixture's reference without
+        # changing its source index or weakening the real lock validators.
+        console_lock = load(ROOT/'console-security.lock.json')
+        refreshed = copy.deepcopy(lock)
+        refreshed_console = copy.deepcopy(console_lock)
+        for changed in (refreshed, refreshed_console):
+            changed['reviewed_at'] = FIXTURE_TIME.isoformat()
+        refreshed_time = fixture_reference_time(refreshed, refreshed_console)
+        self.assertGreater(refreshed_time, FIXTURE_TIME)
+        validate_lock(refreshed, refreshed_time)
+        validate_console_lock(refreshed_console, refreshed_time)
+        disjoint = copy.deepcopy(console_lock)
+        disjoint['reviewed_at'] = lock['review_expires_at']
+        with self.assertRaisesRegex(ValueError, 'FIXTURE_SECURITY_REVIEW_WINDOWS_DISJOINT'):
+            fixture_reference_time(lock, disjoint)
         dockerfile = (ROOT.parent.parent/'Dockerfile').read_text()
         validate_dockerfile(lock, dockerfile)
         with self.assertRaisesRegex(ValueError, 'DOWNLOAD_DRIFT'):
@@ -396,13 +428,25 @@ class SecurityPackageLock(unittest.TestCase):
             validate_dockerfile(lock, dockerfile.replace('RUN --network=none dpkg', 'RUN dpkg'))
     def test_expired_review_arbitrary_download_and_duplicate_package_fail(self):
         original = load(ROOT/'debian-security.lock.json')
-        for change in ('expired', 'origin', 'duplicate', 'index-expired'):
-            lock = copy.deepcopy(original)
-            if change == 'expired': lock['review_expires_at'] = NOW.isoformat()
-            elif change == 'origin': lock['packages'][0]['url'] = 'https://evil.invalid/package.deb'
-            elif change == 'index-expired': lock['source']['release_valid_until'] = 'Sat, 03 Oct 2026 00:00:00 UTC'
-            else: lock['packages'].append(copy.deepcopy(lock['packages'][0]))
-            with self.assertRaises(ValueError): validate_lock(lock, NOW)
+        validate_lock(original, FIXTURE_TIME)
+        for change, code in [('expired', 'SECURITY_REVIEW_EXPIRED'),
+                             ('origin', 'SECURITY_PACKAGE_ORIGIN'),
+                             ('duplicate', 'SECURITY_PACKAGE_NAME'),
+                             ('index-expired', 'SECURITY_INDEX_EXPIRED')]:
+            with self.subTest(change=change):
+                lock = copy.deepcopy(original)
+                if change == 'expired': lock['review_expires_at'] = FIXTURE_TIME.isoformat()
+                elif change == 'origin': lock['packages'][0]['url'] = 'https://evil.invalid/package.deb'
+                elif change == 'index-expired': lock['source']['release_valid_until'] = 'Sat, 03 Oct 2026 00:00:00 UTC'
+                else: lock['packages'].append(copy.deepcopy(lock['packages'][0]))
+                with self.assertRaisesRegex(ValueError, code): validate_lock(lock, FIXTURE_TIME)
+        expires = dt.datetime.fromisoformat(original['review_expires_at'].replace('Z', '+00:00'))
+        # Exercise the default-clock seam too: the unchanged validator must
+        # reject exactly at expiry, and accept the last instant before it.
+        with patch('security_packages.now', return_value=expires), self.assertRaisesRegex(ValueError, 'SECURITY_REVIEW_EXPIRED'):
+            validate_lock(original)
+        with patch('security_packages.now', return_value=expires - dt.timedelta(microseconds=1)):
+            self.assertEqual(validate_lock(original), original)
 
 
 
@@ -412,11 +456,11 @@ class ConsoleReleaseProtocol(unittest.TestCase):
     def tearDown(self):self.tmp.cleanup();self.trust.stop()
     def test_console_is_required_in_every_scan_and_signed_file_inventory(self):
         r=reports();r.pop('console')
-        with self.assertRaisesRegex(ValueError,'SCAN_COVERAGE'):evaluate(r,{'version':1,'exceptions':[]},VERSIONS,NOW)
+        with self.assertRaisesRegex(ValueError,'SCAN_COVERAGE'):evaluate(r,{'version':1,'exceptions':[]},VERSIONS,FIXTURE_TIME)
         r=reports();r.pop('console-builder')
-        with self.assertRaisesRegex(ValueError,'SCAN_COVERAGE'):evaluate(r,{'version':1,'exceptions':[]},VERSIONS,NOW)
+        with self.assertRaisesRegex(ValueError,'SCAN_COVERAGE'):evaluate(r,{'version':1,'exceptions':[]},VERSIONS,FIXTURE_TIME)
         m=load(self.directory/'release-manifest.json');m['images'].pop('console');rewrite(self.directory/'release-manifest.json',m)
-        with self.assertRaisesRegex(ValueError,'RELEASE_COMPONENTS'):verify_candidate(self.directory,REPO,TAG,COMMIT,NOW)
+        with self.assertRaisesRegex(ValueError,'RELEASE_COMPONENTS'):verify_candidate(self.directory,REPO,TAG,COMMIT,FIXTURE_TIME)
     def test_npm_transitive_dev_scoped_and_retained_packages_cannot_be_omitted(self):
         rewrite(self.directory/'console.syft.json',{'artifacts':[]})
         with self.assertRaisesRegex(ValueError,'NPM_DEPENDENCIES_MISSING'):validate_sboms(self.directory)
@@ -438,7 +482,7 @@ class ConsoleReleaseProtocol(unittest.TestCase):
         manifest['files'][p.name]={'sha256':sha(p),'size':p.stat().st_size}
         rewrite(self.directory/'release-manifest.json',manifest)
         with self.assertRaisesRegex(ValueError,'CONSOLE_IMAGE_INVENTORY_MISMATCH'):
-            verify_candidate(self.directory,REPO,TAG,COMMIT,NOW)
+            verify_candidate(self.directory,REPO,TAG,COMMIT,FIXTURE_TIME)
 
     def test_default_cannot_skip_previous_and_first_mode_is_explicit(self):
         with self.assertRaisesRegex(ValueError,'VERIFIED_PREVIOUS'):validate_selection(False,'','',TAG)
@@ -448,7 +492,7 @@ class ConsoleReleaseProtocol(unittest.TestCase):
         proc=subprocess.run([sys.executable,str(ROOT/'build.py'),'--tools','/missing','--output','/missing','--repository',REPO,'--tag',TAG,'--commit',COMMIT,'--run-id','42'],capture_output=True)
         self.assertNotEqual(proc.returncode,0);self.assertIn(b'VERIFIED_PREVIOUS_CONSOLE_RELEASE_REQUIRED',proc.stderr)
     def test_first_claim_rejected_if_console_published_and_previous_must_be_latest_exact_commit(self):
-        release={'draft':False,'tag_name':'v1.2.2','published_at':NOW.isoformat(),'assets':[{'name':'console.oci.tar'}]}
+        release={'draft':False,'tag_name':'v1.2.2','published_at':FIXTURE_TIME.isoformat(),'assets':[{'name':'console.oci.tar'}]}
         with patch('preflight.github',return_value=[release]),self.assertRaisesRegex(ValueError,'ALREADY_EXISTS'):console_policy(REPO,TAG,True,'','')
         with patch('preflight.github',side_effect=[[release],{'sha':'b'*40}]):console_policy(REPO,TAG,False,'v1.2.2','b'*40)
         with patch('preflight.github',return_value=[release]),self.assertRaisesRegex(ValueError,'LATEST_PUBLISHED'):console_policy(REPO,TAG,False,'v1.2.1','b'*40)
@@ -465,21 +509,25 @@ class ConsoleReleaseProtocol(unittest.TestCase):
         gate=load(self.directory/'scan-gate.json');gate['reports']['service']=sha(self.directory/'service.grype.json')
         rewrite(self.directory/'scan-gate.json',gate)
         (self.directory/'release-manifest.json').unlink();(self.directory/'provenance.json').unlink()
-        create_manifest(self.directory,REPO,TAG,COMMIT,'42',{'first_release':True,'previous':None})
+        with patch('build.now', return_value=FIXTURE_TIME):
+            create_manifest(self.directory,REPO,TAG,COMMIT,'42',{'first_release':True,'previous':None})
         with patch('console_assets.run'),patch('verify.cosign_arguments',return_value=['current-pinned-cosign']),patch('verify.verify_statement'):
             with self.assertRaisesRegex(ValueError,'SCANNER_CONFIGURATION'):
                 verify_previous(self.directory,Path('/tools'),REPO,TAG,COMMIT)
     def test_authenticated_previous_uses_historical_policies_without_weakening_install(self):
         # Synthetic older release, not a real signature. Only the cryptographic
         # boundary is mocked; actual old policy, scanner, hashes and OCI checks run.
-        old = NOW - dt.timedelta(days=1)
+        review_start = max(timevalue(load(self.directory/name)['reviewed_at'])
+                           for name in ('debian-security.lock.json', 'console-security.lock.json'))
+        review_margin = (FIXTURE_TIME - review_start) / 4
+        old = FIXTURE_TIME - 2 * review_margin
         tools = load(self.directory/'tools.lock.json')
         tools['tools']['grype']['version'] = '0.119.0'
         rewrite(self.directory/'tools.lock.json', tools)
         for name in ('debian-security.lock.json', 'console-security.lock.json'):
             lock = load(self.directory/name)
-            lock['reviewed_at'] = (old - dt.timedelta(hours=1)).isoformat()
-            lock['review_expires_at'] = (old + dt.timedelta(hours=1)).isoformat()
+            lock['reviewed_at'] = (old - review_margin).isoformat()
+            lock['review_expires_at'] = (old + review_margin).isoformat()
             rewrite(self.directory/name, lock)
         for name in NAMES:
             report = load(self.directory/(name+'.grype.json'))
@@ -491,14 +539,14 @@ class ConsoleReleaseProtocol(unittest.TestCase):
         (self.directory/'release-manifest.json').unlink(); (self.directory/'provenance.json').unlink()
         with patch('build.now',return_value=old): create_manifest(self.directory, REPO,TAG,COMMIT,'42',{'first_release':True,'previous':None})
         with self.assertRaisesRegex(ValueError, 'UNREVIEWED_TOOL_LOCK'):
-            verify_candidate(self.directory, REPO,TAG,COMMIT,NOW)
+            verify_candidate(self.directory, REPO,TAG,COMMIT,FIXTURE_TIME)
         with patch('console_assets.run') as crypto, patch('verify.cosign_arguments', return_value=['current-pinned-cosign']), patch('verify.verify_statement'):
             previous = verify_previous(self.directory,Path('/tools'),REPO,TAG,COMMIT)
         self.assertEqual(previous['created_at'],old.isoformat())
         crypto.assert_called_once_with(['current-pinned-cosign'],timeout=60)
         self.assertFalse((self.directory/'deployment-lock.json').exists())
         with self.assertRaisesRegex(ValueError, 'HISTORICAL_RELEASE_TIME_REQUIRED'):
-            verify_candidate(self.directory,REPO,TAG,COMMIT,NOW,historical=True)
+            verify_candidate(self.directory,REPO,TAG,COMMIT,FIXTURE_TIME,historical=True)
         for script in ('verify.py','install.py','preflight.py'):
             proc=subprocess.run([sys.executable,str(ROOT/script),'--historical'],capture_output=True)
             self.assertNotEqual(proc.returncode,0)
@@ -508,7 +556,7 @@ class ConsoleReleaseProtocol(unittest.TestCase):
         report['artifacts'] = [p for p in report['artifacts'] if p['type'] != 'apk']
         rewrite(self.directory/'console.syft.json',report)
         with self.assertRaisesRegex(ValueError,'CONSOLE_SECURITY_UPDATE_MISSING_FROM_SBOM'):
-            validate_sboms(self.directory,NOW)
+            validate_sboms(self.directory,FIXTURE_TIME)
     def test_staged_build_retains_hash_verified_assets_and_nonpublic_lock_inventory(self):
         files=image_files(self.directory/'console');manifest=asset_manifest(files)
         source=ROOT.parent.parent

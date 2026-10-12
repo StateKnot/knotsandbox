@@ -1,6 +1,8 @@
 # 开发进度与验收证据
 
-最新开发检查点（2026-10-12）：资源观测首批公开CI发现的三个跨平台问题已修复：验收夹具根目录允许固定非root镜像读取、Linux专属测试四处unwrap改为错误传播、三份Terraform锁文件补齐四平台h1且保留原版本/zh/native h1。Linux全目标严格Clippy、真实句柄锁1/1、独立Linux目录权限对照、采集13单测、真实Prometheus镜像/TLS/WAL和双节点双副本协议链、原38告警回放通过；三个模块只读init/validate及mock15/15通过（实际macOS arm64）。首轮下载、插件握手和readiness超时日志保留，原断言/期限/生产权限/CI上传门槛不变。未新增产品动作、依赖或迁移，未部署云资源；远端整套CI以新提交实际运行记录为准。见[Linux CI补验](../research/resource-observability-ci-delivery-20261012.md)。
+最新开发检查点（2026-10-12）：进一步收尾资源观测跨平台CI。远端已确认云只读锁、SDK/控制台和Linux fmt/Clippy通过；实际Linux volume另复现默认Prometheus owner与普通runner之间的WAL清理权限问题。两检查脚本只在断言后以固定默认owner清理五个自有夹具store，新增四项范围/失败保留回归，部署17/17及真实镜像/TLS/WAL、双副本协议和38告警再次通过。release历史fixture仅在测试内按两锁记录窗口的交集选择合法参考时刻，63项通过；生产安全锁/默认真实时钟/签名门槛不变，当前Debian快照已过期，真实发行仍被阻断。未变更生产Rust/API或正式迁移，远端整套CI继续按新提交实际核对。见[补验记录](../research/resource-observability-ci-delivery-20261012.md)与[发行安全状态](release-security-status.md)。
+
+上一开发检查点（2026-10-12）：资源观测首批公开CI发现的三个跨平台问题已修复：验收夹具根目录允许固定非root镜像读取、Linux专属测试四处unwrap改为错误传播、三份Terraform锁文件补齐四平台h1且保留原版本/zh/native h1。Linux全目标严格Clippy、真实句柄锁1/1、独立Linux目录权限对照、采集13单测、真实Prometheus镜像/TLS/WAL和双节点双副本协议链、原38告警回放通过；三个模块只读init/validate及mock15/15通过（实际macOS arm64）。首轮下载、插件握手和readiness超时日志保留，原断言/期限/生产权限/CI上传门槛不变。未新增产品动作、依赖或迁移，未部署云资源；远端整套CI以新提交实际运行记录为准。见[Linux CI补验](../research/resource-observability-ci-delivery-20261012.md)。
 
 上一开发检查点（2026-10-12）：G0-08/G3-12已交付首批资源观测子项，固定宿主指标5→11，CPU自身CFS节流、匿名/文件内存和宿主OOM事件/终止进程速率打通nodeguard/API/OpenAPI/SDK/控制台。可选字段缺失不补零、不抹掉原五项；无利用率百分比或自动操作。采集/写入白名单12项、每节点3072样本和WAL模型同步，原身份/CA/70%磁盘门槛保留。普通Rust56程序429通过/0失败/246环境专项明确ignored；Linux39普通通过及独立真实cgroup专项1/1；隔离TLS PostgreSQL/签名API1/1、真实promtool1/1、双节点双副本采集写入、SDK70/控制台66/Chrome2/OpenAPI13、部署13单测/14官方schema及严格Clippy/fmt通过。首轮权限、定位、计时与容器准备失败保留，未放宽断言/权限/超时，当前测试输入和自有清理核对。无新迁移或生产部署；有效期容量分母、峰值/成本、GPU与公开idle策略仍待开发。详见[本批交付](../research/resource-observability-delivery-20261012.md)。
 
