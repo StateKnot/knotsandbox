@@ -2,6 +2,8 @@
 
 `GET /v1/instances/{id}/metrics` 提供已授权实例某一次 launch 的宿主资源时间序列。采集源是 nodeguard 已登记并固定的 VM cgroup，不接受租户提供的 exporter、标签或 PromQL。它用于资源观察，不构成应用健康、VM 死亡、卷卸载或配额释放证据。
 
+2026-10-12审查明确：当前五类接口返回资源用量，尚无有效期request/limit/overhead分母、利用率/规格推荐/节点成本治理，也不包含GPU。GPU资源模型、运行时、设备租约、采集和安全回收均待实现。idle后台扫描存在，但公开策略配置入口未完成，`idle_timeout_seconds` 默认NULL。已将资源效率/GPU增量及idle运营缺口登记为[61项开发表中的新增工作](../research/rust-sandbox-development-workbreakdown.md#11-资源效率与gpu新增交付顺序)，技术和验收详见[审查与实施计划](../research/resource-efficiency-audit-and-plan-20261012.md)。本次未新增指标枚举或GPU运行能力。
+
 ## 调用合同
 
 调用者须通过产品 OIDC 验证，并持有项目的 `instances:read`。租户头、主体启停和本地 grant 按其他实例查询相同规则校验。后端查询之前和之后分别使用新的数据库事务鉴权；查询过程中撤权或恢复纪元变化不会返回旧数据，JWT 到期也会使请求失败。
