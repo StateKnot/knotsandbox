@@ -1011,6 +1011,8 @@ async fn extension_ack_recovers_lost_base_ack_without_rewriting_base_evidence() 
 #[tokio::test]
 #[ignore = "Requires PostgreSQL, dedicated termination role and loopback mTLS"]
 async fn certification_must_cover_new_permit_and_assigned_renewal() -> anyhow::Result<()> {
+    use chrono::SubsecRound;
+
     let _serial = test_support_db::serial().await;
     for expiry in [
         None,
@@ -1043,7 +1045,9 @@ async fn certification_must_cover_new_permit_and_assigned_renewal() -> anyhow::R
         tx.commit().await?;
         f.guard.shutdown().await?;
     }
-    let horizon = Utc::now() + Duration::hours(1);
+    // PostgreSQL timestamptz retains microseconds. Normalize only this fixture
+    // before its round trip so the lease comparisons remain exact.
+    let horizon = (Utc::now() + Duration::hours(1)).trunc_subsecs(6);
     let f = FixtureRuntime::with_certification(true, Some(horizon)).await?;
     let current =
         f.f.database

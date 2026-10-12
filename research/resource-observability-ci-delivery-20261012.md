@@ -79,3 +79,13 @@ Terraform CLI仍固定1.14.7，其本机官方ZIP摘要与工具链锁文件一�
 首轮使用本机默认Python3.9跑新合同测试时因缺少标准库file_digest报错，记录保留；仓库CI约定的3.12下原11项通过。binary消失收尾负例也经历红→绿，没有屏蔽失败或移除断言。本批未重复无关的429项首批普通Rust、PG/API与浏览器回归；此前数据保留为各自源码检查点。
 
 新增公开文件为宿主gate及其测试；生产Rust改动仅test-only两行，身份校验为上述窄修复。42条正式迁移逐项保持、无0038，生产安全锁和真实时钟未变，过期Debian快照继续阻断发行。最终普通UID→sudo链和整套远端结果按新提交实际CI记录确认，不将本机root专项当成云/Kata认证。容量分母、峰值/成本、GPU、idle策略与生产验收仍按开发表推进。
+
+## 6. 远端回执与后续数据库精度
+
+公开 `9b23f15` 的[实际CI](https://github.com/StateKnot/knotsandbox/actions/runs/38242963756)确认完整采集、身份/TLS/schema、云只读检查、SDK、控制台、fmt/Clippy/release单测、普通Rust与宿主必跑gate及隔离review回归通过。已上传宿主回执实际caller UID1001，精确1通过/0失败/0忽略、唯一marker、binary前后相同；sudo仅执行id/stat/该已编译ELF，没有sudo Cargo或target写入。仅读取两项指定附件成员并核SHA，未任意解包。
+
+同次整套CI随后在PostgreSQL终止认证组失败：15通过、1失败。Linux请求时间`12:44:38.624670844Z`经数据库读取为`12:44:38.624670Z`，原exact比较相差844ns；这是测试fixture未遵循timestamptz微秒精度。只在该case局部以`trunc_subsecs(6)`构造horizon，认证/request/ACK继续由同一值派生；两个exact断言、生产时钟/有效期边界、权限/关闭守卫未修改，未扩大其他时间fixture。
+
+该窄修复已用现有独立TLS PostgreSQL夹具完整执行原16项终止认证回归：16/16通过，42条正常迁移逐项核对，无0038；输入/测试二进制/SDK未漂移、自有容器和进程清理确认。本机与新826文件Linux源码快照的全目标严格Clippy、fmt均通过，296项Rust输入逐项相同。失败记录仍保留；未放宽断言、精度比较或期限。
+
+`9b23f15`整套结果明确为failure，浏览器验收及后续镜像没有执行，缺浏览器回执的上传门槛仍保留。此修复后的远端结果须由新提交实际重验；本批资源观测及宿主门禁通过不能替代整套CI、实云/Kata、持续容量或安全签名发行验收。
