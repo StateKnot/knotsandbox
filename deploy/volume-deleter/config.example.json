@@ -1,0 +1,24 @@
+{
+  "cloud": {
+    "account_id": "REPLACE_WITH_ALIBABA_ACCOUNT_ID",
+    "region": "REPLACE_WITH_CERTIFIED_REGION",
+    "role_arn": "REPLACE_WITH_VOLUME_DELETER_ROLE_ARN",
+    "role_id": "REPLACE_WITH_VOLUME_DELETER_ROLE_ID",
+    "oidc_provider_arn": "REPLACE_WITH_DEPLOYMENT_OIDC_PROVIDER_ARN",
+    "oidc_issuer": "https://REPLACE_WITH_WORKLOAD_ISSUER",
+    "oidc_audience": "REPLACE_WITH_WORKLOAD_AUDIENCE",
+    "oidc_subject": "system:serviceaccount:sandbox-system:sandbox-volume-deleter",
+    "oidc_token_file": "/var/run/sandbox-cloud/token",
+    "deployment": "REPLACE_WITH_EXACT_DEPLOYMENT_TAG",
+    "requests_per_second": 2,
+    "max_in_flight": 2
+  },
+  "storage": {
+    "storage_class": "sandbox-workspace",
+    "kms_key_id": "REPLACE_WITH_WORKSPACE_KMS_KEY_ID",
+    "zones": ["REPLACE_WITH_CERTIFIED_STORAGE_ZONE"],
+    "deployment": "REPLACE_WITH_EXACT_DEPLOYMENT_TAG",
+    "certification_id": "REPLACE_WITH_DEPLOYMENT_CERTIFICATION_ID"
+  },
+  "concurrency": 2
+}

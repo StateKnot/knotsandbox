@@ -1,0 +1,103 @@
+{
+  "instance_id": "00000000-0000-4000-8000-000000000001",
+  "project_id": "00000000-0000-4000-8000-000000000002",
+  "spec_version": 3,
+  "runtime_generation": 2,
+  "launch_id": "00000000-0000-4000-8000-000000000003",
+  "cluster_epoch": "00000000-0000-4000-8000-000000000004",
+  "as_of": "2026-10-08T06:00:00Z",
+  "desired": {
+    "template": {
+      "id": "00000000-0000-4000-8000-000000000005",
+      "name": "approved-python",
+      "version": 1,
+      "image_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "runner_version": "1.0.0",
+      "status": "APPROVED"
+    },
+    "security_policy": {
+      "id": "00000000-0000-4000-8000-000000000006",
+      "name": "deny-all-with-dns",
+      "version": 1,
+      "status": "APPROVED",
+      "document_status": "AVAILABLE",
+      "rules_sha256": "e5b995f70ff4c6f8b7f7ca4af0bcd6207729a9a161a8da984f88a664abe1a1ed",
+      "profile": "DENY_ALL_WITH_DNS"
+    },
+    "resources": {
+      "cpu_millis": 1000,
+      "memory_mib": 2048
+    },
+    "runtime_controls": {
+      "runtime_class": "kata-qemu",
+      "run_as_non_root": true,
+      "user_id": 1000,
+      "seccomp_profile": "RuntimeDefault",
+      "privileged": false,
+      "allow_privilege_escalation": false,
+      "read_only_root_filesystem": true,
+      "host_network": false,
+      "host_pid": false,
+      "host_ipc": false,
+      "service_account_token": false,
+      "capabilities_drop": [
+        "ALL"
+      ]
+    }
+  },
+  "observations": {
+    "lifecycle": {
+      "source": "LIFECYCLE_RECONCILER",
+      "observed_at": "2026-10-08T05:59:50Z",
+      "age_seconds": 10,
+      "freshness": "RECENT",
+      "recent_threshold_seconds": 60
+    },
+    "policy_object": {
+      "status": "RECORDED",
+      "ledger_status": "ACTIVE",
+      "recorded_generation": 1,
+      "observed_at": "2026-10-08T05:57:00Z"
+    },
+    "launch_validation": {
+      "status": "HISTORICAL_RECORDED",
+      "observed_at": "2026-10-08T05:59:40Z",
+      "generation": 2,
+      "matches_current_launch": true,
+      "matches_current_cluster_epoch": true
+    },
+    "node_authorization": {
+      "status": "COVERS_COMPUTE_LEASE",
+      "valid_until": "2026-10-08T07:00:00Z"
+    }
+  },
+  "applied_policy": {
+    "status": "UNKNOWN",
+    "reason": "INDEPENDENT_ENFORCEMENT_EVIDENCE_UNAVAILABLE"
+  },
+  "runtime_isolation": {
+    "status": "UNKNOWN",
+    "reason": "RUNTIME_ISOLATION_CERTIFICATION_UNAVAILABLE"
+  },
+  "image_verification": {
+    "status": "UNKNOWN",
+    "reason": "IMAGE_VERIFICATION_EVIDENCE_UNAVAILABLE"
+  },
+  "findings": [],
+  "active_operation": {
+    "state": "AVAILABLE",
+    "resource": {
+      "id": "00000000-0000-4000-8000-000000000007",
+      "kind": "CREATE",
+      "status": "FAILED",
+      "error": {
+        "code": "OPERATION_FAILED",
+        "retryable": false
+      }
+    }
+  },
+  "denial_history": {
+    "status": "NOT_CAPTURED"
+  },
+  "runtime_certification": "NOT_ASSERTED"
+}

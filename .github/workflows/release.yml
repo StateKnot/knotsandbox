@@ -1,0 +1,139 @@
+name: Release
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Validate builds only, or explicitly publish after environment approval
+        required: true
+        type: choice
+        options: [validate, publish]
+        default: validate
+      tag:
+        description: Existing protected vX.Y.Z or vX.Y.Z-rc.N tag; dispatch this workflow on that same tag
+        required: true
+        type: string
+      commit:
+        description: Reviewed exact 40-character commit; latest CI push run for it must pass
+        required: true
+        type: string
+      console_first_release:
+        description: First console release only; fails if a published console already exists
+        required: true
+        type: boolean
+        default: false
+      console_previous_tag:
+        description: Latest published console tag; required after the first release
+        required: false
+        type: string
+      console_previous_commit:
+        description: Reviewed exact 40-character previous console commit
+        required: false
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify manual tag, commit and required CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          CONSOLE_FIRST_RELEASE: ${{ inputs.console_first_release }}
+          CONSOLE_PREVIOUS_TAG: ${{ inputs.console_previous_tag }}
+          CONSOLE_PREVIOUS_COMMIT: ${{ inputs.console_previous_commit }}
+        shell: bash
+        run: |
+          console_mode=()
+          if [[ "$CONSOLE_FIRST_RELEASE" == true ]]; then console_mode+=(--console-first-release); fi
+          python3 scripts/release/preflight.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" "${console_mode[@]}" --console-previous-tag "$CONSOLE_PREVIOUS_TAG" --console-previous-commit "$CONSOLE_PREVIOUS_COMMIT"
+      - name: Offline protocol and failure tests
+        run: python3 -m unittest discover -s scripts/release/tests -v
+      - name: Install checksum-locked official tools
+        run: python3 scripts/release/install-tools.py --output "$RUNNER_TEMP/release-tools"
+      - name: Verify the real upstream signature and fail-closed negatives
+        run: |
+          python3 scripts/release/check-crypto.py --tools "$RUNNER_TEMP/release-tools"
+          python3 scripts/release/check-statement.py --tools "$RUNNER_TEMP/release-tools"
+      - name: Read-only download of the exact previous authenticated console release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONSOLE_FIRST_RELEASE: ${{ inputs.console_first_release }}
+          CONSOLE_PREVIOUS_TAG: ${{ inputs.console_previous_tag }}
+          CONSOLE_PREVIOUS_COMMIT: ${{ inputs.console_previous_commit }}
+        shell: bash
+        run: |
+          if [[ "$CONSOLE_FIRST_RELEASE" != true ]]; then
+            python3 scripts/release/download_previous.py --tools "$RUNNER_TEMP/release-tools" --directory "$RUNNER_TEMP/previous-console-release" --repository "$GITHUB_REPOSITORY" --tag "$CONSOLE_PREVIOUS_TAG" --commit "$CONSOLE_PREVIOUS_COMMIT"
+          fi
+      - name: Start checksum-locked isolated BuildKit
+        run: bash scripts/release/start-buildkit.sh "$RUNNER_TEMP/release-tools" "$RUNNER_TEMP/release-buildkit" >> "$GITHUB_ENV"
+      - name: Build artifacts, SBOMs and vulnerability gate
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          CONSOLE_FIRST_RELEASE: ${{ inputs.console_first_release }}
+          CONSOLE_PREVIOUS_TAG: ${{ inputs.console_previous_tag }}
+          CONSOLE_PREVIOUS_COMMIT: ${{ inputs.console_previous_commit }}
+        shell: bash
+        run: |
+          console_mode=()
+          if [[ "$CONSOLE_FIRST_RELEASE" == true ]]; then
+            console_mode+=(--console-first-release)
+          else
+            console_mode+=(--console-previous-directory "$RUNNER_TEMP/previous-console-release")
+          fi
+          python3 scripts/release/build.py --tools "$RUNNER_TEMP/release-tools" --output "$RUNNER_TEMP/release-candidate" --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --run-id "$GITHUB_RUN_ID" "${console_mode[@]}" --console-previous-tag "$CONSOLE_PREVIOUS_TAG" --console-previous-commit "$CONSOLE_PREVIOUS_COMMIT"
+      - name: Keep unsigned candidate and scan diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-candidate-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-candidate/
+          if-no-files-found: warn
+          include-hidden-files: false
+          retention-days: 14
+          compression-level: 0
+  publish:
+    if: inputs.mode == 'publish'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    # Configure required human reviewers and protected tag allowlist before use.
+    # This job must never run on a self-hosted runner shared with untrusted code.
+    environment: production-release
+    permissions:
+      contents: write
+      actions: read
+      packages: write
+      deployments: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-candidate-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-candidate
+      - name: Install checksum-locked official tools
+        run: python3 scripts/release/install-tools.py --output "$RUNNER_TEMP/release-tools"
+      - name: Explicitly push, attest and publish verified artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_MODE: ${{ inputs.mode }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+        run: python3 scripts/release/publish.py --confirm-publish --tools "$RUNNER_TEMP/release-tools" --directory "$RUNNER_TEMP/release-candidate" --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT"

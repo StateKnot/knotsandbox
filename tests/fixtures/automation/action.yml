@@ -1,0 +1,44 @@
+name: Real isolated automation acceptance
+description: Run durable automation acceptance in a fresh loopback PostgreSQL server, using only the normal formal schema and dedicated roles
+inputs:
+  evidence-directory:
+    description: New private directory for test output and non-secret schema/source evidence
+    required: false
+    default: .local/automation-ci-evidence
+runs:
+  using: composite
+  steps:
+    - name: Build the ordinary Cargo lib-test executable
+      shell: bash
+      env:
+        CARGO_INCREMENTAL: '0'
+      run: |
+        set -euo pipefail
+        umask 077
+        artifact_file="$(mktemp "$RUNNER_TEMP/automation-build.XXXXXX.jsonl")"
+        cargo test --locked --lib --test automation_process --no-run --message-format=json > "$artifact_file"
+        python3 - "$artifact_file" "$GITHUB_ENV" <<'PY'
+        import json, pathlib, sys
+        messages = [json.loads(line) for line in pathlib.Path(sys.argv[1]).read_text().splitlines()]
+        with open(sys.argv[2], 'a') as output:
+            for name, test, key in [('sandbox_platform', True, 'TEST_BINARY'),
+                                    ('automation_process', True, 'PROCESS_TEST_BINARY'),
+                                    ('sandboxd', False, 'MIGRATION_BINARY')]:
+                paths = [m['executable'] for m in messages if m.get('reason') == 'compiler-artifact'
+                         and m.get('target', {}).get('name') == name
+                         and m.get('profile', {}).get('test') is test and m.get('executable')]
+                if len(paths) != 1 or '\n' in paths[0]:
+                    raise SystemExit('exactly one ordinary executable per target is required')
+                output.write('AUTOMATION_ACCEPTANCE_' + key + '=' + paths[0] + '\n')
+        PY
+    - name: Run actual PG, signed HTTP and TypeScript SDK acceptance
+      shell: bash
+      env:
+        AUTOMATION_ACCEPTANCE_EVIDENCE_DIR: ${{ inputs.evidence-directory }}
+      run: |
+        set -euo pipefail
+        python3 scripts/test-automation.py \
+          --test-binary "$AUTOMATION_ACCEPTANCE_TEST_BINARY" \
+          --process-test-binary "$AUTOMATION_ACCEPTANCE_PROCESS_TEST_BINARY" \
+          --migration-binary "$AUTOMATION_ACCEPTANCE_MIGRATION_BINARY" \
+          --evidence-dir "$AUTOMATION_ACCEPTANCE_EVIDENCE_DIR"

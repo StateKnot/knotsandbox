@@ -1,0 +1,64 @@
+{
+  "gateway": {
+    "username": "system:serviceaccount:sandbox-system:sandbox-gateway",
+    "uid": "REPLACE_WITH_GATEWAY_SERVICE_ACCOUNT_UID"
+  },
+  "termination": {
+    "username": "system:serviceaccount:sandbox-system:sandbox-termination",
+    "uid": "REPLACE_WITH_TERMINATION_SERVICE_ACCOUNT_UID"
+  },
+  "worker": {
+    "username": "system:serviceaccount:sandbox-system:sandbox-worker",
+    "uid": "REPLACE_WITH_WORKER_SERVICE_ACCOUNT_UID"
+  },
+  "namespace_provisioner": {
+    "username": "system:serviceaccount:sandbox-system:namespace-provisioner",
+    "uid": "REPLACE_WITH_PROVISIONER_SERVICE_ACCOUNT_UID"
+  },
+  "scheduler": {
+    "kind": "control_plane",
+    "username": "system:kube-scheduler"
+  },
+  "storage_controllers": [
+    {
+      "kind": "control_plane",
+      "username": "system:kube-controller-manager"
+    },
+    {
+      "kind": "service_account",
+      "username": "system:serviceaccount:kube-system:REPLACE_WITH_CSI_PROVISIONER_ACCOUNT",
+      "uid": "REPLACE_WITH_CSI_SERVICE_ACCOUNT_UID"
+    }
+  ],
+  "policy_status_controllers": [
+    {
+      "kind": "service_account",
+      "username": "system:serviceaccount:kube-system:cilium",
+      "uid": "REPLACE_WITH_CILIUM_SERVICE_ACCOUNT_UID"
+    }
+  ],
+  "namespace_status_controllers": [
+    {
+      "kind": "control_plane",
+      "username": "system:kube-controller-manager"
+    }
+  ],
+  "pod_garbage_collectors": [
+    {
+      "kind": "control_plane",
+      "username": "system:kube-controller-manager"
+    }
+  ],
+  "storage_provisioner": "diskplugin.csi.alibabacloud.com",
+  "certification_id": "REPLACE_WITH_SIGNED_G1_EVIDENCE_REFERENCE",
+  "dns_namespace": "kube-system",
+  "dns_labels": {
+    "k8s-app": "kube-dns"
+  },
+  "ephemeral_storage_mib": 1024,
+  "tmp_size_mib": 256,
+  "volume_deleter": {
+    "username": "system:serviceaccount:sandbox-system:sandbox-volume-deleter",
+    "uid": "REPLACE_WITH_VOLUME_DELETER_SERVICE_ACCOUNT_UID"
+  }
+}

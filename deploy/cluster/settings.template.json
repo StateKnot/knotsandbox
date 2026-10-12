@@ -1,0 +1,19 @@
+{
+  "deployment": null,
+  "region": null,
+  "host_image_id": null,
+  "host_kernel": null,
+  "host_image_evidence_sha256": null,
+  "network_evidence_sha256": null,
+  "mtu": null,
+  "pod_cidr": null,
+  "service_cidr": null,
+  "enterprise_cidrs": [],
+  "ntp_servers": [],
+  "api_dns_name": null,
+  "oidc_provider_arn": null,
+  "ssh_known_hosts_file": null,
+  "download_proxy": null,
+  "trusted_egress_cidrs": [],
+  "backup_recipient_certificate": null
+}

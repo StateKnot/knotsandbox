@@ -1,0 +1,74 @@
+{
+  "mode": "standalone",
+  "namespace": "sandbox-identity",
+  "realm": "sandbox",
+  "audience": "sandbox-api",
+  "public_url": "https://login.example.com",
+  "admin_url": "https://identity-admin.internal.example.com",
+  "database": {
+    "host": "pg.example.rds.aliyuncs.com",
+    "name": "keycloak_prod",
+    "port": 5432
+  },
+  "smtp": {
+    "host": "smtp.example.com",
+    "from": "sandbox@example.com"
+  },
+  "proxy_namespace": "identity-proxy",
+  "proxy_labels": {
+    "app.kubernetes.io/name": "identity-proxy"
+  },
+  "proxy_cidrs": [
+    "10.32.4.0/24"
+  ],
+  "admin_cidrs": [
+    "10.20.0.0/24"
+  ],
+  "monitoring_namespace": "monitoring",
+  "platform_node_selector": {
+    "sandbox.platform/node-pool": "platform"
+  },
+  "zones": [
+    "cn-hangzhou-h",
+    "cn-hangzhou-i",
+    "cn-hangzhou-j"
+  ],
+  "secret_files": {
+    "keycloak-db": {
+      "username": "/secure/identity/db-username",
+      "password": "/secure/identity/db-password"
+    },
+    "keycloak-tls": {
+      "tls.crt": "/secure/identity/tls.crt",
+      "tls.key": "/secure/identity/tls.key"
+    },
+    "keycloak-trust": {
+      "rds.pem": "/secure/identity/rds-ca.pem"
+    },
+    "keycloak-bootstrap": {
+      "username": "/secure/identity/bootstrap-username",
+      "password": "/secure/identity/bootstrap-password"
+    },
+    "keycloak-smtp": {
+      "username": "/secure/identity/smtp-username",
+      "password": "/secure/identity/smtp-password"
+    }
+  },
+  "broker": null,
+  "apiserver_cidrs": [
+    "10.96.0.1/32",
+    "10.10.0.10/32"
+  ],
+  "proxy": {
+    "deployment": "identity-proxy",
+    "configmap": "identity-proxy-config",
+    "public_service": "identity-public",
+    "admin_service": "identity-admin",
+    "image": "REPLACE_WITH_REVIEWED_HAPROXY_IMAGE_AT_SHA256"
+  },
+  "proxy_ca_file": "/secure/identity/frontend-ca.pem",
+  "public_client_cidrs": [
+    "0.0.0.0/0"
+  ],
+  "proxy_backend_ca_file": "/secure/identity/backend-ca.pem"
+}

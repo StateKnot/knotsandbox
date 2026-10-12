@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "issuer",
+    "audience",
+    "account_id",
+    "region",
+    "oidc_provider_arn",
+    "roles",
+    "control_plane_contexts",
+    "origins",
+    "ssh_known_hosts_file",
+    "max_token_lifetime_seconds",
+    "clock_skew_seconds",
+    "cache_seconds",
+    "ca_sha1_fingerprints",
+    "deployment",
+    "cluster_epoch",
+    "control_plane_nodes"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "issuer": {
+      "type": "string",
+      "pattern": "^https://[a-z0-9.-]+$",
+      "maxLength": 253
+    },
+    "audience": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^*,\\s]+$"
+    },
+    "account_id": {
+      "type": "string",
+      "pattern": "^[0-9]{16}$"
+    },
+    "region": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{2,39}$"
+    },
+    "oidc_provider_arn": {
+      "type": "string",
+      "pattern": "^acs:ram::[0-9]{16}:oidc-provider/[a-zA-Z0-9_.-]+$"
+    },
+    "roles": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 20,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "arn",
+          "role_id",
+          "subject"
+        ],
+        "properties": {
+          "arn": {
+            "type": "string",
+            "pattern": "^acs:ram::[0-9]{16}:role/[a-zA-Z0-9_.-]+$"
+          },
+          "role_id": {
+            "type": "string",
+            "pattern": "^[0-9]{1,32}$"
+          },
+          "subject": {
+            "type": "string",
+            "pattern": "^system:serviceaccount:[a-z0-9-]+:[a-z0-9.-]+$",
+            "maxLength": 256
+          }
+        }
+      }
+    },
+    "control_plane_contexts": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 7,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9_.-]{1,128}$"
+      }
+    },
+    "origins": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ssh_host",
+          "https_ip"
+        ],
+        "properties": {
+          "ssh_host": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}$"
+          },
+          "https_ip": {
+            "type": "string",
+            "format": "ipv4"
+          }
+        }
+      }
+    },
+    "ssh_known_hosts_file": {
+      "type": "string",
+      "pattern": "^/",
+      "maxLength": 4096
+    },
+    "max_token_lifetime_seconds": {
+      "type": "integer",
+      "minimum": 600,
+      "maximum": 3600
+    },
+    "clock_skew_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 60
+    },
+    "cache_seconds": {
+      "type": "integer",
+      "minimum": 30,
+      "maximum": 300
+    },
+    "ca_sha1_fingerprints": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 5,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-f0-9]{40}$"
+      }
+    },
+    "deployment": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{2,30}$"
+    },
+    "cluster_epoch": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "control_plane_nodes": {
+      "type": "object",
+      "minProperties": 3,
+      "maxProperties": 7,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "private_ip",
+          "instance_id"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9.-]{0,252}$"
+          },
+          "private_ip": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "instance_id": {
+            "type": "string",
+            "pattern": "^i-[a-zA-Z0-9]+$"
+          }
+        }
+      }
+    }
+  }
+}

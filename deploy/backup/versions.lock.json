@@ -1,0 +1,31 @@
+{
+  "status": "candidate-awaiting-cloud-and-kata-certification",
+  "versions": {
+    "restic": "0.19.1",
+    "rclone": "1.75.1",
+    "kata": "4.2.0",
+    "csi": "1.37.2"
+  },
+  "base_images": {
+    "build": "rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e",
+    "runtime": "debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251"
+  },
+  "artifacts": {
+    "restic_0.19.1_darwin_arm64.bz2": {
+      "url": "https://github.com/restic/restic/releases/download/v0.19.1/restic_0.19.1_darwin_arm64.bz2",
+      "sha256": "7be0a144ccc377880f294204aa271d76e4b79554b42a751151d425ce6ebac143"
+    },
+    "restic_0.19.1_linux_amd64.bz2": {
+      "url": "https://github.com/restic/restic/releases/download/v0.19.1/restic_0.19.1_linux_amd64.bz2",
+      "sha256": "f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c"
+    },
+    "rclone-v1.75.1-linux-amd64.zip": {
+      "url": "https://github.com/rclone/rclone/releases/download/v1.75.1/rclone-v1.75.1-linux-amd64.zip",
+      "sha256": "982b5aa772841168f8e380f139e9e787b2a105403e32b94da8676a0e1c0a13ab"
+    },
+    "rclone-v1.75.1-osx-arm64.zip": {
+      "url": "https://github.com/rclone/rclone/releases/download/v1.75.1/rclone-v1.75.1-osx-arm64.zip",
+      "sha256": "c61d7a371c62bcbbe882c3423aa4b8bf63485c248dd0f692997b8f0c3f6d0c6f"
+    }
+  }
+}

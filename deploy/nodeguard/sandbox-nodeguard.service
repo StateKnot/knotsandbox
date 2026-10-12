@@ -1,0 +1,28 @@
+[Unit]
+Description=Sandbox durable CRI start gate and host termination observer
+Requires=containerd.service
+After=network-online.target containerd.service
+Before=kubelet.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/local/libexec/sandbox-nodeguard --config /etc/sandbox-nodeguard/config.json
+Restart=on-failure
+RestartSec=5s
+# A CRI reply or kernel observation may outlive the caller. Keep the journal
+# lock until the process has actually drained; a stop timeout is not fencing.
+TimeoutStopSec=infinity
+KillMode=mixed
+SendSIGKILL=no
+LimitNOFILE=65536
+NoNewPrivileges=yes
+# The observer must remain in PID 1's mount namespace. Do not add PrivateMounts,
+# ProtectSystem, ProtectHome, RootDirectory or container wrappers here.
+PrivateMounts=no
+
+[Install]
+WantedBy=multi-user.target

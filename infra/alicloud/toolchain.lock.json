@@ -1,0 +1,13 @@
+{
+  "terraform_version": "1.14.7",
+  "release": "https://releases.hashicorp.com/terraform/1.14.7/",
+  "sha256": {
+    "darwin_arm64": "e9004e245b3e56bff9c7a6c572295d710f6ce4fc72e3910e99519ebdcb46d1bb",
+    "darwin_amd64": "469f19fb58ed6f67abc858f1d1a20a2fdb1fadda8eaa0f766da1c8acd1518cb0",
+    "linux_arm64": "04f88ee8924db27c0e26c379721965273c80c9b6a94bc5d8d8048a69163952ba",
+    "linux_amd64": "e8bbcefea8015156e04e2a325cde37a0b2fb761728bda548e2fe3b8ad7c18c96"
+  },
+  "alicloud_provider": "1.293.0",
+  "provider_signature_key_id": "47422B4AA9FA381B",
+  "provider_checksums": ".terraform.lock.hcl"
+}

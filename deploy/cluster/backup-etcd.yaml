@@ -1,0 +1,65 @@
+---
+- name: Encrypt etcd and cluster identity backup on every control node
+  hosts: kube_control_plane
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  vars:
+    backup_root: '/var/lib/sandbox-cluster-backups/{{ ansible_facts.date_time.iso8601_basic_short }}'
+  tasks:
+    - name: Require operator-provided recovery recipient certificate
+      ansible.builtin.assert:
+        that:
+          - sandbox_installation.settings.backup_recipient_certificate is defined
+          - sandbox_installation.settings.backup_recipient_certificate is match('^/')
+    - name: Create private staging directory
+      ansible.builtin.file:
+        path: '{{ backup_root }}'
+        state: directory
+        mode: '0700'
+    - name: Copy public recovery recipient certificate
+      ansible.builtin.copy:
+        src: '{{ sandbox_installation.settings.backup_recipient_certificate }}'
+        dest: '{{ backup_root }}/recipient.pem'
+        mode: '0600'
+    - name: Save consistent etcd snapshot with client TLS
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/etcdctl
+          - --endpoints=https://127.0.0.1:2379
+          - --cacert=/etc/ssl/etcd/ssl/ca.pem
+          - '--cert=/etc/ssl/etcd/ssl/admin-{{ inventory_hostname }}.pem'
+          - '--key=/etc/ssl/etcd/ssl/admin-{{ inventory_hostname }}-key.pem'
+          - snapshot
+          - save
+          - '{{ backup_root }}/snapshot.db'
+      no_log: true
+    - name: Verify snapshot integrity with etcdutl 3.6
+      ansible.builtin.command:
+        argv: [/usr/local/bin/etcdutl, snapshot, status, '{{ backup_root }}/snapshot.db', --write-out=json]
+      register: snapshot_status
+      changed_when: false
+    - name: Save snapshot verification metadata
+      ansible.builtin.copy:
+        content: '{{ snapshot_status.stdout }}'
+        dest: '{{ backup_root }}/snapshot-status.json'
+        mode: '0600'
+    - name: Package CA, service account keys, secrets encryption configuration and snapshot
+      ansible.builtin.command:
+        argv: [tar, -czf, '{{ backup_root }}/recovery.tar.gz', -C, /, etc/kubernetes, etc/ssl/etcd, etc/etcd.env, -C, '{{ backup_root }}', snapshot.db, snapshot-status.json]
+      no_log: true
+    - name: Encrypt backup for offline recovery owner
+      ansible.builtin.command:
+        argv: [openssl, cms, -encrypt, -aes-256-cbc, -binary, -outform, DER, -in, '{{ backup_root }}/recovery.tar.gz', -out, '{{ backup_root }}/recovery.cms', '{{ backup_root }}/recipient.pem']
+      no_log: true
+    - name: Fetch encrypted backup only
+      ansible.builtin.fetch:
+        src: '{{ backup_root }}/recovery.cms'
+        dest: '{{ sandbox_receipts_dir }}/backups/{{ ansible_facts.date_time.iso8601_basic_short }}/{{ inventory_hostname }}.cms'
+        flat: true
+    - name: Delete plaintext snapshot, identity archive and metadata after successful encrypted fetch
+      ansible.builtin.file:
+        path: '{{ backup_root }}/{{ item }}'
+        state: absent
+      loop: [snapshot.db, snapshot-status.json, recovery.tar.gz]
+      no_log: true

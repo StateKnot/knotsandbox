@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "issuer": "https://workloads.example.com",
+  "audience": "sts.aliyuncs.com",
+  "deployment": "sandbox-test",
+  "cluster_epoch": "11111111-2222-4333-8444-555555555555",
+  "account_id": "1234567890123456",
+  "region": "cn-hangzhou",
+  "oidc_provider_arn": "acs:ram::1234567890123456:oidc-provider/workloads",
+  "roles": {
+    "csi-controller": {
+      "arn": "acs:ram::1234567890123456:role/sandbox-csi-controller",
+      "role_id": "123456780",
+      "subject": "system:serviceaccount:kube-system:sandbox-csi-controller"
+    },
+    "csi-node": {
+      "arn": "acs:ram::1234567890123456:role/sandbox-csi-node",
+      "role_id": "123456781",
+      "subject": "system:serviceaccount:kube-system:sandbox-csi-node"
+    },
+    "fencing": {
+      "arn": "acs:ram::1234567890123456:role/sandbox-fencing",
+      "role_id": "123456782",
+      "subject": "system:serviceaccount:sandbox-system:sandbox-fencing"
+    }
+  },
+  "control_plane_contexts": [
+    "control-1",
+    "control-2",
+    "control-3"
+  ],
+  "control_plane_nodes": {
+    "control-1": {
+      "name": "control-1",
+      "private_ip": "10.0.0.1",
+      "instance_id": "i-control1"
+    },
+    "control-2": {
+      "name": "control-2",
+      "private_ip": "10.0.0.2",
+      "instance_id": "i-control2"
+    },
+    "control-3": {
+      "name": "control-3",
+      "private_ip": "10.0.0.3",
+      "instance_id": "i-control3"
+    }
+  },
+  "origins": [
+    {
+      "ssh_host": "origin1.example.test",
+      "https_ip": "192.0.2.10"
+    },
+    {
+      "ssh_host": "origin2.example.test",
+      "https_ip": "192.0.2.11"
+    }
+  ],
+  "ssh_known_hosts_file": "/etc/sandbox-deployment/known_hosts",
+  "max_token_lifetime_seconds": 3600,
+  "clock_skew_seconds": 30,
+  "cache_seconds": 60,
+  "ca_sha1_fingerprints": [
+    "1111111111111111111111111111111111111111"
+  ]
+}

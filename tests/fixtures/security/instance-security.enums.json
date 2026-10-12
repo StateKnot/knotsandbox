@@ -1,0 +1,62 @@
+{
+  "PolicyDocumentStatus": [
+    "AVAILABLE",
+    "UNAVAILABLE"
+  ],
+  "PolicyProfile": [
+    "DENY_ALL_WITH_DNS"
+  ],
+  "ObjectEvidenceStatus": [
+    "RECORDED",
+    "UNAVAILABLE"
+  ],
+  "LaunchEvidenceStatus": [
+    "HISTORICAL_RECORDED",
+    "UNAVAILABLE"
+  ],
+  "NodeAuthorizationStatus": [
+    "COVERS_COMPUTE_LEASE",
+    "UNAVAILABLE",
+    "EXPIRED_OR_INSUFFICIENT"
+  ],
+  "UnknownStatus": [
+    "UNKNOWN"
+  ],
+  "UnknownReason": [
+    "INDEPENDENT_ENFORCEMENT_EVIDENCE_UNAVAILABLE",
+    "RUNTIME_ISOLATION_CERTIFICATION_UNAVAILABLE",
+    "IMAGE_VERIFICATION_EVIDENCE_UNAVAILABLE"
+  ],
+  "SecurityFinding": [
+    "TEMPLATE_NOT_APPROVED",
+    "SECURITY_POLICY_NOT_APPROVED",
+    "POLICY_DOCUMENT_UNAVAILABLE",
+    "POLICY_PROFILE_UNSUPPORTED",
+    "HISTORICAL_CLUSTER_EPOCH",
+    "PLATFORM_SAFE_MODE",
+    "COMPUTE_LEASE_EXPIRED",
+    "COMPUTE_NO_LONGER_DESIRED",
+    "WORKSPACE_UNAVAILABLE"
+  ],
+  "OperationEvidenceState": [
+    "AVAILABLE",
+    "NONE",
+    "REDACTED",
+    "UNAVAILABLE"
+  ],
+  "DenialHistoryStatus": [
+    "NOT_CAPTURED"
+  ],
+  "RuntimeCertification": [
+    "NOT_ASSERTED"
+  ],
+  "ObservationSource": [
+    "LIFECYCLE_RECONCILER"
+  ],
+  "ObservationFreshness": [
+    "MISSING",
+    "RECENT",
+    "HISTORICAL",
+    "INVALID_TIMESTAMP"
+  ]
+}

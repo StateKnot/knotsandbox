@@ -1,0 +1,7 @@
+{
+  "node_image": "node:24.19.0-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df",
+  "nginx_image": "nginxinc/nginx-unprivileged:1.30.5-alpine-slim@sha256:3af0c10d960cc2502427fe1219c52989d309e7d65596869c60a34fd2fa2406f0",
+  "verified_from": "Docker Hub official repository tag API on 2026-10-08",
+  "node_tag_url": "https://hub.docker.com/v2/repositories/library/node/tags/24.19.0-bookworm-slim",
+  "nginx_tag_url": "https://hub.docker.com/v2/repositories/nginxinc/nginx-unprivileged/tags/1.30.5-alpine-slim"
+}

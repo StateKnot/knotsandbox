@@ -1,0 +1,38 @@
+// Public protocol fixture; this does not assert user permissions or cloud readiness.
+export const automationCapability = {
+  schema_version: 1,
+  supported_actions: [
+    "START",
+    "STOP",
+    "RESTART",
+    "DELETE",
+    "RENEW",
+    "EXECUTE",
+    "BACKUP",
+  ],
+  supported_triggers: ["ONCE", "CRON_UTC", "EVENT"],
+  clock: "POSTGRESQL",
+  time_zone: "UTC",
+  cron: {
+    field_count: 7,
+    seconds_field: "0",
+    year_field: "*",
+    day_of_month_and_week: "INTERSECTION",
+  },
+  missed_run_policy: "AT_MOST_ONE_WITHIN_GRACE_ELSE_SKIP_SPAN",
+  skipped_runs_consume_budget: true,
+  known_automated_events_retrigger: false,
+  outcome_unknown_policy: "RECONCILE_ORIGINAL_ONLY",
+  limits: {
+    run_budget: { minimum: 1, maximum: 10000 },
+    minimum_interval_seconds: { minimum: 60, maximum: 86400 },
+    grace_seconds: { minimum: 1, maximum: 3600 },
+    delegation_lifetime_seconds: { exclusive_minimum: 60, maximum: 31622400 },
+    live_policies_per_project: 100,
+    live_policies_per_tenant: 1000,
+    name_bytes_max: 128,
+    cron_expression_bytes_max: 128,
+    event_type_bytes_max: 128,
+  },
+  assurance: "API_CONTRACT_ONLY",
+};

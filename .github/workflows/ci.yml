@@ -1,0 +1,389 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cluster-installation-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Validate installer, real upstream charts, schemas and Ansible syntax
+        run: |
+          python3 -c 'import sys; assert sys.version_info[:2] == (3, 12)'
+          python3 -m venv .local/cluster-venv
+          .local/cluster-venv/bin/python -m pip install --require-hashes -r deploy/cluster/requirements.lock.txt
+          CLUSTER_PYTHON="$PWD/.local/cluster-venv/bin/python" bash deploy/cluster/check.sh
+          CLUSTER_PYTHON="$PWD/.local/cluster-venv/bin/python" bash deploy/nodeguard/check.sh
+          CLUSTER_PYTHON="$PWD/.local/cluster-venv/bin/python" bash deploy/volume-deleter/check.sh
+          CLUSTER_PYTHON="$PWD/.local/cluster-venv/bin/python" bash deploy/termination/check.sh
+          BACKUP_PYTHON="$PWD/.local/cluster-venv/bin/python" bash deploy/backup/check.sh
+          .local/cluster-venv/bin/python -m unittest discover -s deploy/backup-certification/tests -v
+          .local/cluster-venv/bin/python -m unittest discover -s deploy/workload-identity/tests -v
+          .local/cluster-venv/bin/python -m unittest discover -s deploy/storage-credentials/tests -v
+          .local/cluster-venv/bin/python -m unittest discover -s deploy/tests -v
+          .local/cluster-venv/bin/python -m unittest discover -s deploy/api/tests -v
+          .local/cluster-venv/bin/python deploy/api/schema_check.py
+          .local/cluster-venv/bin/python -m unittest discover -s deploy/automation/tests -v
+          .local/cluster-venv/bin/python deploy/automation/schema_check.py
+          .local/cluster-venv/bin/python -m unittest discover -s deploy/admission/tests -v
+          .local/cluster-venv/bin/python deploy/admission/schema_check.py
+          .local/cluster-venv/bin/python scripts/tests/api-contract.py
+      - name: Verify independent metrics collectors, mTLS and persisted WAL
+        run: |
+          .local/cluster-venv/bin/python - <<'PY'
+          import json, subprocess
+          lock = json.load(open('deploy/observability/versions.lock.json'))
+          subprocess.run(['docker', 'pull', lock['prometheus_image']], check=True)
+          PY
+          OBSERVABILITY_PYTHON="$PWD/.local/cluster-venv/bin/python" bash deploy/observability/check.sh
+      - name: Verify independent identity modes and official schemas
+        run: IDENTITY_PYTHON="$PWD/.local/cluster-venv/bin/python" bash deploy/identity/check.sh
+      - name: Download checksum-locked HAProxy source and prepare offline build
+        shell: bash
+        run: |
+          .local/cluster-venv/bin/python - <<'PYTHON'
+          import hashlib, json, pathlib, urllib.request
+          source = json.loads(pathlib.Path('deploy/identity/versions.lock.json').read_text())['proxy_source']
+          assert source['url'].startswith('https://www.haproxy.org/download/')
+          with urllib.request.urlopen(source['url'], timeout=60) as response:
+              archive = response.read(16 * 1024 * 1024 + 1)
+          assert len(archive) <= 16 * 1024 * 1024, 'HAProxy archive exceeds size limit'
+          assert hashlib.sha256(archive).hexdigest() == source['sha256'], 'HAProxy archive checksum mismatch'
+          pathlib.Path('.local/haproxy-source.tar.gz').write_bytes(archive)
+          PYTHON
+          .local/cluster-venv/bin/python deploy/identity/prepare_proxy.py --source-archive .local/haproxy-source.tar.gz --output .local/identity-proxy-build
+      - name: Build pinned proxy with offline build steps and test non-root image
+        shell: bash
+        run: |
+          docker build --network=none --file .local/identity-proxy-build/Dockerfile --tag sandbox-identity-proxy:ci .local/identity-proxy-build
+          IDENTITY_PROXY_IMAGE="$(docker image inspect --format '{{.Id}}' sandbox-identity-proxy:ci)" IDENTITY_PYTHON="$PWD/.local/cluster-venv/bin/python" bash deploy/identity/check-proxy-image.sh
+      - name: Real local TLS identity and private administration chain
+        shell: bash
+        run: |
+          mkdir -p .local/identity-proxy/bin .local/identity-proxy/lib
+          proxy_image="$(docker image inspect --format '{{.Id}}' sandbox-identity-proxy:ci)"
+          proxy_container="$(docker create "$proxy_image")"
+          trap 'docker rm -f "$proxy_container" >/dev/null 2>&1 || true' EXIT
+          docker cp "$proxy_container:/usr/local/sbin/haproxy" .local/identity-proxy/bin/haproxy
+          docker cp "$proxy_container:/usr/local/lib/libssl.so.3" .local/identity-proxy/lib/libssl.so.3
+          docker cp "$proxy_container:/usr/local/lib/libcrypto.so.3" .local/identity-proxy/lib/libcrypto.so.3
+          export HAPROXY_BIN="$PWD/.local/identity-proxy/bin/haproxy"
+          export LD_LIBRARY_PATH="$PWD/.local/identity-proxy/lib"
+          export IDENTITY_PYTHON="$PWD/.local/cluster-venv/bin/python"
+          "$IDENTITY_PYTHON" deploy/identity/tests/live_proxy.py "$HAPROXY_BIN"
+          keycloak_image="$("$IDENTITY_PYTHON" -c 'import json; print(json.load(open("deploy/identity/versions.lock.json"))["keycloak_image"])')"
+          docker pull "$keycloak_image"
+          bash deploy/identity/live-test.sh
+          IDENTITY_ADMIN_CHAIN=true bash deploy/identity/live-test.sh
+  cloud-infrastructure-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Install checksum-locked Terraform and validate mocked cloud plans
+        run: |
+          python3 infra/alicloud/install-terraform.py
+          TF_BIN="$PWD/.local/tools/terraform-1.14.7/terraform" infra/alicloud/check.sh
+          .local/tools/terraform-1.14.7/terraform -chdir=deploy/workload-identity/infra fmt -check -recursive
+          .local/tools/terraform-1.14.7/terraform -chdir=deploy/workload-identity/infra init -backend=false -input=false -lockfile=readonly
+          .local/tools/terraform-1.14.7/terraform -chdir=deploy/workload-identity/infra validate -no-color
+          .local/tools/terraform-1.14.7/terraform -chdir=deploy/workload-identity/infra test -no-color
+  typescript-sdk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+      - name: Install, regenerate, build and test the microservice SDK
+        working-directory: sdk/typescript
+        run: |
+          npm ci --ignore-scripts --no-fund --no-audit
+          npm run generate
+          git diff --exit-code -- src/schema.d.ts
+          npm test
+  production-console:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - name: Build the real API console and test durable browser request boundaries
+        run: |
+          mkdir -p .local
+          npm --prefix console ci --ignore-scripts --no-fund --no-audit
+          npm --prefix console run format:check
+          npm --prefix console test
+          npm --prefix console run build
+          python3 -m unittest discover -s deploy/console/tests -v
+      - name: Actual Chromium UI against explicit HTTP contract fixtures
+        working-directory: console
+        run: |
+          npx --no-install playwright install --with-deps chromium
+          npm run test:browser
+      - name: Build and verify the immutable non-root read-only TLS image
+        run: |
+          docker build --pull --file deploy/console/Dockerfile --build-arg SANDBOX_CONSOLE_FIRST_RELEASE=true --tag sandbox-console:ci .
+          console_image="$(docker image inspect --format '{{.Id}}' sandbox-console:ci)"
+          python3 deploy/console/check_image.py --image "$console_image" > .local/console-image-check.log
+      - name: Retain UI fixture screenshots and local TLS evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: console-contract-and-local-tls-${{ github.sha }}
+          path: |
+            .local/console-instance-desktop.png
+            .local/console-login-mobile.png
+            .local/console-image-check.log
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Install the locked Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+      - name: Build the real HTTP integration client
+        working-directory: sdk/typescript
+        run: |
+          npm ci --ignore-scripts --no-fund --no-audit
+          npm run build
+      - name: Prepare the real console and browser for the live identity integration
+        run: |
+          python3 -m venv .local/cluster-venv
+          .local/cluster-venv/bin/python -m pip install --require-hashes -r deploy/cluster/requirements.lock.txt
+          npm --prefix console ci --ignore-scripts --no-fund --no-audit
+          npm --prefix console run build
+          cd console
+          npx --no-install playwright install --with-deps chromium
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-rust-1.98.1-${{ hashFiles('Cargo.lock') }}
+      - name: Formatting and lint
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --locked --all-targets -- -D warnings
+          bash -n scripts/dev-dependencies.sh deploy/keycloak/postgres-init.sh
+          python3 -m py_compile scripts/dev-database-roles.py
+          python3 -m unittest discover -s scripts/release/tests -v
+          python3 -m json.tool deploy/keycloak/realm.template.json > /dev/null
+      - name: Unit and authentication tests
+        run: cargo test --locked --all-targets
+      - name: Required isolated identity and lifecycle review regressions
+        run: |
+          df -h .
+          mkdir -p .local
+          cargo test --locked --all-targets --no-run --message-format=json > .local/review-artifacts.jsonl
+          python3 scripts/test-review-fixes.py --artifacts .local/review-artifacts.jsonl --evidence-dir .local/review-regressions
+      - name: Retain non-secret identity and lifecycle regression evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: review-regressions-${{ github.sha }}
+          path: |
+            .local/review-artifacts.jsonl
+            .local/review-regressions/*.json
+            .local/review-regressions/*.log
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Start real development dependencies
+        run: scripts/dev-dependencies.sh up
+      - name: Check the real OIDC token contract
+        run: scripts/dev-dependencies.sh token
+      - name: PostgreSQL integration tests (required; never silently skipped)
+        shell: bash
+        run: |
+          set -a
+          source .local/dev.env
+          set +a
+          cargo test --locked --test database -- --ignored
+          cargo test --locked --test database_roles -- --ignored
+          cargo test --locked --test lifecycle_authorization -- --ignored
+          cargo test --locked --test bootstrap -- --ignored
+          cargo test --locked --test timers -- --ignored
+          cargo test --locked --test executions -- --ignored
+          cargo test --locked --test worker -- --ignored
+          # Includes real PG + loopback HTTP/WebSocket + native OSS signing mock.
+          cargo test --locked --test gateway_ledger -- --ignored --test-threads=1
+          cargo test --locked --test review_regressions -- --ignored
+          cargo test --locked --test migrations -- --ignored
+          cargo test --locked --test admission -- --ignored
+          cargo test --locked --test history -- --ignored
+          cargo test --locked --test capabilities -- --ignored
+          cargo test --locked --test instance_security -- --ignored --test-threads=1
+          cargo test --locked --test grants -- --ignored
+          cargo test --locked --test service_clients -- --ignored
+          cargo test --locked --lib termination_ledger::tests -- --ignored --test-threads=1
+          cargo test --locked --lib node_enrollment::tests -- --ignored --test-threads=1
+          cargo test --locked --lib node_fencing::tests -- --ignored --test-threads=1
+          cargo test --locked --lib event_stream::tests -- --ignored --test-threads=1
+          cargo test --locked --lib execution_output_stream::tests -- --ignored --test-threads=1
+          cargo test --locked --lib volume_deletion::tests -- --ignored --test-threads=1
+          cargo test --locked --lib never_authorized::tests -- --ignored --test-threads=1
+          cargo test --locked --lib backup_ledger::tests -- --ignored --test-threads=1
+          cargo test --locked --lib backup_ledger::pipeline_tests -- --ignored --test-threads=1
+          cargo test --locked --lib backup_profile::integration_tests -- --ignored --test-threads=1
+          cargo test --locked --lib metrics::tests::real_pg -- --ignored --test-threads=1
+          cargo test --locked --lib bff::tests -- --ignored --test-threads=1
+          cargo test --locked --test diagnostics -- --ignored --test-threads=1
+          cargo test --locked --test file_transfers -- --ignored --test-threads=1
+          cargo test --locked --test http -- --ignored
+      - name: Real Keycloak to API authorization integration
+        shell: bash
+        run: |
+          set -a
+          source .local/dev.env
+          set +a
+          cargo test --locked --test keycloak -- --ignored
+      - name: Real cross-site Keycloak login, console mutation and live authorization revocation
+        shell: bash
+        run: |
+          df -h .
+          # The runner reads only the fixed local Keycloak credential and owns
+          # a disposable TLS PG with all ten independent logins. Existing dev
+          # database accounts/volumes are retained. No business HTTP is mocked.
+          export RESTORE_TEST_DOCKER_HOST="$(docker context inspect --format '{{.Endpoints.docker.Host}}')"
+          sandbox_live_chrome="$(node --input-type=module -e 'import { chromium } from "./console/node_modules/playwright-core/index.mjs"; process.stdout.write(chromium.executablePath())')"
+          python3 scripts/test-console-browser.py \
+            --node "$(command -v node)" --chrome "$sandbox_live_chrome" \
+            --identity-python "$PWD/.local/cluster-venv/bin/python" \
+            --evidence-dir "$PWD/.local/console-notifications-ci"
+      - name: Retain real browser acceptance receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: console-notifications-${{ github.sha }}
+          path: |
+            .local/console-notifications-ci/record.json
+            .local/console-notifications-ci/source-manifest.json
+            .local/console-notifications-ci/browser.log
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Fresh independent PostgreSQL automation acceptance
+        uses: ./tests/fixtures/automation
+        with:
+          evidence-directory: .local/automation-ci-evidence
+      - name: Retain non-secret formal automation receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: automation-formal-receipt
+          path: .local/automation-ci-evidence/evidence.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Verify metric expressions with the locked official Prometheus evaluator
+        run: |
+          python3 - <<'PY'
+          import json, subprocess
+          lock = json.load(open('deploy/observability/versions.lock.json'))
+          subprocess.run(['docker', 'pull', lock['prometheus_image']], check=True)
+          PY
+          cargo test --locked --lib metrics::tests::official_prometheus -- --ignored
+      - name: Build and smoke-test non-root service and runner images
+        run: |
+          docker build --pull --target runtime --tag sandbox-platform:ci .
+          docker build --target runner --tag sandbox-runner:ci .
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges sandbox-platform:ci --version
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /usr/local/bin/sandbox-admission sandbox-platform:ci --help
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /usr/local/bin/sandbox-automation sandbox-platform:ci --help
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges sandbox-runner:ci health
+          service_image="$(docker image inspect --format '{{.Id}}' sandbox-platform:ci)"
+          python3 deploy/api/check_image.py --image "$service_image"
+      - name: Export and verify the Linux amd64 nodeguard host binary
+        shell: bash
+        run: |
+          docker buildx build --platform linux/amd64 --target nodeguard-export --output type=local,dest=.local/release/nodeguard-linux-amd64 .
+          python3 - <<'PY'
+          import pathlib, struct, tomllib
+          binary = pathlib.Path('.local/release/nodeguard-linux-amd64/sandbox-nodeguard')
+          header = binary.read_bytes()[:64]
+          assert header[:7] == b'\x7fELF\x02\x01\x01', 'Expected 64-bit little-endian ELF'
+          assert struct.unpack_from('<H', header, 18)[0] == 62, 'Expected x86_64 machine'
+          assert tomllib.loads(pathlib.Path('rust-toolchain.toml').read_text())['toolchain']['channel'] == '1.98.1'
+          PY
+          .local/release/nodeguard-linux-amd64/sandbox-nodeguard --help > .local/release/nodeguard-linux-amd64/help.txt
+          printf 'source_commit=%s\nrust_toolchain=1.98.1\nplatform=linux/amd64\ncertification=not-certified\nsignature=unsigned\n' '${{ github.sha }}' > .local/release/nodeguard-linux-amd64/build.txt
+          cd .local/release/nodeguard-linux-amd64
+          sha256sum sandbox-nodeguard > SHA256SUMS
+          sha256sum --check SHA256SUMS
+      - name: Verify projected Nodeguard credentials with actual Linux UID and group boundaries
+        shell: bash
+        run: |
+          CARGO_INCREMENTAL=0 cargo test --locked --test termination_credentials --no-run --message-format=json > .local/nodeguard-trust-build.jsonl
+          python3 - <<'PY'
+          import json, pathlib, re, subprocess
+          messages = [json.loads(line) for line in pathlib.Path('.local/nodeguard-trust-build.jsonl').read_text().splitlines()]
+          executables = {message['executable'] for message in messages
+                         if message.get('reason') == 'compiler-artifact'
+                         and message.get('target', {}).get('name') == 'termination_credentials'
+                         and message.get('profile', {}).get('test') is True
+                         and message.get('executable')}
+          assert len(executables) == 1, 'Expected exact credential test ELF'
+          image = re.search(r'^ARG RUST_IMAGE=(\S+)$', pathlib.Path('Dockerfile').read_text(), re.M).group(1)
+          assert re.fullmatch(r'rust:[A-Za-z0-9.-]+@sha256:[a-f0-9]{64}', image), 'Fixed reviewed build image required'
+          subprocess.run(['docker', 'pull', '--platform', 'linux/amd64', image], check=True)
+          result = subprocess.run(['python3', 'scripts/test-nodeguard-trust-linux.py',
+                                   '--test-binary', str(pathlib.Path(next(iter(executables))).resolve()),
+                                   '--image', image], check=True, capture_output=True, text=True)
+          evidence = json.loads(result.stdout)
+          assert evidence['linux_projected_trust_test'] == 'PASS'
+          pathlib.Path('.local/release/nodeguard-linux-amd64/projected-trust.json').write_text(result.stdout)
+          PY
+      - name: Retain the unsigned host binary and checksum for release review
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sandbox-nodeguard-linux-amd64-${{ github.sha }}
+          path: .local/release/nodeguard-linux-amd64/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Stop dependencies
+        if: always()
+        run: |
+          if [[ -f .local/dev.env ]]; then scripts/dev-dependencies.sh down; fi

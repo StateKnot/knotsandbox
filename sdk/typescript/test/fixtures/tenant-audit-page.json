@@ -1,0 +1,18 @@
+{
+  "items": [
+    {
+      "id": "00000000-0000-4000-8000-000000000002",
+      "tenant_id": "00000000-0000-4000-8000-000000000001",
+      "project_id": null,
+      "actor_principal_id": null,
+      "request_id": "00000000-0000-4000-8000-000000000003",
+      "operation_id": null,
+      "resource_id": null,
+      "action": "service_clients:update",
+      "outcome": "SUCCEEDED",
+      "occurred_at": "2026-10-11T00:00:00Z"
+    }
+  ],
+  "next_cursor": "opaque.signed.cursor",
+  "cutoff": "2026-10-11T00:00:00Z"
+}

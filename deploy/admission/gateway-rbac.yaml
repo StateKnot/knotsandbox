@@ -1,0 +1,68 @@
+# Apply only after fail-closed CONNECT admission is installed and verified.
+# Bind the namespaced Role once per registered project; never grant tenant users
+# this account or arbitrary impersonation rights. kube 4.2 exec uses HTTP GET.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sandbox-gateway
+  namespace: sandbox-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sandbox-gateway-observe-cluster
+rules:
+  - apiGroups: ['']
+    resources: [namespaces, nodes, persistentvolumes]
+    verbs: [get]
+  - apiGroups: [node.k8s.io]
+    resources: [runtimeclasses]
+    resourceNames: [kata-qemu]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sandbox-gateway-observe-cluster
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sandbox-gateway-observe-cluster
+subjects:
+  - kind: ServiceAccount
+    name: sandbox-gateway
+    namespace: sandbox-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sandbox-gateway-execution
+  namespace: REPLACE_WITH_PROJECT_RUNTIME_NAMESPACE
+rules:
+  - apiGroups: ['']
+    resources: [pods, persistentvolumeclaims]
+    verbs: [get]
+  - apiGroups: ['']
+    resources: [pods/exec]
+    verbs: [get]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    resourceNames: [sandbox-default-deny]
+    verbs: [get]
+  - apiGroups: [cilium.io]
+    resources: [ciliumnetworkpolicies]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sandbox-gateway-execution
+  namespace: REPLACE_WITH_PROJECT_RUNTIME_NAMESPACE
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sandbox-gateway-execution
+subjects:
+  - kind: ServiceAccount
+    name: sandbox-gateway
+    namespace: sandbox-system

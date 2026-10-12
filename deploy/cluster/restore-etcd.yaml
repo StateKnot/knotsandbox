@@ -1,0 +1,128 @@
+---
+# All three original members, or replacements already carrying the recovered CA,
+# per-member TLS keys and encryption configuration. No online/partial restore.
+- name: Validate exact disaster-recovery input before stopping control plane
+  hosts: kube_control_plane
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Require complete reviewed recovery contract
+      ansible.builtin.assert:
+        that:
+          - recovery_id is defined and recovery_id is match('^[a-z0-9-]{8,64}$')
+          - recovery_snapshot is defined and recovery_snapshot is match('^/')
+          - recovery_snapshot_sha256 is defined and recovery_snapshot_sha256 is match('^[a-f0-9]{64}$')
+          - recovery_ca_sha256 is defined and recovery_ca_sha256 is match('^[a-f0-9]{64}$')
+          - recovery_encryption_config_sha256 is defined and recovery_encryption_config_sha256 is match('^[a-f0-9]{64}$')
+          - recovery_all_api_writers_fenced | default(false) | bool
+          - groups.kube_control_plane | length == 3
+        fail_msg: Recover CA/encryption identity first; fence all API writers and provide snapshot evidence
+    - name: Verify restored CA and secrets-encryption configuration
+      ansible.builtin.stat:
+        path: '{{ item }}'
+        checksum_algorithm: sha256
+      loop: [/etc/kubernetes/ssl/ca.crt, /etc/kubernetes/ssl/secrets_encryption.yaml]
+      register: restored_identity
+    - name: Require original decryption identity on all members
+      ansible.builtin.assert:
+        that:
+          - restored_identity.results[0].stat.checksum | default('') == recovery_ca_sha256
+          - restored_identity.results[1].stat.checksum | default('') == recovery_encryption_config_sha256
+    - name: Create recovery staging
+      ansible.builtin.file:
+        path: /var/lib/sandbox-recovery
+        state: directory
+        mode: '0700'
+    - name: Copy the SAME snapshot to every member
+      ansible.builtin.copy:
+        src: '{{ recovery_snapshot }}'
+        dest: '/var/lib/sandbox-recovery/{{ recovery_id }}.db'
+        mode: '0600'
+    - name: Hash transferred snapshot
+      ansible.builtin.stat:
+        path: '/var/lib/sandbox-recovery/{{ recovery_id }}.db'
+        checksum_algorithm: sha256
+      register: restored_snapshot
+    - name: Check integrity and one-time recovery directories
+      ansible.builtin.assert:
+        that: restored_snapshot.stat.checksum == recovery_snapshot_sha256
+    - name: Validate snapshot with matching etcdutl
+      ansible.builtin.command:
+        argv: [/usr/local/bin/etcdutl, snapshot, status, '/var/lib/sandbox-recovery/{{ recovery_id }}.db']
+      changed_when: false
+    - name: Refuse reused recovery ID
+      ansible.builtin.stat:
+        path: '/var/lib/etcd.before-{{ recovery_id }}'
+      register: previous_recovery
+    - name: Require clean recovery destination
+      ansible.builtin.assert:
+        that: not previous_recovery.stat.exists
+- name: Stop EVERY control node before restoring ANY member
+  hosts: kube_control_plane
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Stop kubelet to prevent new static pods
+      ansible.builtin.systemd_service:
+        name: kubelet
+        state: stopped
+    - name: Enumerate currently running control-plane containers
+      ansible.builtin.command: /usr/local/bin/crictl --runtime-endpoint unix:///run/containerd/containerd.sock ps -q
+      register: control_containers
+      changed_when: false
+    - name: Stop all containers on dedicated control nodes
+      ansible.builtin.command:
+        argv: [/usr/local/bin/crictl, --runtime-endpoint, unix:///run/containerd/containerd.sock, stop, '{{ item }}']
+      loop: '{{ control_containers.stdout_lines }}'
+    - name: Stop etcd on every member
+      ansible.builtin.systemd_service:
+        name: etcd
+        state: stopped
+- name: Restore complete etcd cluster with revision bump and compacted watches
+  hosts: kube_control_plane
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Preserve original member data for forensics
+      ansible.builtin.command:
+        argv: [mv, /var/lib/etcd, '/var/lib/etcd.before-{{ recovery_id }}']
+    - name: Restore all three members using the same initial cluster
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/etcdutl
+          - snapshot
+          - restore
+          - '/var/lib/sandbox-recovery/{{ recovery_id }}.db'
+          - '--name=etcd{{ groups.etcd.index(inventory_hostname) + 1 }}'
+          - '--initial-cluster={% for host in groups.etcd %}etcd{{ loop.index }}=https://{{ hostvars[host].ip }}:2380{{ "," if not loop.last else "" }}{% endfor %}'
+          - '--initial-advertise-peer-urls=https://{{ ip }}:2380'
+          - '--initial-cluster-token={{ recovery_id }}'
+          - --data-dir=/var/lib/etcd
+          - --bump-revision=1000000000
+          - --mark-compacted
+    - name: Ensure etcd service can access restored data
+      ansible.builtin.file:
+        path: /var/lib/etcd
+        owner: root
+        group: root
+        mode: '0700'
+        recurse: true
+    - name: Start restored member
+      ansible.builtin.systemd_service:
+        name: etcd
+        state: started
+    - name: Verify restored quorum before starting API writers
+      ansible.builtin.command:
+        argv: [/usr/local/bin/etcdctl, --endpoints=https://127.0.0.1:2379, --cacert=/etc/ssl/etcd/ssl/ca.pem, '--cert=/etc/ssl/etcd/ssl/admin-{{ inventory_hostname }}.pem', '--key=/etc/ssl/etcd/ssl/admin-{{ inventory_hostname }}-key.pem', endpoint, health, --cluster]
+      changed_when: false
+      register: quorum
+      retries: 12
+      delay: 5
+      until: quorum.rc == 0
+    - name: Start kubelet after quorum exists
+      ansible.builtin.systemd_service:
+        name: kubelet
+        state: started

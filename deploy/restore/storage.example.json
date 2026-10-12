@@ -1,0 +1,11 @@
+{
+  "protocol": 1,
+  "normal_storage_class": "sandbox-workspace",
+  "restore_raw_storage_class": "sandbox-restore-raw",
+  "restore_delivery_storage_class": "sandbox-restore-delivery",
+  "snapshot_class": "sandbox-workspace",
+  "workspace_kms_key_id": "compute-key-fixture",
+  "account_id": "1234567890123456",
+  "region": "cn-hangzhou",
+  "deployment": "production-a"
+}

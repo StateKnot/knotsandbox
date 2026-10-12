@@ -1,0 +1,75 @@
+# Build context allowlist: local credentials and developer tooling never enter it.
+**
+!Cargo.toml
+!Cargo.lock
+!rust-toolchain.toml
+!build.rs
+!src/
+!src/**
+!migrations/
+!migrations/**
+!scripts/
+!scripts/sql/
+!scripts/sql/*.sql
+!.sqlx/
+!.sqlx/**
+
+# Runtime enrollment validates against this reviewed, nonsecret version lock.
+!deploy/
+!deploy/cluster/
+!deploy/cluster/versions.lock.json
+
+# Exact nonsecret release inputs required by production compile/runtime inventory.
+!deploy/backup/
+!deploy/backup/versions.lock.json
+!scripts/release/
+!scripts/release/debian-security.lock.json
+!scripts/release/native-security.lock.json
+!scripts/release/sqlite_build.py
+# Public, committed certificate/SQL protocol fixtures needed only by the
+# isolated production SQLite acceptance stage; never copied to runtime images.
+!tests/
+!tests/fixtures/
+!tests/fixtures/**
+!tests/support/
+!tests/support/mod.rs
+!tests/nodeguard_journal_native.rs
+!tests/termination_credentials.rs
+!deploy/admission/
+!deploy/admission/config.example.json
+!deploy/keycloak/
+!deploy/keycloak/realm.template.json
+!deploy/observability/
+!deploy/observability/versions.lock.json
+
+# Reviewed public console build inputs; no browser secrets, .env or test data.
+!console/
+!console/package.json
+!console/package-lock.json
+!console/index.html
+!console/tsconfig.json
+!console/vite.config.ts
+!console/src/
+!console/src/**
+!sdk/
+!sdk/typescript/
+!sdk/typescript/src/
+!sdk/typescript/src/schema.d.ts
+!sdk/typescript/src/events.ts
+!sdk/typescript/src/event-message.ts
+!sdk/typescript/src/sse.ts
+!sdk/typescript/src/transport.ts
+!deploy/console/
+!deploy/console/Dockerfile
+!console/scripts/
+!console/scripts/prepare-assets.mjs
+!console/release-assets/
+!console/release-assets/bundle-manifest.json
+!console/release-assets/assets/
+!console/release-assets/assets/*.js
+!console/release-assets/assets/*.css
+
+!console/release-assets/npm-inventory/
+!console/release-assets/npm-inventory/*/
+!console/release-assets/npm-inventory/*/package.json
+!console/release-assets/npm-inventory/*/package-lock.json

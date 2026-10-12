@@ -1,0 +1,724 @@
+{
+  "settings": {
+    "image": "registry.fixture.invalid/sandbox/backup@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "runtime_class": "kata-backup-qemu",
+    "runtime_handler": "kata-qemu",
+    "storage_class": "sandbox-backup-retain",
+    "snapshot_class": "sandbox-snapshot-retain",
+    "dns_namespace": "kube-system",
+    "dns_labels": {
+      "k8s-app": "kube-dns"
+    },
+    "secrets": {
+      "password": "backup-repository-key-reference",
+      "signing_private": "backup-manifest-signing",
+      "signing_public": "backup-manifest-verification"
+    },
+    "certification_report_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "job": {
+    "tenant_id": "044723d6-01bd-42b3-aab1-4d450f30a30e",
+    "project_id": "fe422ddb-8038-484b-8a0d-c8cfb9a30cbc",
+    "backup_id": "5fc057fd-051b-4e32-8475-38942a9b3637",
+    "source_instance_id": "8095f81b-6ae9-4f7c-be20-7aba4f30b655",
+    "source_pvc_uid": "ebbaf0fc-fd11-4057-ae12-2975d80b5d8c",
+    "snapshot_content_uid": "7b390c00-1c96-45e7-b3bf-2d9077688d91",
+    "clone_pvc_uid": "46eb99d3-ac5c-4cbc-897b-c2f21deaf915",
+    "protocol": 1,
+    "source_generation": 2,
+    "size_bytes": 21474836480,
+    "data_timestamp": "2026-10-03T10:10:05.687835+00:00",
+    "consistency": "CRASH_CONSISTENT",
+    "retention_until": "2026-11-03T10:12:05.687835+00:00",
+    "key_ref": "kms:backup-repo:version-1",
+    "region": "cn-hangzhou",
+    "account_id": "1234567890123456",
+    "bucket": "fixture-backup",
+    "vault_bucket": "fixture-backup-vault",
+    "kms_key_id": "fixture-repo-key",
+    "vault_kms_key_id": "fixture-vault-key",
+    "issuer": "https://oidc.fixture.invalid",
+    "oidc_provider_arn": "acs:ram::1234567890123456:oidc-provider/fixture",
+    "roles": {
+      "backup": {
+        "arn": "acs:ram::1234567890123456:role/fixture-backup",
+        "subject": "system:serviceaccount:sandbox-system:sandbox-backup"
+      },
+      "backup-export": {
+        "arn": "acs:ram::1234567890123456:role/fixture-backup-export",
+        "subject": "system:serviceaccount:sandbox-system:sandbox-backup-export"
+      },
+      "restore": {
+        "arn": "acs:ram::1234567890123456:role/fixture-restore",
+        "subject": "system:serviceaccount:sandbox-system:sandbox-restore"
+      }
+    },
+    "deadline": "2026-10-03T11:12:05.687835+00:00",
+    "template_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "runtime_certification_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "seal_attempt_id": "10000000-0000-4000-8000-000000000001",
+    "cluster_epoch": "20000000-0000-4000-8000-000000000002"
+  },
+  "attempt_id": "10000000-0000-4000-8000-000000000001",
+  "cluster_epoch": "20000000-0000-4000-8000-000000000002",
+  "volume": "sbx-bvol-10000000-0000-4000-8000-000000000001",
+  "expected_manifest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "deadline_seconds": 3600,
+  "objects": {
+    "capture": [
+      {
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {
+          "name": "sbx-bcfg-10000000-0000-4000-8000-000000000001",
+          "namespace": "sandbox-system",
+          "labels": {
+            "sandbox.platform/backup-id": "5fc057fd-051b-4e32-8475-38942a9b3637",
+            "sandbox.platform/purpose": "backup-capture",
+            "sandbox.platform/backup-attempt-id": "10000000-0000-4000-8000-000000000001",
+            "sandbox.platform/tenant-id": "044723d6-01bd-42b3-aab1-4d450f30a30e",
+            "sandbox.platform/project-id": "fe422ddb-8038-484b-8a0d-c8cfb9a30cbc",
+            "sandbox.platform/cluster-epoch": "20000000-0000-4000-8000-000000000002",
+            "app.kubernetes.io/managed-by": "sandbox-backup"
+          }
+        },
+        "immutable": true,
+        "data": {
+          "job.json": "{\"account_id\":\"1234567890123456\",\"backup_id\":\"5fc057fd-051b-4e32-8475-38942a9b3637\",\"bucket\":\"fixture-backup\",\"clone_pvc_uid\":\"46eb99d3-ac5c-4cbc-897b-c2f21deaf915\",\"cluster_epoch\":\"20000000-0000-4000-8000-000000000002\",\"consistency\":\"CRASH_CONSISTENT\",\"data_timestamp\":\"2026-10-03T10:10:05.687835+00:00\",\"deadline\":\"2026-10-03T11:12:05.687835+00:00\",\"issuer\":\"https://oidc.fixture.invalid\",\"key_ref\":\"kms:backup-repo:version-1\",\"kms_key_id\":\"fixture-repo-key\",\"oidc_provider_arn\":\"acs:ram::1234567890123456:oidc-provider/fixture\",\"project_id\":\"fe422ddb-8038-484b-8a0d-c8cfb9a30cbc\",\"protocol\":1,\"region\":\"cn-hangzhou\",\"retention_until\":\"2026-11-03T10:12:05.687835+00:00\",\"roles\":{\"backup\":{\"arn\":\"acs:ram::1234567890123456:role/fixture-backup\",\"subject\":\"system:serviceaccount:sandbox-system:sandbox-backup\"},\"backup-export\":{\"arn\":\"acs:ram::1234567890123456:role/fixture-backup-export\",\"subject\":\"system:serviceaccount:sandbox-system:sandbox-backup-export\"},\"restore\":{\"arn\":\"acs:ram::1234567890123456:role/fixture-restore\",\"subject\":\"system:serviceaccount:sandbox-system:sandbox-restore\"}},\"runtime_certification_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"seal_attempt_id\":\"10000000-0000-4000-8000-000000000001\",\"size_bytes\":21474836480,\"snapshot_content_uid\":\"7b390c00-1c96-45e7-b3bf-2d9077688d91\",\"source_generation\":2,\"source_instance_id\":\"8095f81b-6ae9-4f7c-be20-7aba4f30b655\",\"source_pvc_uid\":\"ebbaf0fc-fd11-4057-ae12-2975d80b5d8c\",\"template_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"tenant_id\":\"044723d6-01bd-42b3-aab1-4d450f30a30e\",\"vault_bucket\":\"fixture-backup-vault\",\"vault_kms_key_id\":\"fixture-vault-key\"}"
+        }
+      },
+      {
+        "apiVersion": "batch/v1",
+        "kind": "Job",
+        "metadata": {
+          "name": "sbx-bkp-10000000-0000-4000-8000-000000000001-capture",
+          "namespace": "sandbox-system",
+          "labels": {
+            "sandbox.platform/backup-id": "5fc057fd-051b-4e32-8475-38942a9b3637",
+            "sandbox.platform/purpose": "backup-capture",
+            "sandbox.platform/backup-attempt-id": "10000000-0000-4000-8000-000000000001",
+            "sandbox.platform/tenant-id": "044723d6-01bd-42b3-aab1-4d450f30a30e",
+            "sandbox.platform/project-id": "fe422ddb-8038-484b-8a0d-c8cfb9a30cbc",
+            "sandbox.platform/cluster-epoch": "20000000-0000-4000-8000-000000000002",
+            "app.kubernetes.io/managed-by": "sandbox-backup"
+          }
+        },
+        "spec": {
+          "suspend": true,
+          "backoffLimit": 0,
+          "parallelism": 1,
+          "completions": 1,
+          "completionMode": "NonIndexed",
+          "podReplacementPolicy": "Failed",
+          "activeDeadlineSeconds": 3600,
+          "template": {
+            "metadata": {
+              "labels": {
+                "sandbox.platform/backup-id": "5fc057fd-051b-4e32-8475-38942a9b3637",
+                "sandbox.platform/purpose": "backup-capture",
+                "sandbox.platform/backup-attempt-id": "10000000-0000-4000-8000-000000000001",
+                "sandbox.platform/tenant-id": "044723d6-01bd-42b3-aab1-4d450f30a30e",
+                "sandbox.platform/project-id": "fe422ddb-8038-484b-8a0d-c8cfb9a30cbc",
+                "sandbox.platform/cluster-epoch": "20000000-0000-4000-8000-000000000002",
+                "app.kubernetes.io/managed-by": "sandbox-backup"
+              },
+              "annotations": {
+                "sandbox.platform/backup-certification": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              },
+              "finalizers": [
+                "sandbox.platform/termination-protection"
+              ]
+            },
+            "spec": {
+              "runtimeClassName": "kata-backup-qemu",
+              "serviceAccountName": "sandbox-backup",
+              "automountServiceAccountToken": false,
+              "restartPolicy": "Never",
+              "enableServiceLinks": false,
+              "hostNetwork": false,
+              "hostPID": false,
+              "hostIPC": false,
+              "dnsPolicy": "ClusterFirst",
+              "schedulerName": "default-scheduler",
+              "terminationGracePeriodSeconds": 30,
+              "nodeSelector": {
+                "sandbox.platform/node-pool": "kata"
+              },
+              "tolerations": [
+                {
+                  "key": "sandbox.platform/untrusted",
+                  "operator": "Equal",
+                  "value": "true",
+                  "effect": "NoSchedule"
+                }
+              ],
+              "securityContext": {
+                "seccompProfile": {
+                  "type": "RuntimeDefault"
+                }
+              },
+              "containers": [
+                {
+                  "name": "backup",
+                  "image": "registry.fixture.invalid/sandbox/backup@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                  "imagePullPolicy": "Always",
+                  "command": [
+                    "/usr/local/bin/python3",
+                    "/app/backup.py",
+                    "capture"
+                  ],
+                  "terminationMessagePath": "/run/backup/result.json",
+                  "terminationMessagePolicy": "File",
+                  "securityContext": {
+                    "runAsUser": 0,
+                    "runAsGroup": 0,
+                    "allowPrivilegeEscalation": false,
+                    "readOnlyRootFilesystem": true,
+                    "capabilities": {
+                      "drop": [
+                        "ALL"
+                      ]
+                    }
+                  },
+                  "resources": {
+                    "requests": {
+                      "cpu": "1",
+                      "memory": "1Gi",
+                      "ephemeral-storage": "128Mi"
+                    },
+                    "limits": {
+                      "cpu": "2",
+                      "memory": "2Gi",
+                      "ephemeral-storage": "256Mi"
+                    }
+                  },
+                  "volumeMounts": [
+                    {
+                      "name": "work",
+                      "mountPath": "/run/backup"
+                    },
+                    {
+                      "name": "config",
+                      "mountPath": "/run/backup-config/job.json",
+                      "subPath": "job.json",
+                      "readOnly": true
+                    },
+                    {
+                      "name": "key",
+                      "mountPath": "/run/backup-key/password",
+                      "subPath": "password",
+                      "readOnly": true
+                    },
+                    {
+                      "name": "cloud",
+                      "mountPath": "/var/run/sandbox-cloud",
+                      "readOnly": true
+                    }
+                  ],
+                  "volumeDevices": [
+                    {
+                      "name": "data",
+                      "devicePath": "/dev/sandbox-data"
+                    }
+                  ]
+                }
+              ],
+              "volumes": [
+                {
+                  "name": "work",
+                  "emptyDir": {
+                    "medium": "Memory",
+                    "sizeLimit": "128Mi"
+                  }
+                },
+                {
+                  "name": "config",
+                  "configMap": {
+                    "name": "sbx-bcfg-10000000-0000-4000-8000-000000000001",
+                    "defaultMode": 420
+                  }
+                },
+                {
+                  "name": "key",
+                  "secret": {
+                    "secretName": "backup-repository-key-reference",
+                    "defaultMode": 256
+                  }
+                },
+                {
+                  "name": "cloud",
+                  "projected": {
+                    "defaultMode": 256,
+                    "sources": [
+                      {
+                        "serviceAccountToken": {
+                          "audience": "sts.aliyuncs.com",
+                          "expirationSeconds": 600,
+                          "path": "token"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "name": "data",
+                  "persistentVolumeClaim": {
+                    "claimName": "sbx-bvol-10000000-0000-4000-8000-000000000001",
+                    "readOnly": true
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "seal": [
+      {
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {
+          "name": "sbx-bcfg-10000000-0000-4000-8000-000000000001",
+          "namespace": "sandbox-system",
+          "labels": {
+            "sandbox.platform/backup-id": "5fc057fd-051b-4e32-8475-38942a9b3637",
+            "sandbox.platform/purpose": "backup-seal",
+            "sandbox.platform/backup-attempt-id": "10000000-0000-4000-8000-000000000001",
+            "sandbox.platform/tenant-id": "044723d6-01bd-42b3-aab1-4d450f30a30e",
+            "sandbox.platform/project-id": "fe422ddb-8038-484b-8a0d-c8cfb9a30cbc",
+            "sandbox.platform/cluster-epoch": "20000000-0000-4000-8000-000000000002",
+            "app.kubernetes.io/managed-by": "sandbox-backup"
+          }
+        },
+        "immutable": true,
+        "data": {
+          "job.json": "{\"account_id\":\"1234567890123456\",\"backup_id\":\"5fc057fd-051b-4e32-8475-38942a9b3637\",\"bucket\":\"fixture-backup\",\"clone_pvc_uid\":\"46eb99d3-ac5c-4cbc-897b-c2f21deaf915\",\"cluster_epoch\":\"20000000-0000-4000-8000-000000000002\",\"consistency\":\"CRASH_CONSISTENT\",\"data_timestamp\":\"2026-10-03T10:10:05.687835+00:00\",\"deadline\":\"2026-10-03T11:12:05.687835+00:00\",\"issuer\":\"https://oidc.fixture.invalid\",\"key_ref\":\"kms:backup-repo:version-1\",\"kms_key_id\":\"fixture-repo-key\",\"oidc_provider_arn\":\"acs:ram::1234567890123456:oidc-provider/fixture\",\"project_id\":\"fe422ddb-8038-484b-8a0d-c8cfb9a30cbc\",\"protocol\":1,\"region\":\"cn-hangzhou\",\"retention_until\":\"2026-11-03T10:12:05.687835+00:00\",\"roles\":{\"backup\":{\"arn\":\"acs:ram::1234567890123456:role/fixture-backup\",\"subject\":\"system:serviceaccount:sandbox-system:sandbox-backup\"},\"backup-export\":{\"arn\":\"acs:ram::1234567890123456:role/fixture-backup-export\",\"subject\":\"system:serviceaccount:sandbox-system:sandbox-backup-export\"},\"restore\":{\"arn\":\"acs:ram::1234567890123456:role/fixture-restore\",\"subject\":\"system:serviceaccount:sandbox-system:sandbox-restore\"}},\"runtime_certification_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"seal_attempt_id\":\"10000000-0000-4000-8000-000000000001\",\"size_bytes\":21474836480,\"snapshot_content_uid\":\"7b390c00-1c96-45e7-b3bf-2d9077688d91\",\"source_generation\":2,\"source_instance_id\":\"8095f81b-6ae9-4f7c-be20-7aba4f30b655\",\"source_pvc_uid\":\"ebbaf0fc-fd11-4057-ae12-2975d80b5d8c\",\"template_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"tenant_id\":\"044723d6-01bd-42b3-aab1-4d450f30a30e\",\"vault_bucket\":\"fixture-backup-vault\",\"vault_kms_key_id\":\"fixture-vault-key\"}"
+        }
+      },
+      {
+        "apiVersion": "batch/v1",
+        "kind": "Job",
+        "metadata": {
+          "name": "sbx-bkp-10000000-0000-4000-8000-000000000001-seal",
+          "namespace": "sandbox-system",
+          "labels": {
+            "sandbox.platform/backup-id": "5fc057fd-051b-4e32-8475-38942a9b3637",
+            "sandbox.platform/purpose": "backup-seal",
+            "sandbox.platform/backup-attempt-id": "10000000-0000-4000-8000-000000000001",
+            "sandbox.platform/tenant-id": "044723d6-01bd-42b3-aab1-4d450f30a30e",
+            "sandbox.platform/project-id": "fe422ddb-8038-484b-8a0d-c8cfb9a30cbc",
+            "sandbox.platform/cluster-epoch": "20000000-0000-4000-8000-000000000002",
+            "app.kubernetes.io/managed-by": "sandbox-backup"
+          }
+        },
+        "spec": {
+          "suspend": true,
+          "backoffLimit": 0,
+          "parallelism": 1,
+          "completions": 1,
+          "completionMode": "NonIndexed",
+          "podReplacementPolicy": "Failed",
+          "activeDeadlineSeconds": 3600,
+          "template": {
+            "metadata": {
+              "labels": {
+                "sandbox.platform/backup-id": "5fc057fd-051b-4e32-8475-38942a9b3637",
+                "sandbox.platform/purpose": "backup-seal",
+                "sandbox.platform/backup-attempt-id": "10000000-0000-4000-8000-000000000001",
+                "sandbox.platform/tenant-id": "044723d6-01bd-42b3-aab1-4d450f30a30e",
+                "sandbox.platform/project-id": "fe422ddb-8038-484b-8a0d-c8cfb9a30cbc",
+                "sandbox.platform/cluster-epoch": "20000000-0000-4000-8000-000000000002",
+                "app.kubernetes.io/managed-by": "sandbox-backup"
+              },
+              "annotations": {
+                "sandbox.platform/backup-certification": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              },
+              "finalizers": [
+                "sandbox.platform/termination-protection"
+              ]
+            },
+            "spec": {
+              "runtimeClassName": "kata-backup-qemu",
+              "serviceAccountName": "sandbox-backup-export",
+              "automountServiceAccountToken": false,
+              "restartPolicy": "Never",
+              "enableServiceLinks": false,
+              "hostNetwork": false,
+              "hostPID": false,
+              "hostIPC": false,
+              "dnsPolicy": "ClusterFirst",
+              "schedulerName": "default-scheduler",
+              "terminationGracePeriodSeconds": 30,
+              "nodeSelector": {
+                "sandbox.platform/node-pool": "kata"
+              },
+              "tolerations": [
+                {
+                  "key": "sandbox.platform/untrusted",
+                  "operator": "Equal",
+                  "value": "true",
+                  "effect": "NoSchedule"
+                }
+              ],
+              "securityContext": {
+                "seccompProfile": {
+                  "type": "RuntimeDefault"
+                }
+              },
+              "containers": [
+                {
+                  "name": "backup",
+                  "image": "registry.fixture.invalid/sandbox/backup@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                  "imagePullPolicy": "Always",
+                  "command": [
+                    "/usr/local/bin/python3",
+                    "/app/backup.py",
+                    "seal"
+                  ],
+                  "terminationMessagePath": "/run/backup/result.json",
+                  "terminationMessagePolicy": "File",
+                  "securityContext": {
+                    "runAsUser": 0,
+                    "runAsGroup": 0,
+                    "allowPrivilegeEscalation": false,
+                    "readOnlyRootFilesystem": true,
+                    "capabilities": {
+                      "drop": [
+                        "ALL"
+                      ]
+                    }
+                  },
+                  "resources": {
+                    "requests": {
+                      "cpu": "1",
+                      "memory": "1Gi",
+                      "ephemeral-storage": "1Gi"
+                    },
+                    "limits": {
+                      "cpu": "2",
+                      "memory": "2Gi",
+                      "ephemeral-storage": "2Gi"
+                    }
+                  },
+                  "volumeMounts": [
+                    {
+                      "name": "work",
+                      "mountPath": "/run/backup"
+                    },
+                    {
+                      "name": "config",
+                      "mountPath": "/run/backup-config/job.json",
+                      "subPath": "job.json",
+                      "readOnly": true
+                    },
+                    {
+                      "name": "key",
+                      "mountPath": "/run/backup-key/password",
+                      "subPath": "password",
+                      "readOnly": true
+                    },
+                    {
+                      "name": "cloud",
+                      "mountPath": "/var/run/sandbox-cloud",
+                      "readOnly": true
+                    },
+                    {
+                      "name": "source",
+                      "mountPath": "/run/backup-source/capture.json",
+                      "subPath": "capture.json",
+                      "readOnly": true
+                    },
+                    {
+                      "name": "signing",
+                      "mountPath": "/run/backup-signing/private.pem",
+                      "subPath": "private.pem",
+                      "readOnly": true
+                    }
+                  ]
+                }
+              ],
+              "volumes": [
+                {
+                  "name": "work",
+                  "emptyDir": {
+                    "sizeLimit": "1Gi"
+                  }
+                },
+                {
+                  "name": "config",
+                  "configMap": {
+                    "name": "sbx-bcfg-10000000-0000-4000-8000-000000000001",
+                    "defaultMode": 420
+                  }
+                },
+                {
+                  "name": "key",
+                  "secret": {
+                    "secretName": "backup-repository-key-reference",
+                    "defaultMode": 256
+                  }
+                },
+                {
+                  "name": "cloud",
+                  "projected": {
+                    "defaultMode": 256,
+                    "sources": [
+                      {
+                        "serviceAccountToken": {
+                          "audience": "sts.aliyuncs.com",
+                          "expirationSeconds": 600,
+                          "path": "token"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "name": "source",
+                  "configMap": {
+                    "name": "sbx-capture-5fc057fd-051b-4e32-8475-38942a9b3637",
+                    "defaultMode": 420
+                  }
+                },
+                {
+                  "name": "signing",
+                  "secret": {
+                    "secretName": "backup-manifest-signing",
+                    "defaultMode": 256
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "restore": [
+      {
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {
+          "name": "sbx-bcfg-10000000-0000-4000-8000-000000000001",
+          "namespace": "sandbox-system",
+          "labels": {
+            "sandbox.platform/backup-id": "5fc057fd-051b-4e32-8475-38942a9b3637",
+            "sandbox.platform/purpose": "backup-restore",
+            "sandbox.platform/backup-attempt-id": "10000000-0000-4000-8000-000000000001",
+            "sandbox.platform/tenant-id": "044723d6-01bd-42b3-aab1-4d450f30a30e",
+            "sandbox.platform/project-id": "fe422ddb-8038-484b-8a0d-c8cfb9a30cbc",
+            "sandbox.platform/cluster-epoch": "20000000-0000-4000-8000-000000000002",
+            "app.kubernetes.io/managed-by": "sandbox-backup"
+          }
+        },
+        "immutable": true,
+        "data": {
+          "job.json": "{\"account_id\":\"1234567890123456\",\"backup_id\":\"5fc057fd-051b-4e32-8475-38942a9b3637\",\"bucket\":\"fixture-backup\",\"clone_pvc_uid\":\"46eb99d3-ac5c-4cbc-897b-c2f21deaf915\",\"cluster_epoch\":\"20000000-0000-4000-8000-000000000002\",\"consistency\":\"CRASH_CONSISTENT\",\"data_timestamp\":\"2026-10-03T10:10:05.687835+00:00\",\"deadline\":\"2026-10-03T11:12:05.687835+00:00\",\"issuer\":\"https://oidc.fixture.invalid\",\"key_ref\":\"kms:backup-repo:version-1\",\"kms_key_id\":\"fixture-repo-key\",\"oidc_provider_arn\":\"acs:ram::1234567890123456:oidc-provider/fixture\",\"project_id\":\"fe422ddb-8038-484b-8a0d-c8cfb9a30cbc\",\"protocol\":1,\"region\":\"cn-hangzhou\",\"retention_until\":\"2026-11-03T10:12:05.687835+00:00\",\"roles\":{\"backup\":{\"arn\":\"acs:ram::1234567890123456:role/fixture-backup\",\"subject\":\"system:serviceaccount:sandbox-system:sandbox-backup\"},\"backup-export\":{\"arn\":\"acs:ram::1234567890123456:role/fixture-backup-export\",\"subject\":\"system:serviceaccount:sandbox-system:sandbox-backup-export\"},\"restore\":{\"arn\":\"acs:ram::1234567890123456:role/fixture-restore\",\"subject\":\"system:serviceaccount:sandbox-system:sandbox-restore\"}},\"runtime_certification_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"seal_attempt_id\":\"10000000-0000-4000-8000-000000000001\",\"size_bytes\":21474836480,\"snapshot_content_uid\":\"7b390c00-1c96-45e7-b3bf-2d9077688d91\",\"source_generation\":2,\"source_instance_id\":\"8095f81b-6ae9-4f7c-be20-7aba4f30b655\",\"source_pvc_uid\":\"ebbaf0fc-fd11-4057-ae12-2975d80b5d8c\",\"template_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"tenant_id\":\"044723d6-01bd-42b3-aab1-4d450f30a30e\",\"vault_bucket\":\"fixture-backup-vault\",\"vault_kms_key_id\":\"fixture-vault-key\"}"
+        }
+      },
+      {
+        "apiVersion": "batch/v1",
+        "kind": "Job",
+        "metadata": {
+          "name": "sbx-bkp-10000000-0000-4000-8000-000000000001-restore",
+          "namespace": "sandbox-system",
+          "labels": {
+            "sandbox.platform/backup-id": "5fc057fd-051b-4e32-8475-38942a9b3637",
+            "sandbox.platform/purpose": "backup-restore",
+            "sandbox.platform/backup-attempt-id": "10000000-0000-4000-8000-000000000001",
+            "sandbox.platform/tenant-id": "044723d6-01bd-42b3-aab1-4d450f30a30e",
+            "sandbox.platform/project-id": "fe422ddb-8038-484b-8a0d-c8cfb9a30cbc",
+            "sandbox.platform/cluster-epoch": "20000000-0000-4000-8000-000000000002",
+            "app.kubernetes.io/managed-by": "sandbox-backup"
+          }
+        },
+        "spec": {
+          "suspend": true,
+          "backoffLimit": 0,
+          "parallelism": 1,
+          "completions": 1,
+          "completionMode": "NonIndexed",
+          "podReplacementPolicy": "Failed",
+          "activeDeadlineSeconds": 3600,
+          "template": {
+            "metadata": {
+              "labels": {
+                "sandbox.platform/backup-id": "5fc057fd-051b-4e32-8475-38942a9b3637",
+                "sandbox.platform/purpose": "backup-restore",
+                "sandbox.platform/backup-attempt-id": "10000000-0000-4000-8000-000000000001",
+                "sandbox.platform/tenant-id": "044723d6-01bd-42b3-aab1-4d450f30a30e",
+                "sandbox.platform/project-id": "fe422ddb-8038-484b-8a0d-c8cfb9a30cbc",
+                "sandbox.platform/cluster-epoch": "20000000-0000-4000-8000-000000000002",
+                "app.kubernetes.io/managed-by": "sandbox-backup"
+              },
+              "annotations": {
+                "sandbox.platform/backup-certification": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              },
+              "finalizers": [
+                "sandbox.platform/termination-protection"
+              ]
+            },
+            "spec": {
+              "runtimeClassName": "kata-backup-qemu",
+              "serviceAccountName": "sandbox-restore",
+              "automountServiceAccountToken": false,
+              "restartPolicy": "Never",
+              "enableServiceLinks": false,
+              "hostNetwork": false,
+              "hostPID": false,
+              "hostIPC": false,
+              "dnsPolicy": "ClusterFirst",
+              "schedulerName": "default-scheduler",
+              "terminationGracePeriodSeconds": 30,
+              "nodeSelector": {
+                "sandbox.platform/node-pool": "kata"
+              },
+              "tolerations": [
+                {
+                  "key": "sandbox.platform/untrusted",
+                  "operator": "Equal",
+                  "value": "true",
+                  "effect": "NoSchedule"
+                }
+              ],
+              "securityContext": {
+                "seccompProfile": {
+                  "type": "RuntimeDefault"
+                }
+              },
+              "containers": [
+                {
+                  "name": "backup",
+                  "image": "registry.fixture.invalid/sandbox/backup@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                  "imagePullPolicy": "Always",
+                  "command": [
+                    "/usr/local/bin/python3",
+                    "/app/backup.py",
+                    "restore"
+                  ],
+                  "terminationMessagePath": "/run/backup/result.json",
+                  "terminationMessagePolicy": "File",
+                  "securityContext": {
+                    "runAsUser": 0,
+                    "runAsGroup": 0,
+                    "allowPrivilegeEscalation": false,
+                    "readOnlyRootFilesystem": true,
+                    "capabilities": {
+                      "drop": [
+                        "ALL"
+                      ]
+                    }
+                  },
+                  "resources": {
+                    "requests": {
+                      "cpu": "1",
+                      "memory": "1Gi",
+                      "ephemeral-storage": "128Mi"
+                    },
+                    "limits": {
+                      "cpu": "2",
+                      "memory": "2Gi",
+                      "ephemeral-storage": "256Mi"
+                    }
+                  },
+                  "volumeMounts": [
+                    {
+                      "name": "work",
+                      "mountPath": "/run/backup"
+                    },
+                    {
+                      "name": "config",
+                      "mountPath": "/run/backup-config/job.json",
+                      "subPath": "job.json",
+                      "readOnly": true
+                    },
+                    {
+                      "name": "key",
+                      "mountPath": "/run/backup-key/password",
+                      "subPath": "password",
+                      "readOnly": true
+                    },
+                    {
+                      "name": "cloud",
+                      "mountPath": "/var/run/sandbox-cloud",
+                      "readOnly": true
+                    },
+                    {
+                      "name": "signing",
+                      "mountPath": "/run/backup-signing/public.pem",
+                      "subPath": "public.pem",
+                      "readOnly": true
+                    }
+                  ],
+                  "volumeDevices": [
+                    {
+                      "name": "data",
+                      "devicePath": "/dev/sandbox-data"
+                    }
+                  ],
+                  "env": [
+                    {
+                      "name": "SANDBOX_EXPECTED_MANIFEST_SHA256",
+                      "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                    }
+                  ]
+                }
+              ],
+              "volumes": [
+                {
+                  "name": "work",
+                  "emptyDir": {
+                    "medium": "Memory",
+                    "sizeLimit": "128Mi"
+                  }
+                },
+                {
+                  "name": "config",
+                  "configMap": {
+                    "name": "sbx-bcfg-10000000-0000-4000-8000-000000000001",
+                    "defaultMode": 420
+                  }
+                },
+                {
+                  "name": "key",
+                  "secret": {
+                    "secretName": "backup-repository-key-reference",
+                    "defaultMode": 256
+                  }
+                },
+                {
+                  "name": "cloud",
+                  "projected": {
+                    "defaultMode": 256,
+                    "sources": [
+                      {
+                        "serviceAccountToken": {
+                          "audience": "sts.aliyuncs.com",
+                          "expirationSeconds": 600,
+                          "path": "token"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "name": "data",
+                  "persistentVolumeClaim": {
+                    "claimName": "sbx-bvol-10000000-0000-4000-8000-000000000001",
+                    "readOnly": false
+                  }
+                },
+                {
+                  "name": "signing",
+                  "secret": {
+                    "secretName": "backup-manifest-verification",
+                    "defaultMode": 256
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  }
+}

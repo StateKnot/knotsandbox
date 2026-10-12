@@ -1,0 +1,12 @@
+{
+  "mode": "external",
+  "issuer": "https://identity.example.com/realms/company",
+  "jwks_url": "https://identity.example.com/realms/company/protocol/openid-connect/certs",
+  "audience": "sandbox-api",
+  "token_profile": "rfc9068",
+  "allowed_algorithms": ["RS256"],
+  "max_token_lifetime_seconds": 300,
+  "clock_skew_seconds": 30,
+  "required_scopes": ["sandbox:access"],
+  "scope_profile": "action-scopes"
+}

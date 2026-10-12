@@ -1,0 +1,183 @@
+---
+- name: Install independent public workload identity origins
+  hosts: workload_identity
+  become: true
+  serial: 1
+  gather_facts: true
+  vars:
+    identity_source: "{{ playbook_dir }}"
+  pre_tasks:
+    - name: Require exact reviewed image and installer inputs
+      ansible.builtin.assert:
+        that:
+          - groups['workload_identity'] | length == 2
+          - ansible_distribution == 'Ubuntu'
+          - ansible_distribution_version == '24.04'
+          - workload_identity_config is defined
+          - workload_identity_wheels is defined
+          - workload_identity_nginx_version is defined
+          - workload_identity_publisher_public_key is match('^ssh-ed25519 [A-Za-z0-9+/=]+( [^\r\n]+)?$')
+    - name: Verify exact image-provided Nginx package version without installing arbitrary latest packages
+      ansible.builtin.command: dpkg-query --show --showformat=${Version} nginx
+      register: nginx_package
+      changed_when: false
+      failed_when: nginx_package.rc != 0 or nginx_package.stdout != workload_identity_nginx_version
+    - name: Verify operator supplied the TLS certificate and protected server key
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        get_checksum: false
+        get_mime: false
+        follow: true
+      loop:
+        - /etc/sandbox-workload-identity/tls/fullchain.pem
+        - /etc/sandbox-workload-identity/tls/server.key
+      register: tls_paths
+    - name: Refuse incomplete PKI installation
+      ansible.builtin.assert:
+        that:
+          - tls_paths.results[0].stat.isreg | default(false)
+          - tls_paths.results[1].stat.isreg | default(false)
+          - tls_paths.results[1].stat.pw_name == 'root'
+          - tls_paths.results[1].stat.mode in ['0400', '0600']
+    - name: Require synchronized time before any key retirement can be published
+      ansible.builtin.command: timedatectl show --property=NTPSynchronized --value
+      register: ntp_status
+      changed_when: false
+      failed_when: ntp_status.rc != 0 or ntp_status.stdout != 'yes'
+  tasks:
+    - name: Create unprivileged publisher account
+      ansible.builtin.user:
+        name: oidc-publisher
+        system: true
+        password_lock: true
+        shell: /bin/sh
+        create_home: true
+    - name: Create root-owned tool directory
+      ansible.builtin.file:
+        path: /opt/sandbox-workload-identity
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+    - name: Install only public tool sources and locked requirements
+      ansible.builtin.copy:
+        src: "{{ identity_source }}/{{ item }}"
+        dest: "/opt/sandbox-workload-identity/{{ item }}"
+        owner: root
+        group: root
+        mode: '0644'
+      loop: [identity.py, config.schema.json, requirements.lock.txt]
+    - name: Create protected offline wheel directory
+      ansible.builtin.file:
+        path: /opt/sandbox-workload-identity/wheels
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+    - name: Stage only predownloaded hashed Python wheels
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: /opt/sandbox-workload-identity/wheels/
+        owner: root
+        group: root
+        mode: '0644'
+      with_fileglob: "{{ workload_identity_wheels }}/*.whl"
+    - name: Create isolated Python environment
+      ansible.builtin.command:
+        argv: [python3, -m, venv, /opt/sandbox-workload-identity]
+        creates: /opt/sandbox-workload-identity/bin/python
+    - name: Install the existing pinned dependencies without network fallback
+      ansible.builtin.command:
+        argv: [/opt/sandbox-workload-identity/bin/python, -m, pip, install, --no-index, --require-hashes, --find-links, /opt/sandbox-workload-identity/wheels, -r, /opt/sandbox-workload-identity/requirements.lock.txt]
+      register: wheels_install
+      changed_when: "'Successfully installed' in wheels_install.stdout"
+    - name: Install public identity contract owned by root
+      ansible.builtin.copy:
+        src: "{{ workload_identity_config }}"
+        dest: /etc/sandbox-workload-identity.json
+        owner: root
+        group: root
+        mode: '0644'
+    - name: Create public release root
+      ansible.builtin.file:
+        path: /srv/workload-identity
+        state: directory
+        owner: oidc-publisher
+        group: oidc-publisher
+        mode: '0755'
+    - name: Restrict publisher SSH session to the public JSON receiver
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/40-sandbox-oidc-publisher.conf
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          Match User oidc-publisher
+            ForceCommand /opt/sandbox-workload-identity/bin/python /opt/sandbox-workload-identity/identity.py receive --config /etc/sandbox-workload-identity.json --root /srv/workload-identity
+            AuthenticationMethods publickey
+            PasswordAuthentication no
+            KbdInteractiveAuthentication no
+            PermitTTY no
+            AllowTcpForwarding no
+            AllowAgentForwarding no
+            X11Forwarding no
+            PermitUserRC no
+          Match all
+      notify: Reload SSH safely
+    - name: Activate and validate the forced command before authorizing a publisher
+      ansible.builtin.meta: flush_handlers
+    - name: Install only the restricted publisher public key
+      ansible.posix.authorized_key:
+        user: oidc-publisher
+        key: "{{ workload_identity_publisher_public_key }}"
+        key_options: 'restrict,command="/opt/sandbox-workload-identity/bin/python /opt/sandbox-workload-identity/identity.py receive --config /etc/sandbox-workload-identity.json --root /srv/workload-identity"'
+        exclusive: true
+    - name: Remove any stale render left by an interrupted installation
+      ansible.builtin.file:
+        path: /opt/sandbox-workload-identity/nginx.pending.conf
+        state: absent
+    - name: Render the two-path static Nginx virtual host
+      ansible.builtin.command:
+        argv: [/opt/sandbox-workload-identity/bin/python, /opt/sandbox-workload-identity/identity.py, render-nginx, --config, /etc/sandbox-workload-identity.json, --output, /opt/sandbox-workload-identity/nginx.pending.conf]
+    - name: Install the rendered Nginx configuration
+      ansible.builtin.copy:
+        remote_src: true
+        src: /opt/sandbox-workload-identity/nginx.pending.conf
+        dest: /etc/nginx/conf.d/workload-identity.conf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Reload Nginx safely
+    - name: Remove default site exposing an unrelated application
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      notify: Reload Nginx safely
+    - name: Remove temporary rendered file for the next validated update
+      ansible.builtin.file:
+        path: /opt/sandbox-workload-identity/nginx.pending.conf
+        state: absent
+    - name: Keep static HTTPS available across reboots
+      ansible.builtin.service:
+        name: nginx
+        enabled: true
+        state: started
+  handlers:
+    - name: Check SSH configuration
+      ansible.builtin.command: /usr/sbin/sshd -t
+      changed_when: false
+      listen: Reload SSH safely
+    - name: Reload SSH
+      ansible.builtin.service:
+        name: ssh
+        state: reloaded
+      listen: Reload SSH safely
+    - name: Check Nginx configuration
+      ansible.builtin.command: nginx -t
+      changed_when: false
+      listen: Reload Nginx safely
+    - name: Reload Nginx
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
+      listen: Reload Nginx safely

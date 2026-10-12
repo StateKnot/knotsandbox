@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "platform": "linux/amd64",
+  "target": "runner",
+  "base_image": "debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a",
+  "reviewed_at": "2026-10-03T17:49:00.455630+00:00",
+  "review_expires_at": "2026-10-10T08:45:53Z",
+  "source": {
+    "origin": "https://security.debian.org/debian-security",
+    "suite": "trixie-security",
+    "inrelease_sha256": "58ebdcd605e480c9120f8c34ccd6c84086b8d7bb94d50fda7c22c080dc88018c",
+    "packages_xz_sha256": "f90ac42ac57137087348d3011e70aebb255492bd087b39e57c5a7eceabff3e8a",
+    "archive_keyring_version": "2025.1",
+    "verified_signer": "5E04A1E3223A19A20706E20F9904613D4CCE68C6",
+    "release_date": "Sat, 03 Oct 2026 08:45:53 UTC",
+    "release_valid_until": "Sat, 10 Oct 2026 08:45:53 UTC"
+  },
+  "packages": [
+    {
+      "name": "libssl3t64",
+      "version": "3.5.7-1~deb13u3",
+      "architecture": "amd64",
+      "size_bytes": 2458176,
+      "sha256": "ff16bc048bcd7d1b256094450b79c77947d8e76fe2a24bd99b91021d591fa074",
+      "url": "https://security.debian.org/debian-security/pool/updates/main/o/openssl/libssl3t64_3.5.7-1~deb13u3_amd64.deb",
+      "file": "libssl3t64_3.5.7-1~deb13u3_amd64.deb"
+    },
+    {
+      "name": "openssl-provider-legacy",
+      "version": "3.5.7-1~deb13u3",
+      "architecture": "amd64",
+      "size_bytes": 316452,
+      "sha256": "c12e0266c4780749a4702b8959ac979689f4182e18eed85a8a5eb90ed0e16eab",
+      "url": "https://security.debian.org/debian-security/pool/updates/main/o/openssl/openssl-provider-legacy_3.5.7-1~deb13u3_amd64.deb",
+      "file": "openssl-provider-legacy_3.5.7-1~deb13u3_amd64.deb"
+    },
+    {
+      "name": "libpcre2-8-0",
+      "version": "10.46-1~deb13u3",
+      "architecture": "amd64",
+      "size_bytes": 299148,
+      "sha256": "e226f661d918f04daf38cdbc4806b7ed7d6ef95c7eb0ade692fc350e31970040",
+      "url": "https://security.debian.org/debian-security/pool/updates/main/p/pcre2/libpcre2-8-0_10.46-1~deb13u3_amd64.deb",
+      "file": "libpcre2-8-0_10.46-1~deb13u3_amd64.deb"
+    }
+  ]
+}

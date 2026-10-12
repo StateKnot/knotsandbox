@@ -1,0 +1,44 @@
+---
+- name: Apply validated trusted bootstrap policies and disk CSI
+  hosts: kube_control_plane[0]
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Create protected manifest staging
+      ansible.builtin.file:
+        path: /etc/kubernetes/sandbox-bootstrap
+        state: directory
+        mode: '0700'
+    - name: Copy locally rendered manifests
+      ansible.builtin.copy:
+        src: '{{ sandbox_deployment_dir }}/{{ item }}'
+        dest: '/etc/kubernetes/sandbox-bootstrap/{{ item }}'
+        mode: '0600'
+      loop: [trusted-policies.yaml, csi-crds.yaml, csi.yaml]
+    - name: Apply trusted connectivity before starting CSI
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, --kubeconfig=/etc/kubernetes/admin.conf, apply, --server-side, --field-manager=sandbox-cluster, -f, /etc/kubernetes/sandbox-bootstrap/trusted-policies.yaml]
+      register: policies_applied
+      changed_when: "'configured' in policies_applied.stdout or 'created' in policies_applied.stdout"
+    - name: Apply pinned snapshot CRDs before custom resources
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, --kubeconfig=/etc/kubernetes/admin.conf, apply, --server-side, --field-manager=sandbox-cluster, -f, /etc/kubernetes/sandbox-bootstrap/csi-crds.yaml]
+      register: crds_applied
+      changed_when: "'configured' in crds_applied.stdout or 'created' in crds_applied.stdout"
+    - name: Wait for snapshot API
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, --kubeconfig=/etc/kubernetes/admin.conf, wait, --for=condition=Established, crd/volumesnapshotclasses.snapshot.storage.k8s.io, crd/volumesnapshotcontents.snapshot.storage.k8s.io, crd/volumesnapshots.snapshot.storage.k8s.io, --timeout=60s]
+      changed_when: false
+    - name: Apply CSI resources
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, --kubeconfig=/etc/kubernetes/admin.conf, apply, --server-side, --field-manager=sandbox-cluster, -f, /etc/kubernetes/sandbox-bootstrap/csi.yaml]
+      register: csi_applied
+      changed_when: "'configured' in csi_applied.stdout or 'created' in csi_applied.stdout"
+    - name: Verify controller readiness
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, --kubeconfig=/etc/kubernetes/admin.conf, -n, kube-system, rollout, status, deployment/csi-provisioner, --timeout=300s]
+      changed_when: false
+    - name: Verify node plugin readiness
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, --kubeconfig=/etc/kubernetes/admin.conf, -n, kube-system, rollout, status, daemonset/csi-plugin, --timeout=300s]
+      changed_when: false

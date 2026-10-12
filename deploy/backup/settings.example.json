@@ -1,0 +1,15 @@
+{
+  "image": "registry.example.invalid/sandbox/backup@sha256:REPLACE_WITH_REVIEWED_BUILT_IMAGE_DIGEST",
+  "runtime_class": "kata-backup-qemu",
+  "runtime_handler": "kata-qemu",
+  "storage_class": "sandbox-backup-retain",
+  "snapshot_class": "sandbox-snapshot-retain",
+  "dns_namespace": "kube-system",
+  "dns_labels": {"k8s-app": "kube-dns"},
+  "secrets": {
+    "password": "backup-repository-key-reference",
+    "signing_private": "backup-manifest-signing",
+    "signing_public": "backup-manifest-verification"
+  },
+  "certification_report_sha256": "REPLACE_WITH_VERIFIED_RUNTIME_REPORT_SHA256"
+}

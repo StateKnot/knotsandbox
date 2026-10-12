@@ -1,0 +1,9 @@
+check-for-app-update: false
+ignore: []
+only-fixed: false
+only-notfixed: false
+match-upstream-kernel-headers: true
+db:
+  validate-by-hash-on-start: true
+  validate-age: true
+  max-allowed-built-age: 24h

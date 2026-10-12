@@ -1,0 +1,66 @@
+---
+- name: Install fixed Kata artifacts without enabling unguarded execution
+  hosts: kata
+  become: true
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Install archive decompressor from reviewed OS repositories
+      ansible.builtin.apt:
+        name: zstd
+        state: present
+        update_cache: false
+    - name: Create root-only package staging
+      ansible.builtin.file:
+        path: /var/cache/sandbox-cluster
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Copy verified Go runtime archive
+      ansible.builtin.copy:
+        src: '{{ sandbox_artifact_cache }}/{{ sandbox_installation.artifact_lock.artifacts["kata-go"].filename }}'
+        dest: /var/cache/sandbox-cluster/kata-go.tar.zst
+        owner: root
+        group: root
+        mode: '0600'
+    - name: Verify transferred archive
+      ansible.builtin.stat:
+        path: /var/cache/sandbox-cluster/kata-go.tar.zst
+        checksum_algorithm: sha256
+      register: kata_archive
+    - name: Require pinned SHA256 before root extraction
+      ansible.builtin.assert:
+        that: kata_archive.stat.checksum == sandbox_installation.artifact_lock.artifacts['kata-go'].sha256
+    - name: Extract official archive
+      ansible.builtin.unarchive:
+        src: /var/cache/sandbox-cluster/kata-go.tar.zst
+        dest: /
+        remote_src: true
+        creates: /opt/kata/.sandbox-4.2.0-files-installed
+    - name: Check host capabilities using installed runtime
+      ansible.builtin.command: /opt/kata/bin/kata-runtime check --no-network-checks
+      changed_when: false
+    - name: Copy reviewed Go-QEMU configuration hardener
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/configure-kata.py'
+        dest: /var/cache/sandbox-cluster/configure-kata.py
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Configure dedicated cgroup and prohibit VM reuse and annotation overrides
+      ansible.builtin.command:
+        argv: [python3, /var/cache/sandbox-cluster/configure-kata.py, --source, /opt/kata/share/defaults/kata-containers/configuration-qemu.toml, --destination, /etc/kata-containers/configuration-qemu.toml]
+    - name: Record artifact installation only
+      ansible.builtin.copy:
+        content: '{{ sandbox_installation.artifact_lock.artifacts["kata-go"].sha256 }}\n'
+        dest: /opt/kata/.sandbox-4.2.0-files-installed
+        owner: root
+        group: root
+        mode: '0600'
+    - name: Confirm containerd has no unguarded Kata handler
+      ansible.builtin.command: /usr/local/bin/containerd config dump
+      changed_when: false
+      register: containerd_configuration
+      failed_when: "'io.containerd.kata' in containerd_configuration.stdout"

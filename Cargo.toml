@@ -1,0 +1,109 @@
+[package]
+name = "sandbox-platform"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+publish = false
+license = "MIT"
+description = "KnotSandbox: a Rust control plane for multi-tenant sandboxes"
+repository = "https://github.com/StateKnot/knotsandbox"
+
+[lib]
+name = "sandbox_platform"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sandboxd"
+path = "src/bin/sandboxd.rs"
+
+[[bin]]
+name = "sandbox-admin"
+path = "src/bin/sandbox-admin.rs"
+
+[[bin]]
+name = "sandbox-runner"
+path = "src/bin/sandbox-runner.rs"
+
+[[bin]]
+name = "sandbox-admission"
+path = "src/bin/sandbox-admission.rs"
+
+[[bin]]
+name = "sandbox-nodeguard"
+path = "src/bin/sandbox-nodeguard.rs"
+
+[[bin]]
+name = "sandbox-credentials"
+path = "src/bin/sandbox-credentials.rs"
+
+[[bin]]
+name = "sandbox-automation"
+path = "src/bin/sandbox-automation.rs"
+
+[dependencies]
+anyhow = "1.0"
+axum = { version = "0.8.9", features = ["json", "macros", "ws"] }
+axum-server = { version = "0.8.0", default-features = false, features = ["tls-rustls-no-provider"] }
+base64 = "0.22"
+chrono = { version = "0.4.45", features = ["serde"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+cron = { version = "=0.17.0", default-features = false }
+futures-util = "0.3"
+hex = "0.4"
+hmac = "0.12"
+hyper-util = { version = "=0.1.21", features = ["tokio", "server-auto", "service", "http1"] }
+jsonwebtoken = { version = "10.4", default-features = false, features = ["rust_crypto"] }
+kube = { version = "4.2.0", default-features = false, features = ["client", "rustls-tls", "ws"] }
+k8s-openapi = { version = "0.28", features = ["v1_35"] }
+opendal = { version = "0.59.3", default-features = false, features = ["services-oss", "executors-tokio", "http-transport-reqwest-rustls-no-provider", "layers-retry", "layers-timeout", "layers-concurrent-limit"] }
+opendal-http-transport-reqwest = { version = "0.59.3", default-features = false }
+openidconnect = { version = "=4.0.1", default-features = false }
+prost = "=0.14.4"
+quick-xml = "=0.41.0"
+reqsign-aliyun-oss = "=3.2.0"
+reqsign-core = "=3.3.2"
+reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls"] }
+reqwest_oss = { package = "reqwest", version = "0.13.4", default-features = false, features = ["rustls-no-provider", "stream"] }
+ring = "=0.17.14"
+rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-rustls", "postgres", "sqlite", "chrono", "uuid", "json", "migrate", "macros"] }
+thiserror = "2.0"
+tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "signal", "time", "net", "sync", "process", "io-util", "fs"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tokio-tungstenite = { version = "0.29", default-features = false }
+tonic = { version = "=0.14.6", default-features = false, features = ["transport", "codegen", "router"] }
+tonic-prost = "=0.14.6"
+tower = { version = "0.5", features = ["util", "limit", "timeout", "load-shed"] }
+tower-http = { version = "0.6", features = ["trace", "request-id", "limit", "timeout", "sensitive-headers"] }
+tracing = "0.1"
+tracing-log = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+url = "2.5"
+uuid = { version = "1.26", features = ["v4", "serde"] }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.30.1", default-features = false, features = ["signal", "process", "fs", "user"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "=1.1.5", features = ["process", "event", "fs"] }
+
+[dev-dependencies]
+# Actual HTTP/2 admission transport acceptance; production clients retain their
+# existing feature set and default-features remain disabled.
+reqwest = { version = "0.12.28", default-features = false, features = ["http2"] }
+http-body-util = "0.1"
+log = "0.4"
+tempfile = "3.20"
+
+[profile.release]
+strip = "debuginfo"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"

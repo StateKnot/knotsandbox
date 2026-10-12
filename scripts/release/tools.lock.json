@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "platform": "linux/amd64",
+  "reviewed_on": "2026-10-03",
+  "tools": {
+    "cosign": {
+      "version": "3.1.3",
+      "url": "https://github.com/sigstore/cosign/releases/download/v3.1.3/cosign-linux-amd64",
+      "sha256": "4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71",
+      "members": {
+        "": "cosign"
+      }
+    },
+    "syft": {
+      "version": "1.54.0",
+      "url": "https://github.com/anchore/syft/releases/download/v1.54.0/syft_1.54.0_linux_amd64.tar.gz",
+      "sha256": "54a87372498168b2d033e876fd41fa4e8035b872699e525a57046e1f2f09c860",
+      "members": {
+        "syft": "syft"
+      }
+    },
+    "grype": {
+      "version": "0.120.0",
+      "url": "https://github.com/anchore/grype/releases/download/v0.120.0/grype_0.120.0_linux_amd64.tar.gz",
+      "sha256": "a5a1218dce63acdac152a6b3b5bb366e7267e36f4069848cf455543b3fa5700e",
+      "members": {
+        "grype": "grype"
+      }
+    },
+    "buildkit": {
+      "version": "0.33.1",
+      "url": "https://github.com/moby/buildkit/releases/download/v0.33.1/buildkit-v0.33.1.linux-amd64.tar.gz",
+      "sha256": "4e044bcd62a0c0bbe6a8c94d73989de2bfe4c04dbc0f9d6021cf96b72cd1d965",
+      "members": {
+        "bin/buildctl": "buildctl",
+        "bin/buildkitd": "buildkitd",
+        "bin/buildkit-runc": "buildkit-runc"
+      }
+    },
+    "crane": {
+      "version": "0.22.1",
+      "url": "https://github.com/google/go-containerregistry/releases/download/v0.22.1/go-containerregistry_Linux_x86_64.tar.gz",
+      "sha256": "0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0",
+      "members": {
+        "crane": "crane"
+      }
+    },
+    "gh": {
+      "version": "2.102.0",
+      "url": "https://github.com/cli/cli/releases/download/v2.102.0/gh_2.102.0_linux_amd64.tar.gz",
+      "sha256": "bb766f710eef8ede859c18578c72c327597cd4c8a85b06001b1f3843c6019386",
+      "members": {
+        "gh_2.102.0_linux_amd64/bin/gh": "gh"
+      }
+    }
+  },
+  "trust_root": {
+    "path": "trusted-root.json",
+    "source": "https://raw.githubusercontent.com/sigstore/root-signing/5888f358fc4ab58874447259edf83790261fc616/targets/trusted_root.json",
+    "sha256": "6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66"
+  },
+  "runtime": {
+    "builder_ca_package_version": "20250419~deb12u1",
+    "builder_ca_bundle_sha256": "714d457d580922dbf1d0be8bd35ba236a842b50b0072ae791582a19adef772a5",
+    "service_image": "gcr.io/distroless/cc-debian13:nonroot@sha256:e792ab3d241a468a4fd7519ddbbebe66b49b5f365771716ea688ad40b6c6f1c2",
+    "service_ca_package_version": "20250419",
+    "service_ca_bundle_sha256": "714d457d580922dbf1d0be8bd35ba236a842b50b0072ae791582a19adef772a5",
+    "service_libgcc_s1_version": "14.2.0-19",
+    "runner_image": "debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a",
+    "runner_libgcc_s1_version": "14.2.0-19"
+  }
+}

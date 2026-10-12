@@ -1,0 +1,84 @@
+---
+- name: Verify approved host and quarantine before changing cluster
+  hosts: k8s_cluster
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - name: Require exact reviewed Ubuntu host profile
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == 'Ubuntu'
+          - ansible_facts.distribution_version == '24.04'
+          - ansible_facts.architecture == 'x86_64'
+          - ansible_facts.kernel == sandbox_installation.settings.host_kernel
+          - ansible_facts.swaptotal_mb == 0
+          - containerd_use_systemd_cgroup | bool
+          - kubelet_cgroup_driver == 'systemd'
+          - not kata_containers_enabled | bool
+          - containerd_additional_runtimes | length == 0
+        fail_msg: Host differs from certified image/kernel, or an unguarded runtime was configured
+    - name: Require unified cgroup v2
+      ansible.builtin.stat:
+        path: /sys/fs/cgroup/cgroup.controllers
+      register: cgroup_v2
+    - name: Check cgroup hierarchy
+      ansible.builtin.assert:
+        that: cgroup_v2.stat.exists
+    - name: Require synchronized host clock
+      ansible.builtin.command: timedatectl show -p NTPSynchronized --value
+      changed_when: false
+      register: synchronized
+      failed_when: synchronized.stdout | trim != 'yes'
+    - name: Request short metadata discovery token
+      ansible.builtin.uri:
+        url: http://100.100.100.200/latest/api/token
+        method: PUT
+        headers:
+          X-aliyun-ecs-metadata-token-ttl-seconds: '60'
+        return_content: true
+        use_proxy: false
+        timeout: 5
+      register: metadata_token
+      no_log: true
+    - name: Read instance and image identity
+      ansible.builtin.uri:
+        url: 'http://100.100.100.200/latest/meta-data/{{ item }}'
+        headers:
+          X-aliyun-ecs-metadata-token: '{{ metadata_token.content }}'
+        return_content: true
+        use_proxy: false
+        timeout: 5
+      loop: [instance-id, image-id]
+      register: metadata_identity
+      no_log: true
+    - name: Match actual host to IaC and approved image
+      ansible.builtin.assert:
+        that:
+          - metadata_identity.results[0].content | trim == ecs_instance_id
+          - metadata_identity.results[1].content | trim == sandbox_installation.settings.host_image_id
+    - name: Verify KVM device on the dedicated pool
+      ansible.builtin.stat:
+        path: /dev/kvm
+      register: kvm_device
+      when: inventory_hostname in groups.kata
+    - name: Require hardware virtualization
+      ansible.builtin.assert:
+        that:
+          - kvm_device.stat.exists
+          - kvm_device.stat.ischr
+      when: inventory_hostname in groups.kata
+    - name: Refuse upgrade of a cluster already carrying a sandbox runtime
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, runtimeclasses, -o, json]
+      register: runtime_classes
+      changed_when: false
+      failed_when: false
+      when: inventory_hostname == groups.kube_control_plane[0]
+    - name: Keep this bootstrap upgrade path out of active sandbox clusters
+      ansible.builtin.assert:
+        that: (runtime_classes.stdout | from_json).items | length == 0
+        fail_msg: Active runtime classes require the future certified nodeguard-aware maintenance path; stop here
+      when:
+        - inventory_hostname == groups.kube_control_plane[0]
+        - runtime_classes.rc == 0

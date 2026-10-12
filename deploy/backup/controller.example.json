@@ -1,0 +1,39 @@
+{
+  "protocol": 1,
+  "deployment": "REPLACE_FROM_REVIEWED_TERRAFORM_DEPLOYMENT_IDENTITY",
+  "controller_image": "registry.example.invalid/sandbox-platform@sha256:REPLACE_WITH_VERIFIED_DIGEST",
+  "backup_image": "registry.example.invalid/sandbox-backup@sha256:REPLACE_WITH_VERIFIED_DIGEST",
+  "database_secret": "backup-database",
+  "database_ca_secret": "database-ca",
+  "nodeguard_server_ca_secret": "nodeguard-ca",
+  "nodeguard_client_identity_secret": "backup-nodeguard-client",
+  "signing_public_secret": "sbx-bkey-public-v1",
+  "vault": {
+    "endpoint": "https://oss-cn-hangzhou-internal.aliyuncs.com",
+    "bucket": "fixture-vault",
+    "region": "cn-hangzhou",
+    "account_id": "REPLACE_WITH_ACCOUNT_ID"
+  },
+  "reader": {
+    "region": "cn-hangzhou",
+    "account_id": "REPLACE_WITH_ACCOUNT_ID",
+    "vault_bucket": "fixture-vault",
+    "vault_kms_key_id": "vault-key",
+    "issuer": "https://REPLACE_WITH_KUBERNETES_SA_ISSUER",
+    "oidc_provider_arn": "REPLACE_FROM_READER_CONFIG_TERRAFORM_EXPORT",
+    "role_arn": "REPLACE_FROM_READER_CONFIG_TERRAFORM_EXPORT"
+  },
+  "concurrency": 2,
+  "projects": [
+    "REPLACE_WITH_MANAGED_PROJECT_NAMESPACE"
+  ],
+  "clone_storage_class": "sandbox-backup-retain",
+  "snapshot_class": "sandbox-snapshot-retain",
+  "clone_kms_key_id": "REPLACE_FROM_REVIEWED_TERRAFORM_WORKSPACE_KMS_KEY_ID",
+  "job_controller": {
+    "kind": "control_plane",
+    "username": "system:kube-controller-manager"
+  },
+  "password_secret": "sbx-bkey-password-v1",
+  "signing_private_secret": "sbx-bkey-signing-v1"
+}

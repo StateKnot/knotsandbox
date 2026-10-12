@@ -1,0 +1,77 @@
+# Historical contract reference only. Production uses prepare.py and render.py;
+# see docs/volume-installation.md for separate identity and activation outputs.
+# Render all REPLACE_WITH_* fields, create the referenced ConfigMap/Secret and
+# install rbac.yaml plus the mTLS admission webhook before enabling this worker.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox-volume-deleter
+  namespace: sandbox-system
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {app: sandbox-volume-deleter}
+  template:
+    metadata:
+      labels: {app: sandbox-volume-deleter}
+    spec:
+      serviceAccountName: sandbox-volume-deleter
+      nodeSelector: {sandbox.platform/node-pool: platform}
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector: {matchLabels: {app: sandbox-volume-deleter}}
+      containers:
+        - name: controller
+          image: REPLACE_WITH_REGISTRY/sandbox-platform@sha256:REPLACE_WITH_VERIFIED_IMAGE_DIGEST
+          command: [/usr/local/bin/sandboxd]
+          args: [--role, volume-deleter]
+          env:
+            - name: SANDBOX_DATABASE_URL
+              valueFrom: {secretKeyRef: {name: sandbox-volume-deleter-database, key: url}}
+            - {name: SANDBOX_DB_MAX_CONNECTIONS, value: '10'}
+            - {name: SANDBOX_VOLUME_DELETION_CONFIG_FILE, value: /etc/sandbox-volume/config.json}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: '1', memory: 512Mi}
+          volumeMounts:
+            - {name: configuration, mountPath: /etc/sandbox-volume, readOnly: true}
+            - {name: database-ca, mountPath: /etc/sandbox-db, readOnly: true}
+            - {name: cloud-identity, mountPath: /var/run/sandbox-cloud, readOnly: true}
+      volumes:
+        - name: configuration
+          configMap: {name: sandbox-volume-deleter-config}
+        - name: database-ca
+          configMap: {name: sandbox-database-ca}
+        - name: cloud-identity
+          projected:
+            defaultMode: 0440
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  audience: REPLACE_WITH_WORKLOAD_AUDIENCE
+                  expirationSeconds: 600
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sandbox-volume-deleter
+  namespace: sandbox-system
+spec:
+  minAvailable: 1
+  selector: {matchLabels: {app: sandbox-volume-deleter}}

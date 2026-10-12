@@ -1,0 +1,42 @@
+---
+- name: Establish policies before always-enforcing CNI initializes
+  hosts: kube_control_plane[0]
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Create protected manifest directory
+      ansible.builtin.file:
+        path: /etc/kubernetes/sandbox-bootstrap
+        state: directory
+        mode: '0700'
+    - name: Copy official locked Cilium policy CRD
+      ansible.builtin.copy:
+        src: '{{ sandbox_artifact_cache }}/cilium-policy-crd.yaml'
+        dest: /etc/kubernetes/sandbox-bootstrap/cilium-policy-crd.yaml
+        mode: '0600'
+    - name: Copy verified Cilium chart for the sole Kubespray configuration owner
+      ansible.builtin.copy:
+        src: '{{ sandbox_artifact_cache }}/cilium/'
+        dest: /etc/kubernetes/sandbox-bootstrap/cilium-chart/
+        owner: root
+        group: root
+        mode: preserve
+    - name: Establish Cilium policy API
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, --kubeconfig=/etc/kubernetes/admin.conf, apply, --server-side, --field-manager=sandbox-cluster, -f, /etc/kubernetes/sandbox-bootstrap/cilium-policy-crd.yaml]
+      register: crd_applied
+      changed_when: "'configured' in crd_applied.stdout or 'created' in crd_applied.stdout"
+    - name: Wait for policy API establishment
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, --kubeconfig=/etc/kubernetes/admin.conf, wait, --for=condition=Established, crd/ciliumclusterwidenetworkpolicies.cilium.io, --timeout=60s]
+      changed_when: false
+    - name: Copy validated bootstrap policies
+      ansible.builtin.copy:
+        src: '{{ sandbox_deployment_dir }}/trusted-policies.yaml'
+        dest: /etc/kubernetes/sandbox-bootstrap/trusted-policies.yaml
+        mode: '0600'
+    - name: Create trusted connectivity without permitting tenant or init endpoints
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, --kubeconfig=/etc/kubernetes/admin.conf, apply, --server-side, --field-manager=sandbox-cluster, -f, /etc/kubernetes/sandbox-bootstrap/trusted-policies.yaml]
+      register: policies_applied
+      changed_when: "'configured' in policies_applied.stdout or 'created' in policies_applied.stdout"

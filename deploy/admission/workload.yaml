@@ -1,0 +1,115 @@
+# Historical structure reference only. Production installation uses render.py
+# and docs/admission-installation.md; this file contains placeholders/old probes.
+# This is not a cloud certification claim.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sandbox-admission
+  namespace: sandbox-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sandbox-admission-read-state
+rules:
+  - apiGroups: [""]
+    resources: [namespaces, nodes, pods, persistentvolumes, persistentvolumeclaims]
+    verbs: [get]
+  - apiGroups: [cilium.io]
+    resources: [ciliumnetworkpolicies]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sandbox-admission-read-state
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sandbox-admission-read-state
+subjects:
+  - kind: ServiceAccount
+    name: sandbox-admission
+    namespace: sandbox-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox-admission
+  namespace: sandbox-system
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {app: sandbox-admission}
+  template:
+    metadata:
+      labels: {app: sandbox-admission}
+    spec:
+      serviceAccountName: sandbox-admission
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels: {app: sandbox-admission}
+      containers:
+        - name: admission
+          image: REPLACE_WITH_REGISTRY/sandbox-platform@sha256:REPLACE_WITH_VERIFIED_IMAGE_DIGEST
+          command: [/usr/local/bin/sandbox-admission]
+          args: [--config, /etc/sandbox/config.json, --tls-certificate, /etc/sandbox-tls/tls.crt, --tls-key, /etc/sandbox-tls/tls.key, --apiserver-client-ca, /etc/sandbox-client-ca/ca.crt]
+          env:
+            - name: SANDBOX_ADMISSION_DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: sandbox-admission-database, key: url}
+          ports: [{name: webhook, containerPort: 8443}]
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 250m, memory: 256Mi}
+            limits: {cpu: '1', memory: 512Mi}
+          # No unauthenticated HTTP listener. Startup checks DB role/schema and
+          # verified Kubernetes configuration; TCP only checks listener liveness.
+          readinessProbe: {tcpSocket: {port: webhook}, periodSeconds: 5}
+          livenessProbe: {tcpSocket: {port: webhook}, periodSeconds: 10}
+          volumeMounts:
+            - {name: config, mountPath: /etc/sandbox, readOnly: true}
+            - {name: tls, mountPath: /etc/sandbox-tls, readOnly: true}
+            - {name: client-ca, mountPath: /etc/sandbox-client-ca, readOnly: true}
+      volumes:
+        - name: config
+          configMap: {name: sandbox-admission-config}
+        - name: tls
+          secret: {secretName: sandbox-admission-server-tls, defaultMode: 0440}
+        - name: client-ca
+          configMap: {name: sandbox-apiserver-client-ca}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sandbox-admission
+  namespace: sandbox-system
+spec:
+  selector: {app: sandbox-admission}
+  ports: [{name: https, port: 443, targetPort: webhook}]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sandbox-admission
+  namespace: sandbox-system
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: sandbox-admission}

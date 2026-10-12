@@ -1,0 +1,63 @@
+{
+  "builder_image": "rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e",
+  "crt_files": [
+    "Scrt1.o",
+    "crti.o",
+    "crtn.o",
+    "crtbeginS.o",
+    "crtendS.o",
+    "libgcc.a"
+  ],
+  "crt_packages": [
+    "libc6-dev",
+    "libgcc-12-dev"
+  ],
+  "profile": "gnu-dynamic-v1",
+  "rust_version": "1.98.1",
+  "sqlite": {
+    "flags": [
+      "-O2",
+      "-fPIC",
+      "-ffunction-sections",
+      "-fdata-sections",
+      "-DSQLITE_CORE",
+      "-DSQLITE_DEFAULT_FOREIGN_KEYS=1",
+      "-DSQLITE_ENABLE_API_ARMOR",
+      "-DSQLITE_ENABLE_COLUMN_METADATA",
+      "-DSQLITE_ENABLE_DBSTAT_VTAB",
+      "-DSQLITE_ENABLE_FTS3",
+      "-DSQLITE_ENABLE_FTS3_PARENTHESIS",
+      "-DSQLITE_ENABLE_FTS5",
+      "-DSQLITE_ENABLE_JSON1",
+      "-DSQLITE_ENABLE_LOAD_EXTENSION=1",
+      "-DSQLITE_ENABLE_MEMORY_MANAGEMENT",
+      "-DSQLITE_ENABLE_RTREE",
+      "-DSQLITE_ENABLE_STAT4",
+      "-DSQLITE_SOUNDEX",
+      "-DSQLITE_THREADSAFE=1",
+      "-DSQLITE_USE_URI",
+      "-DHAVE_USLEEP=1",
+      "-DHAVE_ISNAN",
+      "-D_POSIX_THREAD_SAFE_FUNCTIONS",
+      "-DHAVE_LOCALTIME_R",
+      "-DSQLITE_ENABLE_UNLOCK_NOTIFY"
+    ],
+    "sha256": "0e9483900e92cd5de8fd48d16bf9200145a61f7fd5be542a5ac81d8a9516eb9c",
+    "sha3_256": "454e45f61c6bd75b7420e7190732dea03ce6639c63ada47bbc592f67fc340338",
+    "size": 3283177,
+    "source_id": "2026-07-24 19:02:57 bf7c7f30031888f4e796e429ab3978879485813aaca6f641c7b33e4e09459bcc",
+    "sqlite3_c_sha256": "b1dd5d74ec7f29055a6684fa06fb3c2f6821c87dd38f9a458dfd2e8a1db28189",
+    "sqlite3_h_sha256": "919e7f2e8ed1d8f56ac17b412b8971c76aa5d1a879752cc6058f75e7d5910e1d",
+    "url": "https://www.sqlite.org/2026/sqlite-autoconf-3530400.tar.gz",
+    "version": "3.53.4"
+  },
+  "sysroot_files": [
+    "libstd",
+    "libpanic_unwind",
+    "libunwind",
+    "libcompiler_builtins",
+    "liblibc"
+  ],
+  "target": "x86_64-unknown-linux-gnu",
+  "version": 2
+}

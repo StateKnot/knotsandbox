@@ -1,0 +1,6 @@
+check-for-app-update: false
+quiet: true
+
+javascript:
+  search-remote-licenses: false
+  include-dev-dependencies: true

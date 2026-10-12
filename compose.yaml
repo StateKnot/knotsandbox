@@ -1,0 +1,72 @@
+# Local development dependencies only. This is not a production deployment.
+name: sandbox-platform-dev
+services:
+  postgres:
+    image: postgres:17.11-bookworm@sha256:639ab7ceb90e13123085b741fb31ef493fba25463002f6da665352e7b534b652
+    environment:
+      POSTGRES_USER: sandbox_dev_admin
+      POSTGRES_PASSWORD: ${SANDBOX_POSTGRES_ADMIN_PASSWORD:?Run scripts/dev-dependencies.sh init first}
+      POSTGRES_DB: postgres
+      SANDBOX_DB_PASSWORD: ${SANDBOX_DB_PASSWORD:?Missing generated development password}
+      SANDBOX_MIGRATION_DB_PASSWORD: ${SANDBOX_MIGRATION_DB_PASSWORD:?Missing generated development migration password}
+      SANDBOX_WORKER_DB_PASSWORD: ${SANDBOX_WORKER_DB_PASSWORD:?Missing generated development worker password}
+      SANDBOX_ADMISSION_DB_PASSWORD: ${SANDBOX_ADMISSION_DB_PASSWORD:?Missing generated development admission password}
+      SANDBOX_GATEWAY_DB_PASSWORD: ${SANDBOX_GATEWAY_DB_PASSWORD:?Missing generated development gateway password}
+      SANDBOX_FENCING_DB_PASSWORD: ${SANDBOX_FENCING_DB_PASSWORD:?Missing generated development fencing password}
+      SANDBOX_BACKUP_DB_PASSWORD: ${SANDBOX_BACKUP_DB_PASSWORD:?Missing generated development backup password}
+      SANDBOX_VOLUME_DELETER_DB_PASSWORD: ${SANDBOX_VOLUME_DELETER_DB_PASSWORD:?Missing generated development volume deleter password}
+      SANDBOX_TERMINATION_DB_PASSWORD: ${SANDBOX_TERMINATION_DB_PASSWORD:?Missing generated development termination password}
+      SANDBOX_KEYCLOAK_DB_PASSWORD: ${SANDBOX_KEYCLOAK_DB_PASSWORD:?Missing generated development password}
+    ports:
+      - "127.0.0.1:${SANDBOX_PG_PORT:-55432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./deploy/keycloak/postgres-init.sh:/docker-entrypoint-initdb.d/10-sandbox-databases.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U sandbox_dev_admin -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    stop_grace_period: 30s
+    mem_limit: 2g
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.0@sha256:b0f60d489d51c5d113390bdf5461d4c06e6051be026c05549f2e1e10ec352bcc
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak_dev
+      KC_DB_USERNAME: keycloak_dev
+      KC_DB_PASSWORD: ${SANDBOX_KEYCLOAK_DB_PASSWORD:?Missing generated development password}
+      KC_HOSTNAME: http://127.0.0.1:${SANDBOX_KEYCLOAK_PORT:-58080}
+      KC_BOOTSTRAP_ADMIN_USERNAME: sandbox-dev-admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${SANDBOX_KEYCLOAK_ADMIN_PASSWORD:?Missing generated development password}
+      KC_HEALTH_ENABLED: "true"
+      SANDBOX_KEYCLOAK_REALM: sandbox-dev
+      SANDBOX_MACHINE_CLIENT_ID: sandbox-dev-service
+      SANDBOX_MACHINE_CLIENT_SECRET: ${SANDBOX_MACHINE_CLIENT_SECRET:?Missing generated development secret}
+    ports:
+      - "127.0.0.1:${SANDBOX_KEYCLOAK_PORT:-58080}:8080"
+    volumes:
+      - ./deploy/keycloak/realm.template.json:/opt/keycloak/data/import/sandbox-dev-realm.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          bash -ec 'exec 3<>/dev/tcp/127.0.0.1/9000;
+          printf "GET /health/ready HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3;
+          IFS= read -r status <&3;
+          [[ "$$status" == *" 200 "* ]]'
+      interval: 10s
+      timeout: 5s
+      start_period: 120s
+      retries: 18
+    stop_grace_period: 30s
+    mem_limit: 1g
+    pids_limit: 512
+
+volumes:
+  postgres-data:

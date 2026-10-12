@@ -1,0 +1,6 @@
+# Preserve the checksum-locked upstream CRI schema byte for byte.
+vendor/cri/v0.36.4/api.proto -whitespace
+deploy/identity/vendor/26.8.0/kustomization.yml -whitespace
+
+# Preserve the upstream rclone license bytes, including its trailing blank line.
+deploy/backup/licenses/rclone.txt -whitespace

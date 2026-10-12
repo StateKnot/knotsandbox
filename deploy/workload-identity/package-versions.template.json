@@ -1,0 +1,12 @@
+{
+  "packages": {
+    "ca-certificates": null,
+    "chrony": null,
+    "nginx": null,
+    "openssh-server": null,
+    "openssl": null,
+    "python3.12": null,
+    "python3.12-venv": null
+  },
+  "ntp_server_ips": []
+}

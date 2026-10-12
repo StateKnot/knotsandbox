@@ -1,0 +1,875 @@
+#![allow(clippy::unwrap_used)]
+use super::*;
+use crate::{
+    auth::{AuthConfig, JwtAuthenticator},
+    bff_crypto::SessionKeys,
+    bff_oidc::{BrowserOidc, OidcSettings},
+    db::Database,
+    history::CursorSigner,
+};
+use anyhow::Context;
+use axum::response::{Sse, sse::Event};
+use base64::{
+    Engine as _,
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+};
+use jsonwebtoken::{Algorithm, EncodingKey, Header};
+use serde_json::{Value, json};
+use sqlx::{PgPool, postgres::PgPoolOptions};
+use std::{
+    collections::BTreeMap,
+    convert::Infallible,
+    sync::atomic::{AtomicUsize, Ordering},
+};
+use tokio::{net::TcpListener, sync::Mutex};
+
+const ISSUER: &str = "https://identity.bff.invalid/realms/sandbox";
+const ORIGIN: &str = "https://console.bff.invalid";
+const SECRET: &str = "FIXTURE_BROWSER_SECRET_0123456789ABCDEF";
+fn api_failure(error: ApiError) -> anyhow::Error {
+    anyhow::anyhow!(
+        "browser database call failed: {} {}",
+        error.status,
+        error.code
+    )
+}
+#[derive(Clone)]
+struct Provider {
+    nonce: Arc<Mutex<String>>,
+    mode: Arc<AtomicUsize>,
+    calls: Arc<AtomicUsize>,
+}
+struct Fixture {
+    owner: PgPool,
+    admin: PgPool,
+    database_name: String,
+    runtime: Arc<BrowserRuntime>,
+    tenant: Uuid,
+    principal: Uuid,
+    project: Uuid,
+    base: String,
+    client: reqwest::Client,
+    provider: Provider,
+    tasks: Vec<tokio::task::JoinHandle<()>>,
+    keys: tempfile::TempDir,
+}
+fn jwt(value: Value, id: bool) -> String {
+    let mut header = Header::new(Algorithm::RS256);
+    header.kid = Some("key-a".into());
+    header.typ = Some(if id { "JWT" } else { "at+jwt" }.into());
+    jsonwebtoken::encode(
+        &header,
+        &value,
+        &EncodingKey::from_rsa_der(include_bytes!("../tests/fixtures/auth/rsa-a.der")),
+    )
+    .unwrap()
+}
+impl Fixture {
+    async fn start() -> anyhow::Result<Self> {
+        let owner_url = url::Url::parse(&std::env::var("TEST_MIGRATION_DATABASE_URL")?)?;
+        let runtime_url = url::Url::parse(&std::env::var("TEST_DATABASE_URL")?)?;
+        anyhow::ensure!(
+            owner_url.path().ends_with("_test")
+                && runtime_url.path().ends_with("_test")
+                && owner_url.host_str() == Some("127.0.0.1")
+                && owner_url.host_str() == runtime_url.host_str()
+                && owner_url.port() == runtime_url.port(),
+            "local disposable PostgreSQL required"
+        );
+        let database_name = format!("sandbox_bff_{}_test", Uuid::new_v4().simple());
+        let mut admin_url = owner_url.clone();
+        admin_url.set_path("/postgres");
+        if let Ok(password) = std::env::var("SANDBOX_POSTGRES_ADMIN_PASSWORD") {
+            admin_url
+                .set_username("sandbox_dev_admin")
+                .map_err(|_| anyhow::anyhow!("invalid local administrator identity"))?;
+            admin_url
+                .set_password(Some(&password))
+                .map_err(|_| anyhow::anyhow!("invalid local administrator credential"))?;
+        }
+        let admin = PgPoolOptions::new()
+            .max_connections(2)
+            .connect(admin_url.as_str())
+            .await?;
+        anyhow::ensure!(
+            owner_url
+                .username()
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_'),
+            "fixed local migration identity required"
+        );
+        sqlx::query(&format!(
+            "CREATE DATABASE {database_name} OWNER {}",
+            owner_url.username()
+        ))
+        .execute(&admin)
+        .await?;
+        let mut owner_target = owner_url.clone();
+        owner_target.set_path(&database_name);
+        let mut runtime_target = runtime_url;
+        runtime_target.set_path(&database_name);
+        let owner = PgPoolOptions::new()
+            .max_connections(8)
+            .connect(owner_target.as_str())
+            .await?;
+        sqlx::migrate!().run(&owner).await?;
+        let formal: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM _sqlx_migrations WHERE version=37 AND success)",
+        )
+        .fetch_one(&owner)
+        .await?;
+        anyhow::ensure!(
+            formal,
+            "BFF fixture requires normally applied migration 0037"
+        );
+        sqlx::raw_sql(include_str!("../scripts/sql/roles.sql"))
+            .execute(&owner)
+            .await?;
+        sqlx::raw_sql(include_str!("../scripts/sql/browser-role.sql"))
+            .execute(&owner)
+            .await?;
+        let tenant = Uuid::new_v4();
+        let principal = Uuid::new_v4();
+        let project = Uuid::new_v4();
+        let epoch = Uuid::new_v4();
+        let mut tx = owner.begin().await?;
+        sqlx::query("SELECT set_config('app.tenant_id',$1,true)")
+            .bind(tenant.to_string())
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("INSERT INTO platform_configuration(singleton,cluster_epoch,safe_mode) VALUES(true,$1,false)").bind(epoch).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO tenants(id,name) VALUES($1,'Browser test tenant')")
+            .bind(tenant)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "INSERT INTO principals(id,kind,display_name) VALUES($1,'USER','Browser test user')",
+        )
+        .bind(principal)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("INSERT INTO principal_identities(principal_id,issuer,subject) VALUES($1,$2,'browser-user')").bind(principal).bind(ISSUER).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO tenant_principals(tenant_id,principal_id,display_name) VALUES($1,$2,'Browser user')").bind(tenant).bind(principal).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO projects(id,tenant_id,name,max_ttl_seconds) VALUES($1,$2,'Browser project',86400)").bind(project).bind(tenant).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO grants(tenant_id,project_id,principal_id,action) VALUES($1,$2,$3,'instances:read')").bind(tenant).bind(project).bind(principal).execute(&mut *tx).await?;
+        tx.commit().await?;
+        let provider = Provider {
+            nonce: Arc::new(Mutex::new(String::new())),
+            mode: Arc::new(AtomicUsize::new(0)),
+            calls: Arc::new(AtomicUsize::new(0)),
+        };
+        let idp=Router::new().route("/jwks",get(||async{Json(json!({"keys":[serde_json::from_str::<Value>(include_str!("../tests/fixtures/auth/jwk-a.json")).unwrap()]}))})).route("/token",post(provider_token)).with_state(provider.clone());
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let idp_base = format!("http://{}", listener.local_addr()?);
+        let idp_task = tokio::spawn(async move {
+            axum::serve(listener, idp).await.unwrap();
+        });
+        let settings = OidcSettings {
+            issuer: ISSUER.into(),
+            authorization_url: "https://identity.bff.invalid/auth".into(),
+            token_url: format!("{idp_base}/token"),
+            jwks_url: format!("{idp_base}/jwks"),
+            client_id: "sandbox-browser".into(),
+            public_origin: ORIGIN.into(),
+            scopes: vec!["openid".into(), "sandbox:access".into()],
+        };
+        let auth = JwtAuthenticator::new(AuthConfig {
+            scope_profile: Default::default(),
+            issuer: ISSUER.into(),
+            audience: "sandbox-api".into(),
+            jwks_url: settings.jwks_url.clone(),
+            required_scopes: vec!["sandbox:access".into()],
+            jwks_ttl_seconds: 60,
+            clock_skew_seconds: 0,
+            allow_loopback_http: true,
+            max_token_lifetime_seconds: 300,
+        })?;
+        let keys = tempfile::tempdir()?;
+        let path = keys.path().join("session-keys.json");
+        std::fs::write(
+            &path,
+            json!({"active":"a","keys":[{"id":"a","key":URL_SAFE_NO_PAD.encode([42;32])}]})
+                .to_string(),
+        )?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        }
+        let database = Database::connect(runtime_target.as_str(), 16).await?;
+        database.verify_runtime_role().await?;
+        let app = Arc::new(AppState {
+            database,
+            auth,
+            cursor_signer: CursorSigner::from_json(
+                &json!({"active":{"kid":"a","key_base64":STANDARD.encode([43;32])},"previous":[]})
+                    .to_string(),
+            )?,
+            output_reader: None,
+            metrics: None,
+            default_ttl_seconds: 3600,
+            max_ttl_seconds: 86400,
+        });
+        let runtime = Arc::new(BrowserRuntime::new(
+            app,
+            BrowserConfig {
+                oidc: BrowserOidc::test_transport(settings, SECRET.into())?,
+                keys: SessionKeys::from_file(&path)?,
+            },
+        ));
+        let api = Router::new()
+            .route(
+                "/v1/probe",
+                get(|| async { StatusCode::NO_CONTENT }).post(|| async { StatusCode::NO_CONTENT }),
+            )
+            .route(
+                "/v1/test-stream",
+                get(|| async {
+                    let events = futures_util::stream::unfold(0u64, |n| async move {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        Some((
+                            Ok::<_, Infallible>(Event::default().data(n.to_string())),
+                            n + 1,
+                        ))
+                    });
+                    Sse::new(events)
+                }),
+            )
+            .route(
+                "/v1/test-binary",
+                get(|| async {
+                    let bytes = futures_util::stream::unfold(0u64, |n| async move {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        Some((Ok::<_, Infallible>(n.to_string()), n + 1))
+                    });
+                    (
+                        [("content-type", "application/octet-stream")],
+                        Body::from_stream(bytes),
+                    )
+                }),
+            );
+        let api = crate::api::router_with_shutdown(
+            runtime.app.clone(),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .merge(api);
+        let router = runtime
+            .clone()
+            .attach(api)
+            .layer(middleware::from_fn(crate::api::request_boundary));
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let base = format!("http://{}", listener.local_addr()?);
+        let api_task = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_secs(20))
+            .build()?;
+        Ok(Self {
+            owner,
+            admin,
+            database_name,
+            runtime,
+            tenant,
+            principal,
+            project,
+            base,
+            client,
+            provider,
+            tasks: vec![idp_task, api_task],
+            keys,
+        })
+    }
+    async fn login(&self) -> anyhow::Result<(String, String)> {
+        let response = self
+            .client
+            .post(format!("{}/auth/login", self.base))
+            .header("origin", ORIGIN)
+            .json(&json!({"tenant_id":self.tenant}))
+            .send()
+            .await?;
+        anyhow::ensure!(
+            response.status() == StatusCode::OK,
+            "login begin status {}",
+            response.status()
+        );
+        let binding = response.headers()["set-cookie"]
+            .to_str()?
+            .split(';')
+            .next()
+            .unwrap()
+            .to_owned();
+        let value: Value = response.json().await?;
+        let url = url::Url::parse(value["authorization_url"].as_str().unwrap())?;
+        let params = url.query_pairs().into_owned().collect::<BTreeMap<_, _>>();
+        *self.provider.nonce.lock().await = params["nonce"].clone();
+        let response = self
+            .client
+            .get(format!("{}/auth/callback", self.base))
+            .query(&[
+                ("state", &params["state"]),
+                ("code", &"fixture-code".into()),
+            ])
+            .header("cookie", binding)
+            .send()
+            .await?;
+        anyhow::ensure!(
+            response.status() == StatusCode::SEE_OTHER,
+            "login callback status {} body {}",
+            response.status(),
+            response.text().await?
+        );
+        let header = response
+            .headers()
+            .get_all("set-cookie")
+            .iter()
+            .map(|h| h.to_str().unwrap())
+            .find(|h| h.starts_with(SESSION_COOKIE))
+            .unwrap();
+        assert!(header.contains("Secure; HttpOnly; SameSite=Strict"));
+        assert!(!header.contains("Domain="));
+        let cookie = header.split(';').next().unwrap().to_owned();
+        let response = self
+            .client
+            .get(format!("{}/auth/session", self.base))
+            .header("cookie", &cookie)
+            .send()
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        let view: Value = response.json().await?;
+        assert_eq!(view["tenant_id"], self.tenant.to_string());
+        assert_eq!(view["principal_id"], self.principal.to_string());
+        assert!(view.get("access_token").is_none());
+        assert!(view.get("refresh_token").is_none());
+        Ok((cookie, view["csrf_token"].as_str().unwrap().to_owned()))
+    }
+    async fn owner_sql(&self, sql: &str) -> anyhow::Result<()> {
+        let mut tx = self.owner.begin().await?;
+        sqlx::query("SELECT set_config('app.tenant_id',$1,true)")
+            .bind(self.tenant.to_string())
+            .execute(&mut *tx)
+            .await?;
+        sqlx::raw_sql(sql).execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+    async fn close(self) -> anyhow::Result<()> {
+        let owner_role = self.owner.connect_options().get_username().to_owned();
+        for t in self.tasks {
+            t.abort();
+            let _ = t.await;
+        }
+        self.runtime.app.database.pool.close().await;
+        self.owner.close().await;
+        drop(self.runtime);
+        drop(self.keys);
+        let peers:Vec<(String,String,String)>=sqlx::query_as("SELECT usename,COALESCE(state,''),COALESCE(wait_event,'') FROM pg_stat_activity WHERE datname=$1").bind(&self.database_name).fetch_all(&self.admin).await?;
+        let actual_owner: String =
+            sqlx::query_scalar("SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname=$1")
+                .bind(&self.database_name)
+                .fetch_one(&self.admin)
+                .await?;
+        anyhow::ensure!(
+            actual_owner == owner_role
+                && peers.iter().all(|(role, state, wait)| role == &owner_role
+                    && state == "idle"
+                    && wait == "ClientRead"),
+            "fixture cleanup refuses unexpected owner, active or foreign connections"
+        );
+        // Use only an ordinary DROP. An idle migration-owner socket can survive
+        // until process exit; retain that fixture and record separate cleanup.
+        match sqlx::query(&format!("DROP DATABASE {}", self.database_name))
+            .execute(&self.admin)
+            .await
+        {
+            Ok(_) => {}
+            Err(sqlx::Error::Database(ref e)) if e.code().as_deref() == Some("55006") => {
+                std::fs::create_dir_all(".local")?;
+                use std::io::Write;
+                let mut file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(".local/bff-test-cleanup-pending.jsonl")?;
+                writeln!(
+                    file,
+                    "{}",
+                    json!({"database":self.database_name,"owner":owner_role,"reason":"idle_fixture_owner_connection","ordinary_drop_after_test_process_exit":true})
+                )?;
+                eprintln!(
+                    "BFF fixture retained; ordinary cleanup task recorded in .local/bff-test-cleanup-pending.jsonl"
+                );
+            }
+            Err(error) => return Err(error.into()),
+        }
+        self.admin.close().await;
+        Ok(())
+    }
+}
+async fn provider_token(State(provider): State<Provider>, body: String) -> Response {
+    provider.calls.fetch_add(1, Ordering::SeqCst);
+    let params = url::form_urlencoded::parse(body.as_bytes())
+        .into_owned()
+        .collect::<BTreeMap<_, _>>();
+    if params
+        .get("grant_type")
+        .is_some_and(|v| v == "refresh_token")
+    {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+    if provider.mode.load(Ordering::SeqCst) == 1 {
+        return (
+            StatusCode::BAD_GATEWAY,
+            "PRIVATE_PROVIDER_BODY_MUST_NOT_ECHO",
+        )
+            .into_response();
+    }
+    let nonce = provider.nonce.lock().await.clone();
+    let now = Utc::now().timestamp();
+    Json(json!({"access_token":jwt(json!({"iss":ISSUER,"aud":"sandbox-api","sub":"browser-user","client_id":"sandbox-browser","jti":Uuid::new_v4(),"iat":now,"exp":now+240,"scope":"sandbox:access"}),false),"id_token":jwt(json!({"iss":ISSUER,"aud":"sandbox-browser","sub":"browser-user","iat":now,"exp":now+240,"nonce":nonce}),true),"refresh_token":"fixture-rotating-refresh","expires_in":240,"token_type":"Bearer"})).into_response()
+}
+#[tokio::test]
+#[ignore = "requires local disposable PostgreSQL and loopback TCP"]
+async fn browser_http_login_csrf_refresh_revocation_and_stream_close() -> anyhow::Result<()> {
+    let f = Fixture::start().await?;
+    let (cookie, csrf) = f.login().await?;
+    let db = &f.runtime.app.database;
+    assert!(
+        sqlx::query("SELECT payload FROM browser_sessions")
+            .fetch_all(&db.pool)
+            .await
+            .is_err()
+    );
+    let probe = |method: reqwest::Method| {
+        f.client
+            .request(method, format!("{}/v1/probe", f.base))
+            .header("cookie", &cookie)
+            .header("x-tenant-id", f.tenant.to_string())
+    };
+    assert_eq!(
+        probe(reqwest::Method::GET).send().await?.status(),
+        StatusCode::NO_CONTENT
+    );
+    let instances = || {
+        f.client
+            .get(format!("{}/v1/instances", f.base))
+            .query(&[("project_id", f.project.to_string())])
+            .header("cookie", &cookie)
+            .header("x-tenant-id", f.tenant.to_string())
+    };
+    assert_eq!(instances().send().await?.status(), StatusCode::OK);
+    f.owner_sql("UPDATE grants SET enabled=false WHERE action='instances:read'")
+        .await?;
+    assert_eq!(instances().send().await?.status(), StatusCode::FORBIDDEN);
+    f.owner_sql("UPDATE grants SET enabled=true WHERE action='instances:read'")
+        .await?;
+    assert_eq!(
+        probe(reqwest::Method::POST)
+            .header("origin", "https://attacker.invalid")
+            .header("x-csrf-token", &csrf)
+            .send()
+            .await?
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        probe(reqwest::Method::POST)
+            .header("origin", ORIGIN)
+            .send()
+            .await?
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        probe(reqwest::Method::POST)
+            .header("origin", ORIGIN)
+            .header("x-csrf-token", &csrf)
+            .send()
+            .await?
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        probe(reqwest::Method::GET)
+            .header("authorization", "Bearer untrusted")
+            .send()
+            .await?
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        f.client
+            .get(format!("{}/v1/probe", f.base))
+            .header("cookie", &cookie)
+            .header("x-tenant-id", Uuid::new_v4().to_string())
+            .send()
+            .await?
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    f.owner_sql(
+        "UPDATE browser_sessions SET access_expires_at=clock_timestamp()+interval '5 seconds'",
+    )
+    .await?;
+    let calls = f.provider.calls.load(Ordering::SeqCst);
+    let requests = (0..10).map(|_| {
+        f.client
+            .get(format!("{}/auth/session", f.base))
+            .header("cookie", &cookie)
+            .send()
+    });
+    let results = futures_util::future::join_all(requests).await;
+    assert!(
+        results
+            .iter()
+            .any(|r| r.as_ref().is_ok_and(|r| r.status() == StatusCode::OK))
+    );
+    for r in results {
+        assert!(matches!(
+            r?.status(),
+            StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
+        ));
+    }
+    assert_eq!(f.provider.calls.load(Ordering::SeqCst), calls + 1);
+    let mut stream = f
+        .client
+        .get(format!("{}/v1/test-stream", f.base))
+        .header("cookie", &cookie)
+        .header("x-tenant-id", f.tenant.to_string())
+        .send()
+        .await?;
+    assert_eq!(stream.status(), StatusCode::OK);
+    assert!(stream.chunk().await?.is_some());
+    let mut binary = f
+        .client
+        .get(format!("{}/v1/test-binary", f.base))
+        .header("cookie", &cookie)
+        .header("x-tenant-id", f.tenant.to_string())
+        .send()
+        .await?;
+    assert_eq!(binary.status(), StatusCode::OK);
+    assert!(binary.chunk().await?.is_some());
+    let response = f
+        .client
+        .post(format!("{}/auth/logout", f.base))
+        .header("cookie", &cookie)
+        .header("origin", ORIGIN)
+        .header("x-csrf-token", &csrf)
+        .send()
+        .await?;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    // Delay the consumer while the source keeps producing; authorization must
+    // close the server stream rather than waiting for a client heartbeat.
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(12);
+    loop {
+        let chunk = tokio::time::timeout_at(deadline, stream.chunk()).await?;
+        if chunk?.is_none() {
+            break;
+        }
+    }
+    loop {
+        let chunk = tokio::time::timeout_at(deadline, binary.chunk()).await?;
+        if chunk?.is_none() {
+            break;
+        }
+    }
+    assert_eq!(
+        probe(reqwest::Method::GET).send().await?.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let (cookie, _) = f.login().await?;
+    f.owner_sql("UPDATE browser_sessions SET access_expires_at=clock_timestamp()+interval '5 seconds' WHERE status='ACTIVE'").await?;
+    f.provider.mode.store(1, Ordering::SeqCst);
+    let calls = f.provider.calls.load(Ordering::SeqCst);
+    let response = f
+        .client
+        .get(format!("{}/auth/session", f.base))
+        .header("cookie", &cookie)
+        .send()
+        .await?;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(!response.text().await?.contains("PRIVATE_PROVIDER"));
+    assert_eq!(
+        f.client
+            .get(format!("{}/auth/session", f.base))
+            .header("cookie", &cookie)
+            .send()
+            .await?
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(f.provider.calls.load(Ordering::SeqCst), calls + 1);
+    f.provider.mode.store(0, Ordering::SeqCst);
+    let (cookie, _) = f.login().await?;
+    f.owner_sql("UPDATE tenant_principals SET enabled=false")
+        .await?;
+    assert_eq!(
+        f.client
+            .get(format!("{}/auth/session", f.base))
+            .header("cookie", &cookie)
+            .send()
+            .await?
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    f.owner_sql("UPDATE tenant_principals SET enabled=true")
+        .await?;
+    let (cookie, _) = f.login().await?;
+    sqlx::query("UPDATE platform_configuration SET cluster_epoch=$1")
+        .bind(Uuid::new_v4())
+        .execute(&f.owner)
+        .await?;
+    assert_eq!(
+        f.client
+            .get(format!("{}/auth/session", f.base))
+            .header("cookie", &cookie)
+            .send()
+            .await?
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    f.close().await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires local disposable PostgreSQL and loopback TCP"]
+async fn browser_challenge_binding_once_and_lock_wait_expiry() -> anyhow::Result<()> {
+    let f = Fixture::start().await?;
+    let response = f
+        .client
+        .post(format!("{}/auth/login", f.base))
+        .header("origin", ORIGIN)
+        .json(&json!({"tenant_id":f.tenant}))
+        .send()
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let binding = response.headers()["set-cookie"]
+        .to_str()?
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    let value: Value = response.json().await?;
+    let url = url::Url::parse(value["authorization_url"].as_str().unwrap())?;
+    let params = url.query_pairs().into_owned().collect::<BTreeMap<_, _>>();
+    *f.provider.nonce.lock().await = params["nonce"].clone();
+    let callback = || {
+        f.client
+            .get(format!("{}/auth/callback", f.base))
+            .query(&[("state", &params["state"]), ("code", &"once-code".into())])
+    };
+    let wrong = format!("{LOGIN_COOKIE}={}", random_token()?);
+    assert_eq!(
+        callback().header("cookie", wrong).send().await?.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(f.provider.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        callback().header("cookie", &binding).send().await?.status(),
+        StatusCode::SEE_OTHER
+    );
+    assert_eq!(
+        callback().header("cookie", &binding).send().await?.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(f.provider.calls.load(Ordering::SeqCst), 1);
+    let db = f.runtime.app.database.clone();
+    let epoch = db.browser_epoch().await.map_err(api_failure)?;
+    let challenge = Uuid::new_v4();
+    let state = hash_cookie(&random_token()?).map_err(api_failure)?;
+    let binding = hash_cookie(&random_token()?).map_err(api_failure)?;
+    let encrypted =
+        f.runtime
+            .config
+            .keys
+            .encrypt(Purpose::Login, challenge, epoch, b"private challenge")?;
+    assert!(
+        db.browser_login_create(challenge, f.tenant, epoch, &state, &binding, &encrypted)
+            .await
+            .map_err(api_failure)?
+    );
+    assert!(
+        db.browser_login_consume(&state, &binding)
+            .await
+            .map_err(api_failure)?
+            .is_some()
+    );
+    let mut lock = f.owner.begin().await?;
+    sqlx::query("SELECT id FROM principals WHERE id=$1 FOR UPDATE")
+        .bind(f.principal)
+        .fetch_one(&mut *lock)
+        .await?;
+    let session = Uuid::new_v4();
+    let hash = hash_cookie(&random_token()?).map_err(api_failure)?;
+    let csrf = hash_cookie(&random_token()?).map_err(api_failure)?;
+    let payload =
+        f.runtime
+            .config
+            .keys
+            .encrypt(Purpose::Session, session, epoch, b"private session")?;
+    let expiry = Utc::now() + chrono::Duration::seconds(1);
+    let create = tokio::spawn(async move {
+        db.browser_session_create(
+            challenge,
+            session,
+            hash,
+            csrf,
+            ISSUER.into(),
+            "browser-user".into(),
+            expiry,
+            payload,
+        )
+        .await
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let waiting:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=$1 AND wait_event_type='Lock' AND query LIKE 'SELECT sandbox_browser_session_create%')").bind(&f.database_name).fetch_one(&f.admin).await?;
+    assert!(
+        waiting,
+        "the create attempt must actually wait on the principal lock"
+    );
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    lock.commit().await?;
+    assert!(!create.await?.map_err(api_failure)?);
+    let mut tx = f.owner.begin().await?;
+    sqlx::query("SELECT set_config('app.tenant_id',$1,true)")
+        .bind(f.tenant.to_string())
+        .execute(&mut *tx)
+        .await?;
+    let inserted: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM browser_sessions WHERE id=$1)")
+            .bind(session)
+            .fetch_one(&mut *tx)
+            .await?;
+    assert!(!inserted);
+    tx.commit().await?;
+    f.close().await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires local disposable PostgreSQL and loopback TCP"]
+async fn browser_session_idle_abandoned_refresh_and_retention_cleanup() -> anyhow::Result<()> {
+    let f = Fixture::start().await.context("retention fixture start")?;
+    let formal: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM _sqlx_migrations WHERE version=37 AND success)",
+    )
+    .fetch_one(&f.owner)
+    .await
+    .context("formal browser migration query")?;
+    assert_eq!(f.runtime.check_schema().await.is_ok(), formal);
+    let (cookie, _) = f.login().await.context("first retention login")?;
+    f.owner_sql("UPDATE browser_sessions SET idle_expires_at=clock_timestamp()-interval '1 second' WHERE status='ACTIVE'").await?;
+    assert_eq!(
+        f.client
+            .get(format!("{}/auth/session", f.base))
+            .header("cookie", &cookie)
+            .send()
+            .await?
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let (cookie, csrf) = f.login().await.context("second retention login")?;
+    f.owner_sql("UPDATE browser_sessions SET status='REFRESHING',refresh_started_at=clock_timestamp()-interval '16 seconds',version=version+1 WHERE status='ACTIVE'").await?;
+    let calls = f.provider.calls.load(Ordering::SeqCst);
+    assert_eq!(
+        f.client
+            .get(format!("{}/auth/session", f.base))
+            .header("cookie", &cookie)
+            .send()
+            .await?
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(f.provider.calls.load(Ordering::SeqCst), calls);
+    assert_eq!(
+        f.client
+            .post(format!("{}/auth/logout", f.base))
+            .header("origin", ORIGIN)
+            .header("cookie", &cookie)
+            .header("x-csrf-token", &csrf)
+            .send()
+            .await?
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    let _ = f.login().await.context("third retention login")?;
+    f.owner_sql(
+        "UPDATE browser_session_routes SET expires_at=clock_timestamp()-interval '1 second'",
+    )
+    .await?;
+    let changed: i64 = sqlx::query_scalar("SELECT sandbox_browser_cleanup($1)")
+        .bind(Uuid::new_v4())
+        .fetch_one(&f.runtime.app.database.pool)
+        .await
+        .context("retention cleanup scrub query")?;
+    assert!(changed > 0);
+    let mut tx = f.owner.begin().await?;
+    sqlx::query("SELECT set_config('app.tenant_id',$1,true)")
+        .bind(f.tenant.to_string())
+        .execute(&mut *tx)
+        .await?;
+    let remaining: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM browser_sessions WHERE payload IS NOT NULL")
+            .fetch_one(&mut *tx)
+            .await
+            .context("retention ciphertext count")?;
+    assert_eq!(remaining, 0);
+    tx.commit().await?;
+    f.owner_sql(
+        "UPDATE browser_session_routes SET expires_at=clock_timestamp()-interval '31 days'",
+    )
+    .await?;
+    sqlx::query("SELECT sandbox_browser_cleanup($1)")
+        .bind(Uuid::new_v4())
+        .execute(&f.runtime.app.database.pool)
+        .await
+        .context("retention route count")?;
+    let routes: i64 = sqlx::query_scalar("SELECT count(*) FROM browser_session_routes")
+        .fetch_one(&f.owner)
+        .await?;
+    assert_eq!(routes, 0);
+    let mut tx = f.owner.begin().await?;
+    sqlx::query("SELECT set_config('app.tenant_id',$1,true)")
+        .bind(f.tenant.to_string())
+        .execute(&mut *tx)
+        .await?;
+    let audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_events WHERE action LIKE 'browser_sessions:%'",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .context("retention audit count")?;
+    assert!(audits > 0);
+    tx.commit().await?;
+    f.close()
+        .await
+        .context("retention ordinary fixture close")?;
+    Ok(())
+}
+
+#[test]
+fn browser_cookie_capabilities_reject_duplicates_and_noncanonical_tokens() {
+    let token = random_token().unwrap();
+    let mut h = HeaderMap::new();
+    h.insert(
+        "cookie",
+        HeaderValue::from_str(&format!("{SESSION_COOKIE}={token}")).unwrap(),
+    );
+    assert_eq!(cookie(&h, SESSION_COOKIE).unwrap(), Some(token.clone()));
+    h.append(
+        "cookie",
+        HeaderValue::from_str(&format!("{SESSION_COOKIE}={token}")).unwrap(),
+    );
+    assert!(cookie(&h, SESSION_COOKIE).is_err());
+    h.clear();
+    h.insert(
+        "cookie",
+        HeaderValue::from_static("__Host-sandbox-session=invalid"),
+    );
+    assert!(cookie(&h, SESSION_COOKIE).is_err());
+    assert!(digest("invalid+state").is_err());
+    assert!(digest(&"s".repeat(22)).is_ok());
+}

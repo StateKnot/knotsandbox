@@ -1,0 +1,41 @@
+# Apply LAST, after every apiserver has its dedicated mTLS client configuration
+# and the service has passed a signed probe. Never change failurePolicy to Ignore.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: sandbox-runtime-protection
+webhooks:
+  - name: runtime.sandbox.platform
+    admissionReviewVersions: [v1]
+    sideEffects: NoneOnDryRun
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    timeoutSeconds: 5
+    clientConfig:
+      service:
+        namespace: sandbox-system
+        name: sandbox-admission
+        path: /validate
+        port: 443
+      caBundle: REPLACE_WITH_BASE64_SERVER_CA_PEM
+    rules:
+      - operations: [CREATE, UPDATE, DELETE, CONNECT]
+        apiGroups: ['']
+        apiVersions: [v1]
+        resources: [pods, pods/status, pods/binding, pods/ephemeralcontainers, pods/exec, pods/attach, pods/portforward, pods/resize, pods/eviction, persistentvolumeclaims, persistentvolumeclaims/status, namespaces, namespaces/status, namespaces/finalize]
+        scope: '*'
+      - operations: [UPDATE, DELETE]
+        apiGroups: ['']
+        apiVersions: [v1]
+        resources: [persistentvolumes, persistentvolumes/status]
+        scope: Cluster
+      - operations: [CREATE, UPDATE, DELETE]
+        apiGroups: [cilium.io]
+        apiVersions: [v2]
+        resources: [ciliumnetworkpolicies, ciliumnetworkpolicies/status]
+        scope: Namespaced
+      - operations: [CREATE, UPDATE, DELETE]
+        apiGroups: [networking.k8s.io]
+        apiVersions: [v1]
+        resources: [networkpolicies]
+        scope: Namespaced

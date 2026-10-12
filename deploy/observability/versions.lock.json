@@ -1,0 +1,12 @@
+{
+  "status": "candidate-awaiting-cloud-and-runtime-certification",
+  "prometheus_version": "3.13.4",
+  "prometheus_image": "quay.io/prometheus/prometheus@sha256:87861b8cf91579109319ebc300f3f1060e6da9c05d6ae8ad15a20c879e84e32e",
+  "linux_amd64_manifest": "sha256:2b23972d85f7f1350cde18fb61239d6fc8669a5b8fe162ab569373d3ad3463d2",
+  "linux_arm64_manifest": "sha256:765261de302accc2aa2fa1c74aed31ce51c0acd92a0a55406903dbacc18ea39c",
+  "reviewed_on": "2026-10-03",
+  "sources": [
+    "https://prometheus.io/download/",
+    "https://prometheus.io/docs/introduction/release-cycle/"
+  ]
+}

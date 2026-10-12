@@ -1,0 +1,225 @@
+---
+- name: Install guarded runtime on isolated Kata nodes
+  hosts: kata
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  roles:
+    - role: kubespray_defaults
+  pre_tasks:
+    - name: Require exact bootstrap host and preserved quarantine
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == 'Ubuntu'
+          - ansible_facts.distribution_version == '24.04'
+          - ansible_facts.architecture == 'x86_64'
+          - ansible_facts.kernel == sandbox_installation.settings.host_kernel
+          - "'sandbox.platform/unverified=true:NoSchedule' in node_taints"
+          - cri_socket == 'unix:///run/sandbox-nodeguard/cri.sock'
+          - not kata_containers_enabled | bool
+    - name: Fetch actual cluster Node identity through the trusted control plane
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, node, '{{ inventory_hostname }}', -o, json]
+      delegate_to: '{{ groups.kube_control_plane[0] }}'
+      changed_when: false
+      register: guard_node
+    - name: Fetch existing runtime classes before enabling a host handler
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, runtimeclasses, -o, json]
+      delegate_to: '{{ groups.kube_control_plane[0] }}'
+      changed_when: false
+      register: guard_runtime_classes
+    - name: Require exact Node UID, private address and no running tenant runtime
+      ansible.builtin.assert:
+        that:
+          - (guard_node.stdout | from_json).metadata.uid == sandbox_enrollment_node_uid
+          - (guard_node.stdout | from_json).metadata.labels['sandbox.platform/node-pool'] == 'kata'
+          - ((guard_node.stdout | from_json).spec.taints | selectattr('key','equalto','sandbox.platform/unverified') | selectattr('value','equalto','true') | selectattr('effect','equalto','NoSchedule') | list | length) == 1
+          - (guard_runtime_classes.stdout | from_json).items | length == 0
+          - ((guard_node.stdout | from_json).status.addresses | selectattr('type','equalto','InternalIP') | map(attribute='address') | list) == [ip]
+    - name: Refuse existing enrollment and implicit replacement
+      ansible.builtin.stat:
+        path: '{{ item }}'
+      loop: [/var/lib/sandbox-nodeguard/initialized.json, /etc/sandbox-nodeguard/config.json]
+      register: prior_enrollment
+    - name: Keep upgrades on a separate fenced maintenance path
+      ansible.builtin.assert:
+        that: prior_enrollment.results | selectattr('stat.exists') | list | length == 0
+        fail_msg: This installer cannot replace enrolled hosts or erase their durable journal
+    - name: Read actual boot ID
+      ansible.builtin.slurp:
+        src: /proc/sys/kernel/random/boot_id
+      register: guard_boot
+    - name: Ensure kubelet has observed this exact boot
+      ansible.builtin.assert:
+        that: guard_boot.content | b64decode | trim == (guard_node.stdout | from_json).status.nodeInfo.bootID
+  tasks:
+    - name: Create private configuration and binary directories
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      loop: [/etc/sandbox-nodeguard, /etc/sandbox-nodeguard/tls, /var/lib/sandbox-nodeguard, /usr/local/libexec]
+    - name: Install reviewed Linux amd64 nodeguard binary
+      ansible.builtin.copy:
+        src: '{{ sandbox_nodeguard_settings.binary_file }}'
+        dest: /usr/local/libexec/sandbox-nodeguard
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Verify transferred release binary before execution
+      ansible.builtin.stat:
+        path: /usr/local/libexec/sandbox-nodeguard
+        checksum_algorithm: sha256
+      register: guard_binary
+    - name: Require release checksum
+      ansible.builtin.assert:
+        that: guard_binary.stat.checksum == sandbox_nodeguard_settings.binary_sha256
+    - name: Install node-specific certificate material
+      ansible.builtin.copy:
+        src: '{{ item.source }}'
+        dest: '/etc/sandbox-nodeguard/tls/{{ item.name }}'
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+      loop:
+        - source: '{{ sandbox_nodeguard_settings.nodes[inventory_hostname].server_certificate_file }}'
+          name: server.pem
+        - source: '{{ sandbox_nodeguard_settings.nodes[inventory_hostname].server_key_file }}'
+          name: server-key.pem
+        - source: '{{ sandbox_nodeguard_settings.controller_client_ca_file }}'
+          name: controller-ca.pem
+    - name: Install separate metrics scraper trust root when configured
+      ansible.builtin.copy:
+        src: '{{ sandbox_nodeguard_settings.metrics.scraper_client_ca_file }}'
+        dest: /etc/sandbox-nodeguard/tls/scraper-ca.pem
+        owner: root
+        group: root
+        mode: '0600'
+      when: sandbox_nodeguard_settings.metrics is defined
+    - name: Expose only the pinned Go shim to the existing containerd service PATH
+      ansible.builtin.file:
+        src: /opt/kata/bin/containerd-shim-kata-v2
+        dest: /usr/local/bin/containerd-shim-kata-v2
+        state: link
+        owner: root
+        group: root
+        force: false
+    - name: Configure runtime with the single pinned upstream owner
+      ansible.builtin.import_role:
+        name: container-engine/containerd
+    - name: Configure kubelet endpoints with the pinned upstream owner
+      ansible.builtin.import_role:
+        name: kubernetes/node
+    - name: Install host profile collector
+      ansible.builtin.copy:
+        src: '{{ sandbox_nodeguard_assets }}/host_profile.py'
+        dest: /etc/sandbox-nodeguard/host_profile.py
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Write independent expected node identity for collection
+      ansible.builtin.copy:
+        content: >-
+          {{ {'cluster_epoch':sandbox_nodeguard_settings.cluster_epoch,
+              'node_uid':sandbox_enrollment_node_uid,'node_name':inventory_hostname,
+              'cloud_account_id':sandbox_installation.outputs.deployment_identity.cloud_account_id,
+              'region':sandbox_installation.settings.region,'cloud_instance_id':ecs_instance_id,
+              'private_ip':ip,'certification_id':sandbox_nodeguard_settings.certification_id,
+              'metrics_deployment': (sandbox_installation.settings.deployment if sandbox_nodeguard_settings.metrics is defined else none)} | to_json }}
+        dest: /etc/sandbox-nodeguard/collection-request.json
+        owner: root
+        group: root
+        mode: '0600'
+    - name: Validate actual configuration and collect exact SHA256 and boot identity
+      ansible.builtin.command:
+        argv: [python3, /etc/sandbox-nodeguard/host_profile.py, --request, /etc/sandbox-nodeguard/collection-request.json]
+    - name: Initialize durable launch coverage before accepting managed requests
+      ansible.builtin.command:
+        argv: [/usr/local/libexec/sandbox-nodeguard, --initialize-journal]
+    - name: Install dedicated native host service
+      ansible.builtin.copy:
+        src: '{{ sandbox_nodeguard_assets }}/sandbox-nodeguard.service'
+        dest: /etc/systemd/system/sandbox-nodeguard.service
+        owner: root
+        group: root
+        mode: '0644'
+    - name: Verify systemd service syntax
+      ansible.builtin.command:
+        argv: [systemd-analyze, verify, /etc/systemd/system/sandbox-nodeguard.service]
+      changed_when: false
+    - name: Create kubelet ordering directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/kubelet.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+    - name: Require nodeguard before kubelet at every boot
+      ansible.builtin.copy:
+        src: '{{ sandbox_nodeguard_assets }}/kubelet-nodeguard.conf'
+        dest: /etc/systemd/system/kubelet.service.d/30-nodeguard.conf
+        owner: root
+        group: root
+        mode: '0644'
+    - name: Start host gate with managed starts still requiring control-plane registration
+      ansible.builtin.systemd_service:
+        name: sandbox-nodeguard
+        daemon_reload: true
+        enabled: true
+        state: started
+    - name: Wait for local CRI gate socket
+      ansible.builtin.wait_for:
+        path: /run/sandbox-nodeguard/cri.sock
+        timeout: 30
+    - name: Restart kubelet through its guarded endpoint
+      ansible.builtin.systemd_service:
+        name: kubelet
+        state: restarted
+    - name: Export exact enrollment artifact without private keys
+      ansible.builtin.fetch:
+        src: /etc/sandbox-nodeguard/enrollment.json
+        dest: '{{ sandbox_nodeguard_plan_dir }}/artifacts/{{ inventory_hostname }}.json'
+        flat: true
+        validate_checksum: true
+
+    - name: Read measured host identity for the Node annotation
+      ansible.builtin.slurp:
+        src: /etc/sandbox-nodeguard/enrollment.json
+      register: measured_enrollment
+    - name: Wait for kubelet readiness through the guarded runtime
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, --kubeconfig=/etc/kubernetes/admin.conf, wait, '--for=condition=Ready', 'node/{{ inventory_hostname }}', --timeout=120s]
+      delegate_to: '{{ groups.kube_control_plane[0] }}'
+      changed_when: false
+    - name: Fetch current Node before resource-version-fenced profile annotation
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, node, '{{ inventory_hostname }}', -o, json]
+      delegate_to: '{{ groups.kube_control_plane[0] }}'
+      changed_when: false
+      register: current_guard_node
+    - name: Refuse a replaced Node or a boot changed during installation
+      ansible.builtin.assert:
+        that:
+          - (current_guard_node.stdout | from_json).metadata.uid == (measured_enrollment.content | b64decode | from_json).node.node_uid
+          - (current_guard_node.stdout | from_json).status.nodeInfo.bootID == (measured_enrollment.content | b64decode | from_json).node.boot_id
+    - name: Publish measured profile identity without changing quarantine or certification state
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig=/etc/kubernetes/admin.conf
+          - patch
+          - node
+          - '{{ inventory_hostname }}'
+          - --type=json
+          - --patch
+          - >-
+            {{ [{'op':'test','path':'/metadata/uid','value':sandbox_enrollment_node_uid},
+                {'op':'test','path':'/metadata/resourceVersion','value':(current_guard_node.stdout | from_json).metadata.resourceVersion},
+                {'op':'test','path':'/status/nodeInfo/bootID','value':(measured_enrollment.content | b64decode | from_json).node.boot_id},
+                {'op':'add','path':'/metadata/annotations','value':((current_guard_node.stdout | from_json).metadata.annotations | default({})) | combine({'sandbox.platform/runtime-profile-sha256':(measured_enrollment.content | b64decode | from_json).node.profile_sha256})}] | to_json }}
+      delegate_to: '{{ groups.kube_control_plane[0] }}'

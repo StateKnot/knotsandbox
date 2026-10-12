@@ -1,0 +1,12 @@
+{
+  "namespace": "sandbox-system",
+  "image": "registry.example.test/platform@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "database_secret": "automation-db",
+  "database_secret_key": "url",
+  "database_ca_config_map": "database-ca",
+  "database_cidrs": ["10.20.1.0/24", "10.20.2.0/24"],
+  "replicas": 2,
+  "default_ttl_seconds": 3600,
+  "max_ttl_seconds": 86400,
+  "db_max_connections": 4
+}

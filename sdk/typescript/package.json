@@ -1,0 +1,17 @@
+{
+  "name": "@sandbox-platform/client",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "generate": "openapi-typescript ../../openapi/sandbox-api.yaml -o src/schema.d.ts",
+    "build": "tsc -p tsconfig.json && node -e \"require('node:fs').copyFileSync('src/schema.d.ts','dist/schema.d.ts')\"",
+    "test": "npm run build && node --test test/*.test.mjs"
+  },
+  "dependencies": { "openapi-fetch": "0.17.0" },
+  "devDependencies": { "openapi-typescript": "7.13.0", "typescript": "5.9.3" }
+}

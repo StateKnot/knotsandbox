@@ -1,0 +1,80 @@
+{
+  "status": "candidate-awaiting-cloud-certification",
+  "versions": {
+    "kubespray": "2.32.0",
+    "kubernetes": "1.36.4",
+    "etcd": "3.6.14",
+    "containerd": "2.3.5",
+    "runc": "1.4.3",
+    "cilium": "1.20.2",
+    "kata": "4.2.0",
+    "kata_runtime": "go-qemu",
+    "csi_chart": "1.36.2",
+    "csi_driver": "1.37.2",
+    "helm": "3.22.0",
+    "ansible": "12.3.0",
+    "ansible_core": "2.19.8"
+  },
+  "artifacts": {
+    "kubespray": {
+      "url": "https://api.github.com/repos/kubernetes-sigs/kubespray/tarball/v2.32.0",
+      "sha256": "c64df4f74908d7617c9ba999d0f09995ea0c41454a76ec7cf2711f0289f03bce",
+      "filename": "kubespray.tgz"
+    },
+    "csi": {
+      "url": "https://api.github.com/repos/kubernetes-sigs/alibaba-cloud-csi-driver/tarball/v1.37.2",
+      "sha256": "ab11d85ef8a376abfef5b789a23eaf210c1fde4287fa6d1ee23607f0013ae749",
+      "filename": "csi.tgz"
+    },
+    "cilium": {
+      "url": "https://helm.cilium.io/cilium-1.20.2.tgz",
+      "sha256": "b2afd87b7f75f875f92a14559f14f59b7babbb479d968e3fd625a20bf30ec20e",
+      "filename": "cilium.tgz"
+    },
+    "kubernetes-schema": {
+      "url": "https://raw.githubusercontent.com/kubernetes/kubernetes/v1.36.4/api/openapi-spec/swagger.json",
+      "sha256": "dcede2063da1d7ad62ecb5af8adb6d7fabd0b52385a7fa0048afb491dac90450",
+      "filename": "kubernetes-schema.json"
+    },
+    "helm-darwin-arm64": {
+      "url": "https://get.helm.sh/helm-v3.22.0-darwin-arm64.tar.gz",
+      "sha256": "4c9982a6cdeb458b60258df66b55398ca5b19293f6877faffe2909ad6f23dfe0",
+      "filename": "helm-darwin-arm64.tgz"
+    },
+    "helm-linux-amd64": {
+      "url": "https://get.helm.sh/helm-v3.22.0-linux-amd64.tar.gz",
+      "sha256": "1e4ab49e429626cf6c6958d914248b78c9730803c2751b87627e171dc800e7bb",
+      "filename": "helm-linux-amd64.tgz"
+    },
+    "helm-linux-arm64": {
+      "url": "https://get.helm.sh/helm-v3.22.0-linux-arm64.tar.gz",
+      "sha256": "f14e804dfee240f55525b667488fe9adca349e63e00c9af634c0beb1421ac310",
+      "filename": "helm-linux-arm64.tgz"
+    },
+    "kata-versions": {
+      "url": "https://github.com/kata-containers/kata-containers/releases/download/4.2.0/kata-containers-4.2.0-versions.yaml",
+      "sha256": "aa845a2e362b4b2d55bf7be513634237b24a2ad9f69e07be6e99cbb4bd620b2d",
+      "filename": "kata-versions.yaml"
+    },
+    "kata-go": {
+      "url": "https://github.com/kata-containers/kata-containers/releases/download/4.2.0/kata-go-static-4.2.0-amd64.tar.zst",
+      "sha256": "7dda31ca54b397cbf8165f620d6041872d3c45b7a77383ce0e86f76a06e103d0",
+      "filename": "kata-go-static-4.2.0-amd64.tar.zst"
+    },
+    "cilium-policy-crd": {
+      "url": "https://raw.githubusercontent.com/cilium/cilium/v1.20.2/pkg/k8s/apis/cilium.io/client/crds/v2/ciliumclusterwidenetworkpolicies.yaml",
+      "filename": "cilium-policy-crd.yaml",
+      "sha256": "ae65e44fdee9da399cb7257a8464f197bea5270fdc213f6343700309c39abad6"
+    }
+  },
+  "csi_images": {
+    "registry.cn-hangzhou.aliyuncs.com/acs/csi-plugin:v1.37.2": "registry.cn-hangzhou.aliyuncs.com/acs/csi-plugin@sha256:f3dde54782067d2441ed1c784db0432e25056d298536903a3067b026e32afbbf",
+    "registry.cn-hangzhou.aliyuncs.com/acs/csi-plugin:v1.37.2-init": "registry.cn-hangzhou.aliyuncs.com/acs/csi-plugin@sha256:2e3e4464dc39caf538fb3c92922ced5d5927301919e721720f9c4af1ba80280e",
+    "registry.cn-hangzhou.aliyuncs.com/acs/csi-attacher:v4.12.0-aliyun": "registry.cn-hangzhou.aliyuncs.com/acs/csi-attacher@sha256:8e0bcdca8dadcc77b8aa9e7343cc560d36209cd5ad57a9ef2aea16ec10b0be60",
+    "registry.cn-hangzhou.aliyuncs.com/acs/csi-provisioner:v6.2.1-aliyun": "registry.cn-hangzhou.aliyuncs.com/acs/csi-provisioner@sha256:29f5332e701b804125edc1cb74224a1bd5a26108ca3b0c068d105fba750b9de3",
+    "registry.cn-hangzhou.aliyuncs.com/acs/csi-resizer:v2.1.1-aliyun": "registry.cn-hangzhou.aliyuncs.com/acs/csi-resizer@sha256:bf16104be28052c8a81bb87939775e53268f21d0ff2264c5bb7355d1b48e3f35",
+    "registry.cn-hangzhou.aliyuncs.com/acs/csi-snapshotter:v8.5.1-aliyun": "registry.cn-hangzhou.aliyuncs.com/acs/csi-snapshotter@sha256:d87d0e892c1c2298a48be0ea665e89f61cec53351eeb5c4b5426c97987de0ca2",
+    "registry.cn-hangzhou.aliyuncs.com/acs/snapshot-controller:v8.5.1-aliyun": "registry.cn-hangzhou.aliyuncs.com/acs/snapshot-controller@sha256:30cce2576a3d943233632b3883fabd2cea6f608bb9bca3df605bc0ce7d221433",
+    "registry.cn-hangzhou.aliyuncs.com/acs/csi-node-driver-registrar:v2.17.0-aliyun": "registry.cn-hangzhou.aliyuncs.com/acs/csi-node-driver-registrar@sha256:2c20e8022f88c8fed7e32445b78d4c3b7c879fd0d62fdf3b9c07192258c5a8d9"
+  }
+}

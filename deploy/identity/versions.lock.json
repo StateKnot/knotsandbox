@@ -1,0 +1,25 @@
+{
+  "keycloak_version": "26.8.0",
+  "keycloak_image": "quay.io/keycloak/keycloak:26.8.0@sha256:b0f60d489d51c5d113390bdf5461d4c06e6051be026c05549f2e1e10ec352bcc",
+  "operator_image": "quay.io/keycloak/keycloak-operator:26.8.0@sha256:3e7c09e685865f45c753aedb5eef8bed9f5f0af37b76ef568ae920bae6d4f2d5",
+  "upstream": "https://github.com/keycloak/keycloak-k8s-resources/tree/26.8.0/kubernetes",
+  "files": {
+    "keycloakoidcclients.k8s.keycloak.org-v1.yml": "15d9199822d1918438bd1d093eee3ec8406e7f9d0837c4527fd6da99c63b058a",
+    "keycloaksamlclients.k8s.keycloak.org-v1.yml": "7c69d146f610f3c40acf4466518e89615b6fce7ee2a03d75cd93b7a9a7bf259e",
+    "kustomization.yml": "fd702341f6442d432190e6c83b82c2f105f8ba91b635a99bc300af29343265ac",
+    "keycloaks.k8s.keycloak.org-v1.yml": "20c51247cb6cbc6158098caabeaf6b429dc8c016e35829f5ddd9c468b7582667",
+    "keycloakrealmimports.k8s.keycloak.org-v1.yml": "8d552e1864d78117a07e535479ddb36e16a42b2695726c875f44828e1323edd4",
+    "kubernetes.yml": "90444b88fdf0eab6d24bc9ddd9e57e34610a1490296cc670abac73ff25a7cd14",
+    "LICENSE.txt": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "proxy_source": {
+    "version": "3.2.25",
+    "url": "https://www.haproxy.org/download/3.2/src/haproxy-3.2.25.tar.gz",
+    "sha256": "d59a68d0daef7b5c596b019b742089788ff1748513ef96e71fe7b3943577866e"
+  },
+  "cnp_schema": {
+    "path": "vendor/cilium-1.20.2-cnp.yaml",
+    "sha256": "62c6de8f358da125b94468d39187edb1cea157d79503fdc50ccec8a6aaa79a76",
+    "url": "https://github.com/cilium/cilium/blob/v1.20.2/pkg/k8s/apis/cilium.io/client/crds/v2/ciliumnetworkpolicies.yaml"
+  }
+}

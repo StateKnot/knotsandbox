@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OSS bucket retention expectation",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "profile_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "cluster_epoch": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "deployment": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]{1,63}$"
+    },
+    "profile_settings_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "account_id": {
+      "type": "string",
+      "pattern": "^[0-9]{16}$"
+    },
+    "region": {
+      "type": "string",
+      "pattern": "^cn-[a-z0-9-]{1,29}$",
+      "maxLength": 32
+    },
+    "bucket": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"
+    },
+    "kms_key_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]{1,128}$"
+    },
+    "vault_retention_days": {
+      "type": "integer",
+      "minimum": 31,
+      "maximum": 3650
+    },
+    "certified_until": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "anchor_key": {
+      "type": "string",
+      "pattern": "^certification/[0-9a-f-]{36}/[0-9a-f-]{36}/[A-Za-z0-9_.-]{1,128}$"
+    },
+    "anchor_etag": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 128,
+      "pattern": "^\"[!-~]+\"$"
+    },
+    "anchor_size_bytes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1048576
+    }
+  },
+  "required": [
+    "profile_id",
+    "cluster_epoch",
+    "deployment",
+    "profile_settings_sha256",
+    "account_id",
+    "region",
+    "bucket",
+    "kms_key_id",
+    "vault_retention_days",
+    "certified_until",
+    "anchor_key",
+    "anchor_etag",
+    "anchor_size_bytes"
+  ]
+}
