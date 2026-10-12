@@ -18,7 +18,23 @@ LOCK = json.loads((ROOT / 'versions.lock.json').read_text())
 NAMESPACE = 'sandbox-observability'
 APP = 'sandbox-metrics-agent'
 UUID = r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
-RAW = 'sandbox_vm_(cpu_seconds_total|memory_bytes|io_read_bytes_total|io_write_bytes_total|tasks|observation_success)'
+RAW_METRICS = (
+    'sandbox_vm_cpu_seconds_total',
+    'sandbox_vm_cpu_throttled_periods_total',
+    'sandbox_vm_cpu_throttled_seconds_total',
+    'sandbox_vm_memory_bytes',
+    'sandbox_vm_memory_anon_bytes',
+    'sandbox_vm_memory_file_bytes',
+    'sandbox_vm_memory_oom_events_total',
+    'sandbox_vm_memory_oom_kills_total',
+    'sandbox_vm_io_read_bytes_total',
+    'sandbox_vm_io_write_bytes_total',
+    'sandbox_vm_tasks',
+    'sandbox_vm_observation_success',
+)
+RAW = '|'.join(re.escape(name) for name in RAW_METRICS)
+MAX_LAUNCHES_PER_TARGET = 256
+NODE_SAMPLE_LIMIT = MAX_LAUNCHES_PER_TARGET * len(RAW_METRICS)
 LABELS = ['__name__', 'deployment', 'cluster_epoch', 'node_uid', 'host_boot_id', 'tenant_id', 'project_id', 'instance_id', 'launch_id', 'generation', 'collector_replica', 'job', 'instance']
 # Pinned 3.13.4 agent registry. A single remote-write queue makes dropping its
 # url/remote_name labels unambiguous; the WAL/corruption metrics have no labels.
@@ -118,15 +134,16 @@ def validate(settings, terraform, remote_url):
 
 
 def capacity(settings):
-    # Six bounded raw metrics per launch; the 1 KiB allowance includes churn/
+    # Twelve bounded raw metrics per launch; the 1 KiB allowance includes churn/
     # label records. It is a conservative planning model, not a storage SLA.
-    samples = len(settings['nodes']) * 256 * 6
+    samples = len(settings['nodes']) * NODE_SAMPLE_LIMIT
     # Native scrape reports enter the WAL even when remote-write filters them.
     # Self metrics are bounded after relabeling by their own sample_limit.
     reports = (len(settings['nodes']) + 1) * SCRAPE_REPORT_SAMPLES
     total = samples + reports + SELF_SAMPLE_LIMIT
     budget = total * (6 * 3600 // 15) * 1024 * 2
-    return {'replicas': 2, 'targets_per_replica': len(settings['nodes']) + 1, 'max_launches_per_target': 256,
+    return {'replicas': 2, 'targets_per_replica': len(settings['nodes']) + 1, 'max_launches_per_target': MAX_LAUNCHES_PER_TARGET,
+            'max_raw_metrics_per_launch': len(RAW_METRICS), 'max_raw_samples_per_node_scrape': NODE_SAMPLE_LIMIT,
             'nodeguard_targets_per_replica': len(settings['nodes']), 'self_scrape_targets_per_replica': 1,
             'max_raw_samples_per_scrape_per_replica': samples,
             'max_self_samples_per_scrape_per_replica': SELF_SAMPLE_LIMIT,
@@ -156,7 +173,7 @@ def prometheus(settings, replica, remote_url):
         jobs.append({'job_name': 'nodeguard-' + node['node_uid'], 'scheme': 'https', 'metrics_path': '/metrics',
                      'scrape_interval': '15s', 'scrape_timeout': '5s', 'honor_labels': False, 'honor_timestamps': False,
                      'scrape_protocols': ['PrometheusText0.0.4'], 'fallback_scrape_protocol': 'PrometheusText0.0.4',
-                     'body_size_limit': '2MB', 'sample_limit': 1536, 'label_limit': 13,
+                     'body_size_limit': '2MB', 'sample_limit': NODE_SAMPLE_LIMIT, 'label_limit': 13,
                      'label_name_length_limit': 64, 'label_value_length_limit': 128, 'target_limit': 1,
                      'follow_redirects': False, 'enable_http2': False,
                      'tls_config': {'ca_file': '/etc/scraper/ca.crt', 'cert_file': '/etc/scraper/tls.crt',

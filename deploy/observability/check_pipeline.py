@@ -27,6 +27,16 @@ sys.path.insert(0,str(ROOT/'tests'))
 from test_observability import fixture
 from observability import LOCK,SELF_METRICS,prometheus,require
 
+RAW_VALUES = {
+    'sandbox_vm_memory_bytes': 4096,
+    'sandbox_vm_cpu_throttled_periods_total': 3,
+    'sandbox_vm_cpu_throttled_seconds_total': 2.5,
+    'sandbox_vm_memory_anon_bytes': 1024,
+    'sandbox_vm_memory_file_bytes': 2048,
+    'sandbox_vm_memory_oom_events_total': 2,
+    'sandbox_vm_memory_oom_kills_total': 0,
+}
+
 
 def run(args):
     p=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30,check=False)
@@ -76,11 +86,18 @@ def main():
                     for i,node in enumerate(s['nodes']):
                         labels={'tenant_id':str(uuid.UUID(int=101)),'project_id':str(uuid.UUID(int=102)),'instance_id':str(uuid.UUID(int=200+i)),'generation':'1','launch_id':str(uuid.UUID(int=300+i)),'cluster_epoch':s['cluster_epoch'],'node_uid':node['node_uid'],'host_boot_id':node['host_boot_id'],'deployment':s['deployment'],'collector_replica':'rogue','secret_label':'MUST_BE_REMOVED'}
                         label_text=','.join(k+'="'+v+'"' for k,v in labels.items())
-                        rows.append('sandbox_vm_memory_bytes{'+label_text+'} 4096 1600000000000')
+                        for metric,value in RAW_VALUES.items():
+                            rows.append(metric+'{'+label_text+'} '+str(value)+' 1600000000000')
                         rows.append('unapproved_guest_secret{'+label_text+'} 99')
                         spoof=label_text+',job="sandbox-agent"'
                         for metric in ('up',*SELF_METRICS):rows.append(metric+'{'+spoof+'} -424242')
+                        # Invalid tenant identity and a stale exporter epoch
+                        # must fail before remote-write, for every new metric.
+                        bad_tenant={**labels,'tenant_id':str(uuid.UUID(int=0))}
+                        bad_tenant_text=','.join(k+'="'+v+'"' for k,v in bad_tenant.items())
+                        for metric in RAW_VALUES:rows.append(metric+'{'+bad_tenant_text+'} -424242')
                         labels['cluster_epoch']=str(uuid.UUID(int=999));label_text=','.join(k+'="'+v+'"' for k,v in labels.items())
+                        for metric in RAW_VALUES:rows.append(metric+'{'+label_text+'} -424242')
                         rows.append('sandbox_vm_tasks{'+label_text+'} 99')
                     scrapes.set();self.answer(200,('\n'.join(rows)+'\n').encode())
                 def do_POST(self):
@@ -136,6 +153,7 @@ def main():
             def labelset(rows):return {tuple(sorted(row.items())) for row in rows}
             def matches(rows,expected,value=None):
                 return len(rows)==len(expected) and labelset([r['metric'] for r in rows])==labelset(expected) and all(float(r['value'][1])>=0 if value is None else float(r['value'][1])==value for r in rows)
+            raw_sets={metric:[{**row,'__name__':metric} for row in raw] for metric in RAW_VALUES}
             deadline=time.monotonic()+35
             def wait_series(expr,expected,value,code):
                 while time.monotonic()<deadline:
@@ -148,6 +166,10 @@ def main():
             require(len(result)==4 and scrapes.is_set() and accepted.is_set() and writes[0]>2,'PIPELINE_INCOMPLETE')
             require({r['metric']['collector_replica'] for r in result}=={'a','b'},'HA_REPLICA_DROPPED')
             require(all(float(r['value'][1])==4096 and 'secret_label' not in r['metric'] and 'exported_collector_replica' not in r['metric'] for r in result),'METRIC_LABEL_OR_VALUE')
+            for metric,value in RAW_VALUES.items():
+                rows=wait_series(metric,raw_sets[metric],value,'PRESSURE_IDENTITY_OR_VALUE')
+                require(len(rows)==4 and {r['metric']['collector_replica'] for r in rows}=={'a','b'},'PRESSURE_HA_REPLICA_DROPPED')
+                require(all('secret_label' not in r['metric'] and 'exported_collector_replica' not in r['metric'] for r in rows),'PRESSURE_PRIVATE_LABEL_WRITTEN')
             require(query('unapproved_guest_secret')==[] and query('sandbox_vm_tasks')==[],'UNAPPROVED_DATA_WRITTEN')
             observed=query('timestamp(sandbox_vm_memory_bytes)');require(len(observed)==4 and all(time.time()-float(r['value'][1])<15 for r in observed),'SOURCE_TIMESTAMP_OVERRIDE')
             wait_series('up',node_up+self_up,1,'UP_IDENTITY_OR_VALUE')
@@ -157,12 +179,17 @@ def main():
             wait_series('up{job=~"nodeguard-.*"}',node_up,0,'FAILED_SCRAPE_UP_NOT_ZERO')
             require(fault_scrapes[0]>0,'NODE_FAILURE_NOT_REACHED')
             wait_series('up{job="sandbox-agent"}',self_up,1,'SELF_FAILED_WITH_NODE')
-            # Failed scrapes mark old RAW series stale; the last genuine value remains 4096.
-            held=query('last_over_time(sandbox_vm_memory_bytes[1m])')
-            require(len(held)==4 and labelset([{k:v for k,v in r['metric'].items() if k!='__name__'} for r in held])==labelset([{k:v for k,v in r.items() if k!='__name__'} for r in raw]) and all(float(r['value'][1])==4096 for r in held) and query('sandbox_vm_memory_bytes == 0')==[],'FAILED_SCRAPE_FABRICATED_USAGE')
+            # Failed scrapes remove instant samples, preserving genuine raw
+            # history (including a real zero OOM-kill counter, never zero-fill).
+            for metric,value in RAW_VALUES.items():
+                wait_series(metric,[],None,'FAILED_SCRAPE_RETAINED_INSTANT_USAGE')
+                held=query('last_over_time('+metric+'[1m])')
+                require(len(held)==4 and labelset([{k:v for k,v in r['metric'].items() if k!='__name__'} for r in held])==labelset([{k:v for k,v in r.items() if k!='__name__'} for r in raw_sets[metric]]) and all(float(r['value'][1])==value for r in held),'FAILED_SCRAPE_FABRICATED_USAGE')
+                if value!=0:require(query(metric+' == 0')==[],'FAILED_SCRAPE_FABRICATED_ZERO')
             metrics_fault.clear()
             wait_series('up{job=~"nodeguard-.*"}',node_up,1,'SCRAPE_RECOVERY_NOT_WRITTEN')
-            wait_series('sandbox_vm_memory_bytes',raw,4096,'RAW_RECOVERY_CHANGED_IDENTITY_OR_VALUE')
+            for metric,value in RAW_VALUES.items():
+                wait_series(metric,raw_sets[metric],value,'RAW_RECOVERY_CHANGED_IDENTITY_OR_VALUE')
             wait_series(native,self_metrics,None,'SELF_AFTER_RECOVERY_CHANGED')
         finally:
             for name in reversed(names):
@@ -170,7 +197,7 @@ def main():
                 subprocess.run(['docker','rm','-f',name],stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=10)
             if server:server.shutdown();server.server_close()
             if thread:thread.join(timeout=5)
-    print('PASS actual local Prometheus agents: mTLS scrape, BasicAuth remote write, 503 retry, separate HA replicas, raw-metric/identity/label filters, native up failure/recovery, genuine self counters and guest spoof rejection, collector timestamps. Protocol fixture only, no cloud certification.')
+    print('PASS actual local Prometheus agents: mTLS scrape, BasicAuth remote write, 503 retry, separate HA replicas, six pressure metrics with genuine zero and throttle-unit values, strict raw-metric/identity/label filters, native up and raw-series failure/recovery, genuine self counters and guest spoof rejection, collector timestamps. Protocol fixture only, no cloud certification.')
 
 
 if __name__=='__main__':

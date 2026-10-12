@@ -573,11 +573,17 @@ mod linux {
             };
             still_live()?;
             let root = PathBuf::from(format!("/proc/self/fd/{}", pinned.cgroup.as_raw_fd()));
+            // Controller-specific files are optional; bounded reads through
+            // the pinned inode preserve the same identity as the base sample.
+            let memory_stat = read_text(&root.join("memory.stat"), 65536).ok();
+            let memory_events = read_text(&root.join("memory.events"), 65536).ok();
             let result = super::super::metrics::parse(
                 &read_text(&root.join("cpu.stat"), 65536)?,
                 &read_text(&root.join("memory.current"), 64)?,
                 &read_text(&root.join("io.stat"), 65536)?,
                 &read_text(&root.join("pids.current"), 64)?,
+                memory_stat.as_deref(),
+                memory_events.as_deref(),
             )?;
             // Exit/migration during sampling invalidates the entire observation.
             still_live()?;
@@ -785,6 +791,8 @@ mod linux {
                 ("memory.current", "1024"),
                 ("io.stat", "8:0 rbytes=2 wbytes=3"),
                 ("pids.current", "1"),
+                ("memory.stat", "anon invalid\nfile 2048"),
+                ("memory.events", "oom 2\noom_kill 0"),
             ] {
                 std::fs::write(directory.path().join(name), value)?;
             }
@@ -850,6 +858,10 @@ mod linux {
             release??;
             assert_eq!(value.cpu_usage_usec, 17);
             assert_eq!(value.memory_bytes, 1024);
+            assert_eq!(value.memory_anon_bytes, None);
+            assert_eq!(value.memory_file_bytes, None);
+            assert_eq!(value.memory_oom_events, Some(2));
+            assert_eq!(value.memory_oom_kills, Some(0));
             Ok(())
         }
         #[test]

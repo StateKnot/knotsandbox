@@ -4815,7 +4815,8 @@ components:
         cutoff: { type: string, format: date-time }
     RuntimeMetric:
       type: string
-      enum: [VM_CPU_CORES, VM_MEMORY_BYTES, VM_IO_READ_BYTES_PER_SECOND, VM_IO_WRITE_BYTES_PER_SECOND, VM_TASKS]
+      description: Fixed host VM cgroup metrics including virtualization overhead. Optional throttle/memory-stat/event series may be absent on older collectors or unsupported controllers; missing values stay null. These are neither utilization percentages nor health/termination proof.
+      enum: [VM_CPU_CORES, VM_MEMORY_BYTES, VM_IO_READ_BYTES_PER_SECOND, VM_IO_WRITE_BYTES_PER_SECOND, VM_TASKS, VM_CPU_THROTTLED_PERIODS_PER_SECOND, VM_CPU_THROTTLED_SECONDS_PER_SECOND, VM_MEMORY_ANON_BYTES, VM_MEMORY_FILE_BYTES, VM_MEMORY_OOM_EVENTS_PER_SECOND, VM_MEMORY_OOM_KILLS_PER_SECOND]
     MetricPoint:
       type: object
       required: [evaluated_at, observed_at, value, status, collector_replica]
@@ -4830,7 +4831,7 @@ components:
       required: [metric, unit, source, stale_after_seconds, points]
       properties:
         metric: { "$ref": "#/components/schemas/RuntimeMetric" }
-        unit: { type: string, enum: [cores, bytes, bytes_per_second, tasks] }
+        unit: { type: string, enum: [cores, bytes, bytes_per_second, tasks, periods_per_second, seconds_per_second, events_per_second] }
         source: { type: string, enum: [HOST_VM_RUNTIME] }
         stale_after_seconds: { type: integer, const: 60 }
         points:

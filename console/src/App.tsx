@@ -40,6 +40,7 @@ import {
   automationSupports,
 } from "./automation.ts";
 import type { AutomationContract } from "./automation.ts";
+import { runtimeMetrics, runtimeMetricUnits } from "./runtime-metrics.ts";
 type Instance = Schema["Instance"];
 function errorText(error: unknown) {
   return error instanceof ApiFailure
@@ -1599,14 +1600,10 @@ function Metrics({
               setMetric(e.target.value as Schema["RuntimeMetric"])
             }
           >
-            {[
-              "VM_CPU_CORES",
-              "VM_MEMORY_BYTES",
-              "VM_IO_READ_BYTES_PER_SECOND",
-              "VM_IO_WRITE_BYTES_PER_SECOND",
-              "VM_TASKS",
-            ].map((m) => (
-              <option key={m}>{m}</option>
+            {Object.entries(runtimeMetrics).map(([value, info]) => (
+              <option key={value} value={value}>
+                {info.label}
+              </option>
             ))}
           </select>
         </Field>
@@ -1614,18 +1611,23 @@ function Metrics({
           查询最近 15 分钟
         </button>
       </div>
+      <p className="fine muted">{runtimeMetrics[metric].description}</p>
+      <p className="fine muted">
+        缺失、过期或当前节点不支持的指标保留为空，不代表用量为零。
+      </p>
       <Remote state={result}>
         {result.data && (
           <>
             <p className="muted">
-              单位 {result.data.series.unit} · 数据源{" "}
-              {result.data.series.source} · 查询 {date(result.data.queried_at)}
+              单位 {runtimeMetricUnits[result.data.series.unit]}（
+              {result.data.series.unit}） · 数据源 {result.data.series.source} ·
+              查询 {date(result.data.queried_at)}
             </p>
             <svg
               className="metric-chart"
               viewBox="0 0 800 180"
               role="img"
-              aria-label="最近15分钟指标；缺失或过期数据留空"
+              aria-label={`${runtimeMetrics[metric].label}；最近15分钟指标；缺失或过期数据留空`}
             >
               <line
                 x1="0"

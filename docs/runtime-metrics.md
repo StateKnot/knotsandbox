@@ -2,7 +2,7 @@
 
 `GET /v1/instances/{id}/metrics` 提供已授权实例某一次 launch 的宿主资源时间序列。采集源是 nodeguard 已登记并固定的 VM cgroup，不接受租户提供的 exporter、标签或 PromQL。它用于资源观察，不构成应用健康、VM 死亡、卷卸载或配额释放证据。
 
-2026-10-12审查明确：当前五类接口返回资源用量，尚无有效期request/limit/overhead分母、利用率/规格推荐/节点成本治理，也不包含GPU。GPU资源模型、运行时、设备租约、采集和安全回收均待实现。idle后台扫描存在，但公开策略配置入口未完成，`idle_timeout_seconds` 默认NULL。已将资源效率/GPU增量及idle运营缺口登记为[61项开发表中的新增工作](../research/rust-sandbox-development-workbreakdown.md#11-资源效率与gpu新增交付顺序)，技术和验收详见[审查与实施计划](../research/resource-efficiency-audit-and-plan-20261012.md)。本次未新增指标枚举或GPU运行能力。
+2026-10-12首批资源效率开发已将固定指标从5项扩展为11项，补充CPU自身限额节流、匿名/文件内存和宿主OOM观察。尚无有效期request/limit/overhead分母、利用率百分比、规格推荐或节点成本治理，也不包含GPU。idle公开策略配置与安全委派仍待开发，`idle_timeout_seconds` 默认NULL。完整计划见[61项开发表](../research/rust-sandbox-development-workbreakdown.md#11-资源效率与gpu新增交付顺序)，本批实现、上线顺序和实际验收见[交付记录](../research/resource-observability-delivery-20261012.md)。
 
 ## 调用合同
 
@@ -10,7 +10,7 @@
 
 | 参数 | 规则 |
 | --- | --- |
-| `metric` | 以下五个固定枚举之一 |
+| `metric` | 以下11个固定枚举之一 |
 | `start`、`end` | RFC3339；最近 90 天内，不接受未来时间；内部按整秒计算 |
 | `step_seconds` | 15–3600；单次范围不超过 7 天且最多 1441 点 |
 | `launch_id` | 可选；省略时查询当前 launch。显式历史 launch 必须属于该实例且仍在当前平台恢复纪元 |
@@ -22,8 +22,16 @@
 | `VM_IO_READ_BYTES_PER_SECOND` | `io.stat rbytes` 的 2 分钟速率，跨宿主块设备求和 |
 | `VM_IO_WRITE_BYTES_PER_SECOND` | `io.stat wbytes` 的 2 分钟速率，跨宿主块设备求和 |
 | `VM_TASKS` | `pids.current` 中的宿主任务/线程数，不是 guest 进程数 |
+| `VM_CPU_THROTTLED_PERIODS_PER_SECOND` | `cpu.stat nr_throttled` 的2分钟速率，单位周期/秒；观察该cgroup自身CFS限额，不涵盖祖先限额的全部节流 |
+| `VM_CPU_THROTTLED_SECONDS_PER_SECOND` | `cpu.stat throttled_usec` 转为秒后的2分钟速率，单位秒/秒；可能大于1，不是CPU利用率百分比 |
+| `VM_MEMORY_ANON_BYTES` | `memory.stat anon`，单位字节；宿主匿名映射，不是guest应用工作集 |
+| `VM_MEMORY_FILE_BYTES` | `memory.stat file`，单位字节；包括tmpfs和共享内存，不等于可全部回收的缓存 |
+| `VM_MEMORY_OOM_EVENTS_PER_SECOND` | `memory.events oom` 的2分钟速率，单位事件/秒；宿主内存不足事件，不等于guest OOM或进程死亡 |
+| `VM_MEMORY_OOM_KILLS_PER_SECOND` | `memory.events oom_kill` 的2分钟速率，单位进程/秒（接口单位为`events_per_second`）；不是实例终止数 |
 
 I/O 是宿主 cgroup 记账值；设备层级可能使同一次 I/O 在多个设备记账，不能直接作为 guest 文件读写量或计费量。计数器速率至少需要足够的采样点，启动预热阶段返回缺失。
+
+匿名与文件内存之和不必等于`memory.current`；内核其他记账、并发读取及内核配置均需按实际宿主解释。`memory.events`沿挂载的内核层级语义读取，`memory_localevents`等配置可改变范围。缺少可选CPU字段或内存文件、旧采集器没有新序列、可选内存文件读取/解析失败时，新指标保持`MISSING`/null，不能推断为零或自动宣称硬件不支持。可选内存失败不抹掉原五项；必需`cpu.stat`仍按原严格数值校验，损坏则整次基础观察失败。
 
 结果含 `instance_id`、`generation`、`launch_id`、`cluster_epoch`、`queried_at`，以及 `series`。每个点分开给出查询时间 `evaluated_at` 和原始样本时间 `observed_at`：
 
@@ -68,6 +76,8 @@ nodeguard 可配置独立 `metrics`：同一登记私网 IP、9445 端口、depl
 采集 CA 更换或撤销需要在受控维护窗口替换专用信任根并重启 nodeguard；目前没有 CRL/OCSP 或 CA 热重载，不能承诺即时撤销某一张证书。重启仍须遵守宿主账本恢复和隔离流程。超时不产生资源零值或终止证明。
 
 每次读取先按本机 boot 账本选出未完成可信终止的普通工作负载，备份 VM 不进入产品实例指标。读取器核对固定 cgroup FD 的 device/inode，以及各已登记 pidfd 和进程 cgroup 归属，再经固定目录 FD 读内核计数器；读取后重复身份检查。身份不匹配或读取失败时只输出 `sandbox_vm_observation_success=0`，不会制造资源零值。采集不改变启动、终止或配额账本。
+
+`sandbox_vm_observation_success=1`仅表示原五项必需计数读取成功，不保证六项可选指标齐全。新内存文件各限64KiB；每个文件失败仅省略该文件的新序列。采集和写入白名单精确包含11项资源序列及1项基础观察标记，每节点上限为`256 × 12 = 3072`个样本。WAL容量报告同时计入这些序列、原生抓取记录及采集器自身指标；原70%磁盘预算门槛、保留期限和内存上限保持。已有安装须重新渲染并审核容量报告，不能仅手工放宽白名单。
 
 每宿主最多一个并发采集、256 个登记观察体和 2 MiB 输出；批次具有 2 秒处理期限、HTTP 3 秒期限。固定观察锁使用非阻塞取得，仅在锁内复制已有 cgroup 和 pidfd 句柄；实际 proc/cgroup 读取在锁外完成。用户态超时无法解除内核不可中断 I/O；后台任务仍持有唯一槽位，避免超时后不断创建阻塞线程。这是故障限制，不是节点容量认证。
 

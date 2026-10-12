@@ -7,6 +7,7 @@ export default defineConfig({
     "notification-inbox.spec.ts",
     "tenant-audit.spec.ts",
     "backup-capability.spec.ts",
+    "runtime-metrics.spec.ts",
   ],
   fullyParallel: false,
   workers: 1,

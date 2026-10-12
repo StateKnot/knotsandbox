@@ -1,6 +1,8 @@
 # 开发进度与验收证据
 
-最新检查与计划（2026-10-12）：完成资源效率/GPU源码审查与官方预研。当前只有五类VM宿主用量和配额/TTL/可信回收基础，没有有效期容量分母、完整利用率/浪费/推荐/成本闭环；idle后台逻辑已存在，但公开策略入口未实现且默认NULL。GPU请求/Flavor/配额/节点池/设备租约/隔离清理/采集/API/UI均未实现，当前严格拒绝额外GPU资源。已新增7个工作包（总61项）：G0-08、G1-11/G1-12、G2-13、G3-12/G3-13、G4-09；P0先CPU画像与G2-07 idle运营入口，同时认证GPU底座，随后设备账本/观测/受控优化/弹性和真GPU/72h/成本验收。GPU Operator 26.3候选Kata路径需整个GPU节点设备组独占，MIG/shared mode另认证；未改变现有安全限制或运行能力，也未做实机GPU/云账单测量。见[审查与生产方案](../research/resource-efficiency-audit-and-plan-20261012.md)、[GPU官方预研](../research/gpu-resource-efficiency-reference-20261012.md)、[开发表](../research/rust-sandbox-development-workbreakdown.md#11-资源效率与gpu新增交付顺序)。
+最新开发检查点（2026-10-12）：G0-08/G3-12已交付首批资源观测子项，固定宿主指标5→11，CPU自身CFS节流、匿名/文件内存和宿主OOM事件/终止进程速率打通nodeguard/API/OpenAPI/SDK/控制台。可选字段缺失不补零、不抹掉原五项；无利用率百分比或自动操作。采集/写入白名单12项、每节点3072样本和WAL模型同步，原身份/CA/70%磁盘门槛保留。普通Rust56程序429通过/0失败/246环境专项明确ignored；Linux39普通通过及独立真实cgroup专项1/1；隔离TLS PostgreSQL/签名API1/1、真实promtool1/1、双节点双副本采集写入、SDK70/控制台66/Chrome2/OpenAPI13、部署13单测/14官方schema及严格Clippy/fmt通过。首轮权限、定位、计时与容器准备失败保留，未放宽断言/权限/超时，当前测试输入和自有清理核对。无新迁移或生产部署；有效期容量分母、峰值/成本、GPU与公开idle策略仍待开发。详见[本批交付](../research/resource-observability-delivery-20261012.md)。
+
+上一检查点（2026-10-12）：完成资源效率/GPU源码审查与官方预研，并新增7个工作包（总61项）：G0-08、G1-11/G1-12、G2-13、G3-12/G3-13、G4-09。idle后台逻辑已存在，但公开策略入口未实现且默认NULL；整VM背景工作/硬停授权、独立可撤销委派和保护须完整开发。GPU请求/Flavor/配额/节点池/设备租约/隔离清理/采集/API/UI均未实现，当前严格拒绝额外GPU资源。GPU候选Kata路径需整个GPU节点设备组独占，MIG/shared mode另认证；未做实机GPU/云账单测量。见[审查与生产方案](../research/resource-efficiency-audit-and-plan-20261012.md)、[GPU官方预研](../research/gpu-resource-efficiency-reference-20261012.md)、[开发表](../research/rust-sandbox-development-workbreakdown.md#11-资源效率与gpu新增交付顺序)。
 
 上一检查点：G4-06已补齐升级后同run UNKNOWN→FAILED双状态通知合同。当前coordinator独立LOGIN合法推进v5→v6并同事务保存来源/转换审计，原UNKNOWN首来源v4及已阅v2保持，FAILED独立未读v1；同文本key跨两个通知target恢复各自原回执，FAILED ACK、实时撤权、limit1固定cutoff分页和跨项目/租户游标拒绝通过。首次实际验收发现测试误期望终态同版本重复源提交；只修正为真实唯一约束23505及整事务回滚，源码/日志/自有清理记录保留，没有放宽产品约束。最终820文件候选下14组64项真实Docker TLS PG/HTTP/worker回归通过，扩展升级用例1/1（1.70秒）；Rust56程序427通过/0失败/246环境专项明确ignored、严格Clippy/fmt及SDK构建通过。42条正式迁移逐项匹配、无38，输入/二进制/SDK无漂移、自有清理确认，runner强制三个完成marker。该结果证明合法来源writer与当前通知Interface，不代表完整controller未知结果恢复、旧发行包混跑/回退或实云发布。见[本轮交付](../research/database-upgrade-progression-delivery-20261011.md)、[升级说明](database-upgrade.md)。
 
@@ -112,7 +114,7 @@ Linux v6不可变668文件源码点 `7be7c22a0af3765adbd4033f32bfcd18f7658497f8a
 | G0-05 | 云和版本矩阵 | 设计已记录，验收待完成 | research/rust-sandbox-production-development.md |
 | G0-06 | 安全设计 | 设计已记录，验收待完成 | research/rust-sandbox-production-development.md |
 | G0-07 | 容量和验收 | 设计已记录，验收待完成 | research/rust-sandbox-production-development.md |
-| G0-08 | 资源效率与GPU合同 | 未开始 | P0；本次已审查/预研/列计划，指标分母/有效期、SLO/保护租约、GPU支持矩阵/物理分配单位/预算与排期仍待冻结。见[实施计划](../research/resource-efficiency-audit-and-plan-20261012.md) |
+| G0-08 | 资源效率与GPU合同 | 开发中 | P0；首批六项宿主指标/单位/缺失与基础兼容、精确白名单/3072样本及WAL预算已固定并验收；有效期容量分母、SLO/保护租约、GPU支持矩阵/物理分配单位/预算排期仍待冻结。见[交付](../research/resource-observability-delivery-20261012.md) |
 | G1-01 | 工程与流水线 | 开发中 | 正常锁定 Cargo/OCI/Rust/SDK CI与八ELF构建/export/原生库存/OCI/SBOM/扫描闭包代码已实现；本轮63项发布协议通过。当前源码Linux八制品实际构建、完整漏洞扫描和统一签名发布门未通过；旧七ELF候选仅为历史来源，发布仍被阻止 |
 | G1-02 | 云资源IaC | 开发中 | Terraform固定CLI/provider、三AZ网络/节点/私网入口、RDS、OSS/KMS与组件RAM；官方schema validate及11项mock plan通过，未执行云apply/实云验收 |
 | G1-03 | 集群安装维护 | 开发中 | 固定制品安装器，新增平台组件网络边界排除后9项离线/24资源schema/7入口Ansible语法通过；已拆控制面与addons安装，工作负载公钥双源发布、实际投射token到STS门禁已实现并做协议测试；宿主安装器/登记已测，未执行云SSH/安装或持续fencing认证 |
@@ -139,7 +141,7 @@ Linux v6不可变668文件源码点 `7be7c22a0af3765adbd4033f32bfcd18f7658497f8a
 | G2-12 | 内核故障回归 | 开发中 | PG故障/并发、worker失租约与UID丢失、SDK断流重放已覆盖；真实节点/网络/磁盘故障尚待环境 |
 | G2-13 | 资源规格与GPU账本 | 未开始 | P0；CPU批准profile/overhead、GPU设备组库存/租约与tenant/project配额、API/SDK/角色及正常新迁移；无双分配或提前释放 |
 | G3-01 | 实例详情 | 开发中 | 独立/details聚合持久工作区、模板digest、策略版本、租约与launch证据；执行摘要独立授权，实时健康明确UNKNOWN；控制台详情页已接真实API合同，浏览器使用合同替身验证；云连续采样待验收 |
-| G3-02 | 监控与告警 | 开发中 | 五类宿主资源指标、固定PromQL/原始样本时间/HA不累加、历史launch授权、查询后撤权与token过期已接API/OpenAPI/SDK/控制台；采集链标准告警、38场景原生回放和真实双副本故障恢复通过；这些是用量及采集链告警，不等于利用率/浪费闭环，也无GPU；画像/优化另列G3-12/G3-13，实例告警管理/自动修复及云验收待完成 |
+| G3-02 | 监控与告警 | 开发中 | 宿主固定指标已5→11，固定PromQL/原始样本时间/HA不累加、历史launch授权、查询后撤权与token过期接API/OpenAPI/SDK/控制台；采集链标准告警及原38场景回放保留，新六项双副本采集写入/故障恢复另验收。用量/节流/内存观察不等于完整利用率/浪费闭环，也无GPU；实例告警管理/自动修复及云验收待完成 |
 | G3-03 | 操作记录 | 开发中 | 项目作用域操作/审计分页API、HMAC游标、实时撤权、历史错误脱敏；控制台历史页已接真实API合同，归档保留待开发 |
 | G3-04 | 事件与通知 | 开发中 | 已有受租户项目隔离的SSE事件流与控制台断点重连/撤权清空证据；0042异常收件箱及正常分页/详情/幂等确认API已接SDK和UI。真实BFF异常ACK丢回执、UNKNOWN重载、读写撤权、原键/旧ETag重放和业务事实不变已通过；外发Webhook、归档保留、事件/通知容量及目标云入口慢消费者仍待验收 |
 | G3-05 | 安全防护 | 开发中 | 正式1..37上的只读/security API、OpenAPI/SDK/控制台已接入；实际PG/JWT/JWKS/真实Node SDK安全专项8项及capabilities 1项通过，最后DB时钟判定权限期限；压缩文档展开上限、数值精度、历史证据、optional脱敏与撤权已测，5组OpenAPI合同和2项Chrome HTTP合同通过。期望/历史/独立证据分离，独立认证仍UNKNOWN；持久隔离/解除隔离、拒绝历史和镜像认证待开发 |
@@ -149,7 +151,7 @@ Linux v6不可变668文件源码点 `7be7c22a0af3765adbd4033f32bfcd18f7658497f8a
 | G3-09 | 租户账户与客户端 | 开发中 | 机器身份及项目grant管理已有真实全链；新增独立租户账户审计API/SDK/UI，无需项目选择，脱敏和当前授权5项实际PG/签名HTTP/Node专项通过。人类账户生命周期、MFA/邮件与生产HA待完成 |
 | G3-10 | 产品安装与控制台 | 开发中 | 新增租户账户审计和备份能力UI约束，控制台66单测及新增9项Chrome HTTP合同/生产构建通过；已有OIDC/BFF管理链证据保留，新审计尚未计作BFF全链。必跑CI新增tenant_audit真实数据库suite与SDK制品漂移检查，远端未执行。全产品安装组合、统一Linux八ELF/四OCI签名发布、实云/PKI/HA/容量待完成 |
 | G3-11 | 完整功能验收 | 未开始 | — |
-| G3-12 | 利用率与成本画像 | 未开始 | P0先CPU/内存/存储；有效期容量分母、压力峰值/覆盖率、GPU采集归属/显存/功耗/故障、聚合/浪费分类/资源时长与实际费用、只读API/UI |
+| G3-12 | 利用率与成本画像 | 开发中 | 首批六项CPU自身节流/匿名与文件内存/宿主OOM观察已全链打通并实际本地验收；有效期容量分母、PSI/峰值/覆盖率、存储/聚合/浪费分类/资源时长与费用、GPU采集归属仍待开发，不宣称百分比或成本收益。见[交付](../research/resource-observability-delivery-20261012.md) |
 | G3-13 | 资源优化闭环 | 未开始 | P1；有证据建议/preview、显式策略/授权/撤销、保卷停机重建调档、batch队列/受控装箱和收益核验；缺测/UNKNOWN不误停 |
 | G4-01 | 权限与攻击面 | 开发中 | 整仓身份与安装问题已修复：完整安装输入绑定、输出读取后原身份复核、显式OAuth scope profile、SERVICE client及owner CAS轮换。真实身份/输出/委派和受影响API回归已通过并接必跑CI；网络/镜像/备份/session等完整攻击面与候选发布验收未完成。见[修复证据](../research/architecture-review-fixes-20261010.md) |
 | G4-02 | 状态与生命周期故障 | 开发中 | 生命周期worker永久故障与timer监督、公平到期领取及非阻塞锁已实现；真实进程运行后claim/timer ACL故障非零退出及物理PG后端缺席、锁超时同进程恢复、百项workspace行锁后续STOP均通过，并接必跑CI。实云、旧generation/终端/批量容量等完整矩阵待验收。见[修复证据](../research/architecture-review-fixes-20261010.md) |

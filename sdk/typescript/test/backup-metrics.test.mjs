@@ -57,3 +57,31 @@ test('metrics preserves an explicit launch and missing values without mutation o
   assert.equal(result.data.series.points[0].status, 'MISSING');
   assert.equal(result.data.series.points[0].value, null);
 });
+
+test('host efficiency metrics keep fixed selectors, units, genuine zero and missing samples', async () => {
+  for (const [metric, unit, value] of [
+    ['VM_CPU_THROTTLED_PERIODS_PER_SECOND', 'periods_per_second', 2],
+    ['VM_CPU_THROTTLED_SECONDS_PER_SECOND', 'seconds_per_second', 1.5],
+    ['VM_MEMORY_ANON_BYTES', 'bytes', 4096],
+    ['VM_MEMORY_FILE_BYTES', 'bytes', 8192],
+    ['VM_MEMORY_OOM_EVENTS_PER_SECOND', 'events_per_second', 0],
+    ['VM_MEMORY_OOM_KILLS_PER_SECOND', 'events_per_second', 0.2],
+  ]) {
+    const client = clientFor(async request => {
+      assert.equal(request.method, 'GET');
+      assert.equal(request.headers.get('idempotency-key'), null);
+      assert.equal(request.headers.get('x-tenant-id'), tenant);
+      const query = new URL(request.url).searchParams;
+      assert.equal(query.get('metric'), metric);
+      assert.equal(query.get('launch_id'), resource);
+      return Response.json({ instance_id: resource, launch_id: resource, series: { metric, unit, points: [
+        { value, status: 'FRESH', collector_replica: 'a' },
+        { value: null, status: 'MISSING', collector_replica: null },
+      ] } });
+    });
+    const result = await client.GET('/v1/instances/{id}/metrics', { params: { path: { id: resource }, header: { 'X-Tenant-ID': tenant }, query: { metric, start: '2026-10-12T00:00:00Z', end: '2026-10-12T00:01:00Z', step_seconds: 15, launch_id: resource } } });
+    assert.equal(result.data.series.unit, unit);
+    assert.equal(result.data.series.points[0].value, value);
+    assert.equal(result.data.series.points[1].value, null);
+  }
+});

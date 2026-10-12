@@ -36,7 +36,13 @@ type Result<T> = std::result::Result<T, MetricsError>;
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RuntimeMetric {
     VmCpuCores,
+    VmCpuThrottledPeriodsPerSecond,
+    VmCpuThrottledSecondsPerSecond,
     VmMemoryBytes,
+    VmMemoryAnonBytes,
+    VmMemoryFileBytes,
+    VmMemoryOomEventsPerSecond,
+    VmMemoryOomKillsPerSecond,
     VmIoReadBytesPerSecond,
     VmIoWriteBytesPerSecond,
     VmTasks,
@@ -45,13 +51,25 @@ impl RuntimeMetric {
     fn counter(&self) -> bool {
         matches!(
             self,
-            Self::VmCpuCores | Self::VmIoReadBytesPerSecond | Self::VmIoWriteBytesPerSecond
+            Self::VmCpuCores
+                | Self::VmCpuThrottledPeriodsPerSecond
+                | Self::VmCpuThrottledSecondsPerSecond
+                | Self::VmMemoryOomEventsPerSecond
+                | Self::VmMemoryOomKillsPerSecond
+                | Self::VmIoReadBytesPerSecond
+                | Self::VmIoWriteBytesPerSecond
         )
     }
     pub(crate) fn name(&self) -> &'static str {
         match self {
             Self::VmCpuCores => "sandbox_vm_cpu_seconds_total",
+            Self::VmCpuThrottledPeriodsPerSecond => "sandbox_vm_cpu_throttled_periods_total",
+            Self::VmCpuThrottledSecondsPerSecond => "sandbox_vm_cpu_throttled_seconds_total",
             Self::VmMemoryBytes => "sandbox_vm_memory_bytes",
+            Self::VmMemoryAnonBytes => "sandbox_vm_memory_anon_bytes",
+            Self::VmMemoryFileBytes => "sandbox_vm_memory_file_bytes",
+            Self::VmMemoryOomEventsPerSecond => "sandbox_vm_memory_oom_events_total",
+            Self::VmMemoryOomKillsPerSecond => "sandbox_vm_memory_oom_kills_total",
             Self::VmIoReadBytesPerSecond => "sandbox_vm_io_read_bytes_total",
             Self::VmIoWriteBytesPerSecond => "sandbox_vm_io_write_bytes_total",
             Self::VmTasks => "sandbox_vm_tasks",
@@ -60,7 +78,12 @@ impl RuntimeMetric {
     pub fn unit(&self) -> &'static str {
         match self {
             Self::VmCpuCores => "cores",
-            Self::VmMemoryBytes => "bytes",
+            Self::VmCpuThrottledPeriodsPerSecond => "periods_per_second",
+            Self::VmCpuThrottledSecondsPerSecond => "seconds_per_second",
+            Self::VmMemoryBytes | Self::VmMemoryAnonBytes | Self::VmMemoryFileBytes => "bytes",
+            Self::VmMemoryOomEventsPerSecond | Self::VmMemoryOomKillsPerSecond => {
+                "events_per_second"
+            }
             Self::VmIoReadBytesPerSecond | Self::VmIoWriteBytesPerSecond => "bytes_per_second",
             Self::VmTasks => "tasks",
         }

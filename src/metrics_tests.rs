@@ -171,6 +171,91 @@ fn query_identity_is_closed_and_cost_is_bounded() {
     assert!(MetricRange::new(now - chrono::Duration::days(91), now, 3600).is_err());
 }
 
+#[test]
+fn efficiency_series_keep_real_zero_over_one_missing_and_ha_freshness() {
+    let labels = binding().labels("production-a").unwrap();
+    let t = range().start;
+    for (metric, unit, measured) in [
+        (
+            RuntimeMetric::VmCpuThrottledPeriodsPerSecond,
+            "periods_per_second",
+            2.0,
+        ),
+        (
+            RuntimeMetric::VmCpuThrottledSecondsPerSecond,
+            "seconds_per_second",
+            1.5,
+        ),
+        (RuntimeMetric::VmMemoryAnonBytes, "bytes", 4096.0),
+        (RuntimeMetric::VmMemoryFileBytes, "bytes", 8192.0),
+        (
+            RuntimeMetric::VmMemoryOomEventsPerSecond,
+            "events_per_second",
+            0.5,
+        ),
+        (
+            RuntimeMetric::VmMemoryOomKillsPerSecond,
+            "events_per_second",
+            0.25,
+        ),
+    ] {
+        let decoded = decode(
+            &serde_json::to_vec(&response(vec![
+                series(
+                    &labels,
+                    "a",
+                    "value",
+                    json!([[t, measured.to_string()], [t + 15, "0"]]),
+                ),
+                series(
+                    &labels,
+                    "a",
+                    "observed_at",
+                    json!([[t, t.to_string()], [t + 15, (t + 15).to_string()]]),
+                ),
+                series(
+                    &labels,
+                    "b",
+                    "value",
+                    json!([[t, (measured * 4.0).to_string()]]),
+                ),
+                series(
+                    &labels,
+                    "b",
+                    "observed_at",
+                    json!([[t, (t - 90).to_string()]]),
+                ),
+            ]))
+            .unwrap(),
+            &labels,
+            &["a".into(), "b".into()],
+            metric,
+            range(),
+        )
+        .unwrap();
+        assert_eq!(decoded.unit, unit);
+        assert_eq!(decoded.points[0].value, Some(measured));
+        assert_eq!(decoded.points[0].collector_replica.as_deref(), Some("a"));
+        assert_eq!(decoded.points[1].value, Some(0.0));
+        assert_eq!(decoded.points[2].value, None);
+        assert_eq!(decoded.points[2].status, SampleStatus::Missing);
+        let absent = decode(
+            &serde_json::to_vec(&response(vec![])).unwrap(),
+            &labels,
+            &["a".into()],
+            metric,
+            range(),
+        )
+        .unwrap();
+        assert!(
+            absent
+                .points
+                .iter()
+                .all(|p| p.value.is_none() && p.status == SampleStatus::Missing)
+        );
+    }
+}
+
 /// The actual pinned Prometheus evaluator, not a handwritten PromQL substitute.
 /// Docker must already have the locked image; no registry pull occurs here.
 #[test]
@@ -214,7 +299,7 @@ fn official_prometheus_preserves_identity_raw_sample_time_and_separate_ha_series
     );
     value.insert("sandbox_value_kind".into(), "value".into());
     gauge.insert("sandbox_value_kind".into(), "observed_at".into());
-    let test = json!({"evaluation_interval":"15s","fuzzy_compare":true,"tests":[
+    let mut test = json!({"evaluation_interval":"15s","fuzzy_compare":true,"tests":[
         {"name":"exact identity and HA remain separate", "interval":"15s", "input_series":inputs,
         "promql_expr_test":[{"expr":expression(&labels,RuntimeMetric::VmCpuCores),"eval_time":"2m","exp_samples":expected}]},
         {"name":"lookback does not replace original sample time", "interval":"15s",
@@ -230,6 +315,58 @@ fn official_prometheus_preserves_identity_raw_sample_time_and_separate_ha_series
             {"expr":expression(&labels,RuntimeMetric::VmCpuCores),"eval_time":"3m","exp_samples":[]}
         ]}
     ]});
+    // Literal workload expectations exercise the actual Prometheus evaluator.
+    // Throttled seconds/s is deliberately >1; it is not a utilization ratio.
+    for (metric, values, expected_value, gauge) in [
+        (
+            RuntimeMetric::VmCpuThrottledPeriodsPerSecond,
+            "0+30x8",
+            2.0,
+            false,
+        ),
+        (
+            RuntimeMetric::VmCpuThrottledSecondsPerSecond,
+            "0+22.5x8",
+            1.5,
+            false,
+        ),
+        (RuntimeMetric::VmMemoryAnonBytes, "4096+0x8", 4096.0, true),
+        (RuntimeMetric::VmMemoryFileBytes, "8192+0x8", 8192.0, true),
+        (
+            RuntimeMetric::VmMemoryOomEventsPerSecond,
+            "0+0x8",
+            0.0,
+            false,
+        ),
+        (
+            RuntimeMetric::VmMemoryOomKillsPerSecond,
+            "0+3x8",
+            0.2,
+            false,
+        ),
+    ] {
+        let mut input_labels = labels.clone();
+        input_labels.insert("collector_replica".into(), "a".into());
+        let input = format!("{}{}", metric.name(), selector(&input_labels));
+        let mut value_labels = input_labels.clone();
+        value_labels.insert("sandbox_value_kind".into(), "value".into());
+        if gauge {
+            value_labels.insert("__name__".into(), metric.name().into());
+        }
+        input_labels.insert("sandbox_value_kind".into(), "observed_at".into());
+        test["tests"].as_array_mut().unwrap().push(json!({
+            "name":format!("optional efficiency metric {} retains units, zero and missing", metric.name()),
+            "interval":"15s",
+            "input_series":[{"series":input,"values":format!("{values} _x30")}],
+            "promql_expr_test":[
+                {"expr":expression(&labels,metric),"eval_time":"2m","exp_samples":[
+                    {"labels":selector(&value_labels),"value":expected_value},
+                    {"labels":selector(&input_labels),"value":120}
+                ]},
+                {"expr":expression(&labels,metric),"eval_time":"7m15s","exp_samples":[]}
+            ]
+        }));
+    }
     let dir = tempfile::tempdir()?;
     std::fs::write(dir.path().join("queries.yml"), serde_json::to_vec(&test)?)?;
     let lock: Value =
@@ -537,7 +674,7 @@ async fn check_metrics_http_contract(
         )?)
     };
     let parameters = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("metric", "VM_CPU_CORES")
+        .append_pair("metric", "VM_MEMORY_ANON_BYTES")
         .append_pair("start", &q.start.to_rfc3339())
         .append_pair("end", &q.end.to_rfc3339())
         .append_pair("step_seconds", "15")
@@ -568,6 +705,39 @@ async fn check_metrics_http_contract(
     assert_eq!(data["launch_id"], f.launch.launch_id.to_string());
     assert_eq!(data["series"]["points"][0]["status"], "MISSING");
     assert!(data["series"]["points"][0]["value"].is_null());
+    for metric in [
+        "VM_CPU_THROTTLED_PERIODS_PER_SECOND",
+        "VM_CPU_THROTTLED_SECONDS_PER_SECOND",
+        "VM_MEMORY_ANON_BYTES",
+        "VM_MEMORY_FILE_BYTES",
+        "VM_MEMORY_OOM_EVENTS_PER_SECOND",
+        "VM_MEMORY_OOM_KILLS_PER_SECOND",
+    ] {
+        let query = parameters.replace("VM_MEMORY_ANON_BYTES", metric);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::get(format!(
+                    "/v1/instances/{}/metrics?{query}",
+                    f.launch.instance_id
+                ))
+                .header("authorization", format!("Bearer {}", token(300)?))
+                .header("x-tenant-id", f.f.actor.tenant_id.to_string())
+                .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK, "{metric}");
+        let value: Value =
+            serde_json::from_slice(&axum::body::to_bytes(response.into_body(), 128 * 1024).await?)?;
+        assert_eq!(value["series"]["metric"], metric);
+        assert!(
+            value["series"]["points"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|p| p["status"] == "MISSING" && p["value"].is_null())
+        );
+    }
     mode.store(3, Ordering::SeqCst);
     let expired = app.clone().oneshot(send("", token(3)?)?).await?;
     mode.store(0, Ordering::SeqCst);

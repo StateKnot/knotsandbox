@@ -1,6 +1,6 @@
 //! Dedicated read-only scrape surface. Serve only with its own scraper-client
 //! CA, never the controller CA and never on the CRI control router.
-use super::{GuardError, cri::CriProxy};
+use super::{GuardError, cri::CriProxy, metrics::CgroupCounters};
 use crate::metrics::{RuntimeMetric, RuntimeMetricBinding};
 use axum::{
     Router,
@@ -40,6 +40,63 @@ pub fn router(proxy: Arc<CriProxy>, deployment: String) -> Result<Router, GuardE
             slots: Arc::new(tokio::sync::Semaphore::new(1)),
         }))
 }
+
+fn write_samples(
+    output: &mut String,
+    labels: &str,
+    counters: &CgroupCounters,
+) -> Result<(), GuardError> {
+    for (metric, value) in [
+        (
+            RuntimeMetric::VmCpuCores,
+            Some(counters.cpu_usage_usec as f64 / 1_000_000.0),
+        ),
+        (
+            RuntimeMetric::VmCpuThrottledPeriodsPerSecond,
+            counters.cpu_throttled_periods.map(|v| v as f64),
+        ),
+        (
+            RuntimeMetric::VmCpuThrottledSecondsPerSecond,
+            counters.cpu_throttled_usec.map(|v| v as f64 / 1_000_000.0),
+        ),
+        (
+            RuntimeMetric::VmMemoryBytes,
+            Some(counters.memory_bytes as f64),
+        ),
+        (
+            RuntimeMetric::VmMemoryAnonBytes,
+            counters.memory_anon_bytes.map(|v| v as f64),
+        ),
+        (
+            RuntimeMetric::VmMemoryFileBytes,
+            counters.memory_file_bytes.map(|v| v as f64),
+        ),
+        (
+            RuntimeMetric::VmMemoryOomEventsPerSecond,
+            counters.memory_oom_events.map(|v| v as f64),
+        ),
+        (
+            RuntimeMetric::VmMemoryOomKillsPerSecond,
+            counters.memory_oom_kills.map(|v| v as f64),
+        ),
+        (
+            RuntimeMetric::VmIoReadBytesPerSecond,
+            Some(counters.io_read_bytes as f64),
+        ),
+        (
+            RuntimeMetric::VmIoWriteBytesPerSecond,
+            Some(counters.io_write_bytes as f64),
+        ),
+        (RuntimeMetric::VmTasks, Some(counters.tasks as f64)),
+    ] {
+        if let Some(value) = value {
+            writeln!(output, "{}{{{labels}}} {value}", metric.name())
+                .map_err(|_| GuardError::Unknown)?;
+        }
+    }
+    Ok(())
+}
+
 async fn scrape(State(state): State<MetricsState>) -> Response {
     let result = async {
         let slot = state
@@ -56,14 +113,20 @@ async fn scrape(State(state): State<MetricsState>) -> Response {
             let mut output=String::new();
             for (metric,kind,help) in [
                 (RuntimeMetric::VmCpuCores,"counter","CPU seconds charged to the host VM cgroup including virtualization overhead."),
+                (RuntimeMetric::VmCpuThrottledPeriodsPerSecond,"counter","Periods throttled by this host VM cgroup's own CFS bandwidth limit; excludes ancestor throttling."),
+                (RuntimeMetric::VmCpuThrottledSecondsPerSecond,"counter","Accumulated seconds throttled by this host VM cgroup's own CFS bandwidth limit; its rate may exceed one, excludes ancestor throttling."),
                 (RuntimeMetric::VmMemoryBytes,"gauge","Bytes in host VM cgroup memory.current including cache."),
+                (RuntimeMetric::VmMemoryAnonBytes,"gauge","Anonymous mapping bytes charged to the host VM cgroup; not a guest RAM working set."),
+                (RuntimeMetric::VmMemoryFileBytes,"gauge","File-backed bytes charged to the host VM cgroup including tmpfs and shared memory; not all reclaimable cache."),
+                (RuntimeMetric::VmMemoryOomEventsPerSecond,"counter","Kernel memory.events oom counter for the host VM cgroup; follows the mounted kernel hierarchy semantics, not guest OOMs."),
+                (RuntimeMetric::VmMemoryOomKillsPerSecond,"counter","Host processes killed by OOM as reported by this VM cgroup's memory.events; not guest processes or instance deaths."),
                 (RuntimeMetric::VmIoReadBytesPerSecond,"counter","Sum of host VM cgroup io.stat rbytes across devices."),
                 (RuntimeMetric::VmIoWriteBytesPerSecond,"counter","Sum of host VM cgroup io.stat wbytes across devices."),
                 (RuntimeMetric::VmTasks,"gauge","Host tasks (threads) in the VM cgroup, not guest processes."),
             ] {
                 writeln!(output,"# HELP {} {help}\n# TYPE {} {kind}",metric.name(),metric.name()).map_err(|_|GuardError::Unknown)?;
             }
-            output.push_str("# HELP sandbox_vm_observation_success Whether this scrape obtained all bound host counters; never a health or termination proof.\n# TYPE sandbox_vm_observation_success gauge\n");
+            output.push_str("# HELP sandbox_vm_observation_success Whether this scrape obtained the five required bound host counters; optional pressure counters may be absent, never a health or termination proof.\n# TYPE sandbox_vm_observation_success gauge\n");
             let mut seen=BTreeSet::new();
             for (launch,observation) in observations {
                 if Instant::now()>=deadline { return Err(GuardError::Expired) }
@@ -71,13 +134,7 @@ async fn scrape(State(state): State<MetricsState>) -> Response {
                 let binding=RuntimeMetricBinding{tenant_id:launch.tenant_id,project_id:launch.project_id,instance_id:launch.instance_id,generation:launch.generation,launch_id:launch.launch_id,cluster_epoch:node.cluster_epoch,node_uid:node.node_uid,host_boot_id:node.boot_id};
                 let labels=binding.labels(&state.deployment).map_err(|_|GuardError::Invalid)?.iter().map(|(k,v)|format!("{k}=\"{v}\"")).collect::<Vec<_>>().join(",");
                 if let Ok(c)=observer.metrics(&observation) {
-                    for (metric,value) in [
-                        (RuntimeMetric::VmCpuCores,c.cpu_usage_usec as f64/1_000_000.0),
-                        (RuntimeMetric::VmMemoryBytes,c.memory_bytes as f64),
-                        (RuntimeMetric::VmIoReadBytesPerSecond,c.io_read_bytes as f64),
-                        (RuntimeMetric::VmIoWriteBytesPerSecond,c.io_write_bytes as f64),
-                        (RuntimeMetric::VmTasks,c.tasks as f64),
-                    ] { writeln!(output,"{}{{{labels}}} {value}",metric.name()).map_err(|_|GuardError::Unknown)?; }
+                    write_samples(&mut output,&labels,&c)?;
                     writeln!(output,"sandbox_vm_observation_success{{{labels}}} 1").map_err(|_|GuardError::Unknown)?;
                 } else {
                     // Failed reads must not become a new zero resource sample.
@@ -111,6 +168,61 @@ mod tests {
     };
     use chrono::Utc;
     use uuid::Uuid;
+
+    #[test]
+    fn pressure_exposition_converts_units_and_omits_unavailable_counters() -> anyhow::Result<()> {
+        let counters = super::super::metrics::parse(
+            "usage_usec 1250000\nnr_throttled 3\nthrottled_usec 2500000",
+            "4096",
+            "8:0 rbytes=2 wbytes=3",
+            "1",
+            Some("anon 1024\nfile 2048"),
+            Some("oom 2\noom_kill 0"),
+        )?;
+        let mut output = String::new();
+        write_samples(&mut output, "instance_id=\"test\"", &counters)?;
+        assert_eq!(output.lines().count(), 11);
+        assert!(output.contains("sandbox_vm_cpu_seconds_total{instance_id=\"test\"} 1.25\n"));
+        assert!(
+            output.contains("sandbox_vm_cpu_throttled_periods_total{instance_id=\"test\"} 3\n")
+        );
+        assert!(
+            output.contains("sandbox_vm_cpu_throttled_seconds_total{instance_id=\"test\"} 2.5\n")
+        );
+        assert!(output.contains("sandbox_vm_memory_anon_bytes{instance_id=\"test\"} 1024\n"));
+        assert!(output.contains("sandbox_vm_memory_file_bytes{instance_id=\"test\"} 2048\n"));
+        assert!(output.contains("sandbox_vm_memory_oom_events_total{instance_id=\"test\"} 2\n"));
+        assert!(output.contains("sandbox_vm_memory_oom_kills_total{instance_id=\"test\"} 0\n"));
+
+        // Missing files and malformed optional files never emit zero samples.
+        let counters = super::super::metrics::parse(
+            "usage_usec 1250000",
+            "4096",
+            "8:0 rbytes=2 wbytes=3",
+            "1",
+            None,
+            Some("oom -1"),
+        )?;
+        output.clear();
+        write_samples(&mut output, "instance_id=\"test\"", &counters)?;
+        assert_eq!(output.lines().count(), 5);
+        assert!(output.contains("sandbox_vm_memory_bytes{instance_id=\"test\"} 4096\n"));
+        for name in [
+            "sandbox_vm_cpu_throttled_periods_total",
+            "sandbox_vm_cpu_throttled_seconds_total",
+            "sandbox_vm_memory_anon_bytes",
+            "sandbox_vm_memory_file_bytes",
+            "sandbox_vm_memory_oom_events_total",
+            "sandbox_vm_memory_oom_kills_total",
+        ] {
+            assert!(
+                !output.contains(name),
+                "unexpected unavailable metric {name}"
+            );
+        }
+        Ok(())
+    }
+
     async fn listen(
         app: Router,
         ca: &[u8],

@@ -1803,8 +1803,11 @@ export interface components {
             /** Format: date-time */
             cutoff: string;
         };
-        /** @enum {string} */
-        RuntimeMetric: "VM_CPU_CORES" | "VM_MEMORY_BYTES" | "VM_IO_READ_BYTES_PER_SECOND" | "VM_IO_WRITE_BYTES_PER_SECOND" | "VM_TASKS";
+        /**
+         * @description Fixed host VM cgroup metrics including virtualization overhead. Optional throttle/memory-stat/event series may be absent on older collectors or unsupported controllers; missing values stay null. These are neither utilization percentages nor health/termination proof.
+         * @enum {string}
+         */
+        RuntimeMetric: "VM_CPU_CORES" | "VM_MEMORY_BYTES" | "VM_IO_READ_BYTES_PER_SECOND" | "VM_IO_WRITE_BYTES_PER_SECOND" | "VM_TASKS" | "VM_CPU_THROTTLED_PERIODS_PER_SECOND" | "VM_CPU_THROTTLED_SECONDS_PER_SECOND" | "VM_MEMORY_ANON_BYTES" | "VM_MEMORY_FILE_BYTES" | "VM_MEMORY_OOM_EVENTS_PER_SECOND" | "VM_MEMORY_OOM_KILLS_PER_SECOND";
         MetricPoint: {
             /** Format: date-time */
             evaluated_at: string;
@@ -1818,7 +1821,7 @@ export interface components {
         MetricSeries: {
             metric: components["schemas"]["RuntimeMetric"];
             /** @enum {string} */
-            unit: "cores" | "bytes" | "bytes_per_second" | "tasks";
+            unit: "cores" | "bytes" | "bytes_per_second" | "tasks" | "periods_per_second" | "seconds_per_second" | "events_per_second";
             /** @enum {string} */
             source: "HOST_VM_RUNTIME";
             /** @constant */

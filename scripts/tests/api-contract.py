@@ -41,6 +41,33 @@ def references(value):
 
 
 class ApiContract(unittest.TestCase):
+    def test_host_efficiency_metrics_preserve_units_and_missing_values(self):
+        validator = Draft202012Validator(
+            {"$ref": "#/components/schemas/MetricSeries", "components": DOCUMENT["components"]},
+            format_checker=FormatChecker(formats=["date-time", "uuid"]),
+        )
+        for metric, unit, value in (
+            ("VM_CPU_THROTTLED_PERIODS_PER_SECOND", "periods_per_second", 2.0),
+            ("VM_CPU_THROTTLED_SECONDS_PER_SECOND", "seconds_per_second", 1.5),
+            ("VM_MEMORY_ANON_BYTES", "bytes", 4096),
+            ("VM_MEMORY_FILE_BYTES", "bytes", 8192),
+            ("VM_MEMORY_OOM_EVENTS_PER_SECOND", "events_per_second", 0),
+            ("VM_MEMORY_OOM_KILLS_PER_SECOND", "events_per_second", 0.2),
+        ):
+            with self.subTest(metric=metric):
+                series = {"metric": metric, "unit": unit, "source": "HOST_VM_RUNTIME", "stale_after_seconds": 60,
+                          "points": [{"evaluated_at": "2026-10-12T00:00:00Z", "observed_at": "2026-10-12T00:00:00Z",
+                                      "value": value, "status": "FRESH", "collector_replica": "a"},
+                                     {"evaluated_at": "2026-10-12T00:00:15Z", "observed_at": None,
+                                      "value": None, "status": "MISSING", "collector_replica": None}]}
+                validator.validate(series)
+                invalid = copy.deepcopy(series)
+                invalid["metric"] = "GPU_UTILIZATION"
+                self.assertTrue(list(validator.iter_errors(invalid)))
+                invalid = copy.deepcopy(series)
+                invalid["points"][0]["value"] = -1
+                self.assertTrue(list(validator.iter_errors(invalid)))
+
     def test_tenant_audit_projection_rejects_project_records_and_private_details(self):
         page = json.loads((ROOT / "sdk/typescript/test/fixtures/tenant-audit-page.json").read_text())
         validator = Draft202012Validator(

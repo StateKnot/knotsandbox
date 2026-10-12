@@ -11,7 +11,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from observability import validate, capacity, resources, prometheus, render, endpoint, LOCK, RAW, LABELS, SELF_METRICS, SELF_SAMPLE_LIMIT, SCRAPE_REPORT_SAMPLES
+from observability import validate, capacity, resources, prometheus, render, endpoint, LOCK, RAW, RAW_METRICS, LABELS, SELF_METRICS, SELF_SAMPLE_LIMIT, SCRAPE_REPORT_SAMPLES
 
 
 def relabel(labels, rules):
@@ -77,7 +77,7 @@ class ObservabilityTest(unittest.TestCase):
                 self.assertFalse(job['tls_config']['insecure_skip_verify'])
                 self.assertFalse(job['honor_timestamps'])
                 self.assertFalse(job['honor_labels'])
-                self.assertEqual(job['sample_limit'], 1536)
+                self.assertEqual(job['sample_limit'], 3072)
                 self.assertEqual(job['label_limit'], 13)
                 self.assertEqual(job['static_configs'][0]['targets'], [node['private_ip'] + ':9445'])
                 self.assertEqual(job['static_configs'][0]['labels'], {'scrape_node_uid': node['node_uid'], 'scrape_host_boot_id': node['host_boot_id']})
@@ -117,6 +117,48 @@ class ObservabilityTest(unittest.TestCase):
         self.assertIsNone(relabel({'__name__': 'scrape_duration_seconds', **target}, writer))
         self.assertIsNone(relabel({'__name__': 'unapproved_guest_secret', **target}, writer))
 
+    def test_all_pressure_metrics_pass_both_filters_without_weakening_identity_or_labels(self):
+        expected = (
+            'sandbox_vm_cpu_seconds_total', 'sandbox_vm_cpu_throttled_periods_total',
+            'sandbox_vm_cpu_throttled_seconds_total', 'sandbox_vm_memory_bytes',
+            'sandbox_vm_memory_anon_bytes', 'sandbox_vm_memory_file_bytes',
+            'sandbox_vm_memory_oom_events_total', 'sandbox_vm_memory_oom_kills_total',
+            'sandbox_vm_io_read_bytes_total', 'sandbox_vm_io_write_bytes_total',
+            'sandbox_vm_tasks', 'sandbox_vm_observation_success',
+        )
+        self.assertEqual(len(RAW_METRICS), 12)
+        self.assertEqual(set(RAW_METRICS), set(expected))
+        s, tf, u = fixture()
+        for replica in ('a', 'b'):
+            p = prometheus(s, replica, u)
+            writer = p['remote_write'][0]['write_relabel_configs']
+            for job in [j for j in p['scrape_configs'] if j['job_name'].startswith('nodeguard-')]:
+                node = next(n for n in s['nodes'] if job['job_name'].endswith(n['node_uid']))
+                source = {'deployment': s['deployment'], 'cluster_epoch': s['cluster_epoch'],
+                          'node_uid': node['node_uid'], 'host_boot_id': node['host_boot_id'],
+                          'generation': '1', 'collector_replica': 'rogue',
+                          'job': job['job_name'], 'instance': node['private_ip'] + ':9445',
+                          'secret_label': 'PRIVATE', 'exported_collector_replica': 'rogue',
+                          **{k: str(uuid.UUID(int=i + 101)) for i, k in enumerate(['tenant_id', 'project_id', 'instance_id', 'launch_id'])}}
+                for name in expected:
+                    with self.subTest(replica=replica, node=node['node_uid'], metric=name):
+                        accepted = relabel({**source, '__name__': name}, job['metric_relabel_configs'])
+                        self.assertEqual(set(accepted), set(LABELS))
+                        self.assertEqual(accepted['collector_replica'], replica)
+                        self.assertEqual(relabel(accepted, writer), accepted)
+                        self.assertNotIn('secret_label', accepted)
+                        self.assertNotIn('exported_collector_replica', accepted)
+                        for key, value in [('node_uid', str(uuid.UUID(int=999))),
+                                           ('host_boot_id', str(uuid.UUID(int=999))),
+                                           ('cluster_epoch', str(uuid.UUID(int=999))),
+                                           ('tenant_id', str(uuid.UUID(int=0))), ('tenant_id', 'invalid')]:
+                            self.assertIsNone(relabel({**source, '__name__': name, key: value}, job['metric_relabel_configs']))
+                for name in ['sandbox_vm_cpu_secret_total', 'sandbox_vm_memory_file_bytes_extra',
+                             'prefix_sandbox_vm_memory_oom_kills_total', 'sandbox_vm_gpu_utilization',
+                             'unapproved_guest_secret']:
+                    self.assertIsNone(relabel({**source, '__name__': name}, job['metric_relabel_configs']))
+                    self.assertIsNone(relabel({**source, '__name__': name}, writer))
+
     def test_self_scrape_is_bounded_loopback_and_scrubs_registry_private_labels(self):
         s, tf, u = fixture(); p = prometheus(s, 'b', u)
         job = next(j for j in p['scrape_configs'] if j['job_name'] == 'sandbox-agent')
@@ -139,10 +181,12 @@ class ObservabilityTest(unittest.TestCase):
 
     def test_capacity_includes_self_scrape_and_all_native_wal_reports(self):
         s, tf, u = fixture(); p = prometheus(s, 'a', u); c = capacity(s)
-        raw = len(s['nodes']) * 256 * 6
+        raw = len(s['nodes']) * 256 * 12
         native = len(p['scrape_configs']) * SCRAPE_REPORT_SAMPLES
         total = raw + SELF_SAMPLE_LIMIT + native
         self.assertEqual(c['max_raw_samples_per_scrape_per_replica'], raw)
+        self.assertEqual(c['max_raw_metrics_per_launch'], 12)
+        self.assertEqual(c['max_raw_samples_per_node_scrape'], 3072)
         self.assertEqual(c['max_self_samples_per_scrape_per_replica'], SELF_SAMPLE_LIMIT)
         self.assertEqual(c['max_scrape_report_samples_per_scrape_per_replica'], native)
         self.assertEqual(c['max_wal_samples_per_scrape_per_replica'], total)
@@ -151,7 +195,8 @@ class ObservabilityTest(unittest.TestCase):
         self.assertEqual(c['six_hour_budget_bytes_with_checkpoint_reserve'], total * 1440 * 1024 * 2)
         self.assertGreater(c['six_hour_budget_bytes_with_checkpoint_reserve'], raw * 1440 * 1024 * 2)
         self.assertEqual(c['disk_usage_budget_fraction'], 0.7)
-        # This accepted inventory fit the old raw-only budget, but the added WAL samples do not fit.
+        # This inventory fit the original six-series raw budget. The twelve
+        # series expansion must reject it without relaxing the disk margin.
         s['nodes'] = [{'name': 'kata-' + str(i), 'node_uid': str(uuid.UUID(int=i + 1)),
                        'host_boot_id': str(uuid.UUID(int=i + 101)), 'private_ip': '10.80.40.' + str(i + 10)} for i in range(16)]
         s['wal_gib'] = 97
@@ -159,6 +204,12 @@ class ObservabilityTest(unittest.TestCase):
         inventory.update({n['name']: {'id': 'i-test-' + str(i), 'private_ip': n['private_ip'], 'role': 'kata', 'zone': 'cn-hangzhou-h'} for i, n in enumerate(s['nodes'])})
         tf['node_inventory']['value'] = inventory
         self.assertLessEqual(16 * 256 * 6 * 1440 * 1024 * 2, int(97 * 1024 ** 3 * 0.7))
+        with self.assertRaisesRegex(ValueError, '^WAL_CAPACITY$'):
+            validate(s, tf, u)
+        # Even a twelve-series raw-only budget is insufficient if native/self
+        # WAL samples push it past the unchanged 70% capacity gate.
+        s['wal_gib'] = 193
+        self.assertLessEqual(16 * 256 * 12 * 1440 * 1024 * 2, int(193 * 1024 ** 3 * 0.7))
         with self.assertRaisesRegex(ValueError, '^WAL_CAPACITY$'):
             validate(s, tf, u)
 
