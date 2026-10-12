@@ -81,6 +81,25 @@ python3 infra/alicloud/install-terraform.py
 TF_BIN="$PWD/.local/tools/terraform-1.14.7/terraform" infra/alicloud/check.sh
 ```
 
+### 跨平台 provider 锁文件维护
+
+CLI 安装包和 provider 分别校验：`toolchain.lock.json` 固定 Terraform CLI 的官方 ZIP SHA-256，三个根模块各自的 `.terraform.lock.hcl` 固定 `aliyun/alicloud` 1.293.0。当前支持 `darwin_arm64`、`darwin_amd64`、`linux_arm64`、`linux_amd64`；版本维护时必须为四个平台预先生成 provider 的内容校验值 `h1`，不能只提交本机平台的 `h1`。官方发布包的 `zh` 校验 ZIP，不能代替已经解包的 provider 缓存所需的 `h1`。macOS 初始化成功不证明 Linux 的只读锁文件校验可通过。
+
+在独立维护分支使用锁定的 CLI 和官方 Registry 更新校验值，不连接云 backend：
+
+```bash
+tf_bin="$PWD/.local/tools/terraform-1.14.7/terraform"
+for module_dir in infra/alicloud infra/alicloud/state-bootstrap deploy/workload-identity/infra; do
+  "$tf_bin" -chdir="$module_dir" providers lock \
+    -platform=darwin_arm64 -platform=darwin_amd64 \
+    -platform=linux_arm64 -platform=linux_amd64
+done
+```
+
+审核日志中的 provider 签名 key ID `47422B4AA9FA381B`，确认版本仍为 1.293.0、原有发布包 `zh` 没有丢失，只增加由已验证官方包生成的目标平台 `h1`。随后提交三个锁文件，分别执行 `init -backend=false -input=false -lockfile=readonly`、`validate` 和原生 mock-provider 测试。普通 CI 和部署初始化继续使用 `-lockfile=readonly`；不能通过删除锁文件、临时允许 CI 改锁或换用未认证镜像解除校验失败。GitHub 发布包下载不可达时保留失败证据，不能把网络故障转换为接受任意新校验值。参照 [Terraform 锁文件校验说明](https://developer.hashicorp.com/terraform/language/files/dependency-lock)与[多平台 providers lock](https://developer.hashicorp.com/terraform/cli/commands/providers/lock)。
+
+2026-10-12 已为三个根模块补齐四平台内容校验值，各锁文件只新增三个 `h1`；provider 版本、约束、全部原有 `zh` 和 macOS arm64 原有 `h1` 保持不变。直接下载超时后，三个非本机平台的官方发布 ZIP 经 GitHub release asset API 获取，逐个 SHA-256 匹配此前已冻结的 `zh`；本机平台复用原有解包内容，由固定 Terraform 独立计算 `h1` 并严格匹配原冻结值，再从本任务的已验证本地镜像生成校验值。本轮保留官方 Registry 的 signer 元数据和原始签名，但没有重新执行 PGP 验签，信任依据为原锁定校验值。macOS arm64 实际完成三个模块的 `fmt`、只读锁文件/禁用 backend 的 `init`、`validate`，以及 **15 个原生 mock-provider 测试（10+2+3）**；没有连接云 backend、运行真实云 plan/apply 或取得云运行认证。Linux 平台的校验值已生成，实际 Linux 执行结果应以对应 CI 回执为准。
+
 2026-10-03 实际在 macOS arm64 完成：
 
 - Terraform 1.14.7 官方 archive 与 SHA256SUMS 比对一致；darwin_arm64 SHA256 为 `e9004e245b3e56bff9c7a6c572295d710f6ce4fc72e3910e99519ebdcb46d1bb`。`toolchain.lock.json` 同时固定 Linux/macOS 两种架构的官方包 checksum。此次没有独立 GPG 验证 Terraform CLI 签名。

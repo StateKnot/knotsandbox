@@ -60,7 +60,7 @@ WAL规划同时计入新序列、原生抓取记录和自身指标，原70%磁�
 | 双节点/双副本实际采集写入 | 真实Prometheus协议链通过 | 六项新序列各4份绑定正确，24份新样本；mTLS、写入重试、私有标签/无效身份拒绝、失败与恢复；exporter为协议夹具 |
 | 采集部署 | 13单测、14对象官方schema、锁定镜像配置/TLS/WAL跨重启、原38告警场景回放通过 | 精确白名单/3072样本、WAL余量拒绝和原身份规则，不是集群安装 |
 | SDK/控制台/OpenAPI | SDK70、控制台单测66、Chrome新指标合同2、OpenAPI13项通过 | 控制台/SDK构建与格式检查通过；Chrome为真实浏览器HTTP合同夹具 |
-| 代码检查 | all-targets严格Clippy及Rust格式检查通过 | 新增Rust、部署脚本与Interface已独立只读复核 |
+| 代码检查 | macOS all-targets严格Clippy及Rust格式检查通过；Linux补验见下文 | 新增Rust、部署脚本与Interface已独立只读复核 |
 
 保留首轮SDK回环监听权限失败、浏览器控件定位失败、并行Rust网络/计时失败以及冷编译期间PG容器准备超时。SDK在允许回环环境通过；浏览器改用实际combobox角色，不改变产品或断言；Rust同源码/原期限串行通过；PG在冷编译结束后用新库通过。控制台首次npm脚本报告Node选项错误，固定Node24.19.0绝对路径按同参数66项通过；不推断未复现的子进程环境根因。告警回放首轮脚本失败，单独配置/规则/38夹具生成通过后，原脚本串行重跑38项通过；未确认首轮失败根因。没有放宽授权、超时或测试断言。
 
@@ -73,3 +73,7 @@ G0-08/G3-12均仍开发中。下一步是有有效期的capacity/request/limit/o
 G2-07需完整闲置策略配置及安全授权：平台活动结束不证明guest无后台工作，启用不能绕过`instances:hard_stop`；独立有界可撤销委派、后台保护、计时重置、CAS/幂等和idle/TTL分离均待实现。现有UNKNOWN执行活动槽保护不能当成通用实例UNKNOWN排除。
 
 GPU版本/实机矩阵、设备租约/分配、安全清理、可信归属、GPU监控和成本核算继续按[资源效率计划](resource-efficiency-audit-and-plan-20261012.md)推进。未开启GPU、调整requests=limits、启用闲置停机或宣称降低了实际云费用。云隔离、72小时容量、真实工作负载SLO和统一签名发行仍有独立发布门。
+
+## 6. 公开CI补验
+
+首批公开CI的SDK/控制台通过；采集夹具目录权限、Linux测试lint和Terraform跨平台锁检查失败。随后完成三类窄修复及实际Linux/Prometheus/native Terraform补验，保留首轮失败与原检查门槛，详见[补验交付](resource-observability-ci-delivery-20261012.md)。远端整套CI需按新提交实际运行核对；不将首批本地通过等同于完整生产上线。

@@ -192,3 +192,5 @@ G2的纯业务代码和契约测试可以提前开展；依赖Kata、网络、�
 首批开发检查点（2026-10-12）：固定宿主资源指标由5项扩展到11项，CPU自身限额节流、匿名/文件内存、宿主OOM事件和终止进程速率已打通nodeguard→固定查询→API/OpenAPI→SDK→控制台。采集/写入白名单扩为12个原始序列（含观察标记），每节点样本限额3072及WAL容量校验同步，原磁盘余量和隔离限制保留。真实Linux内核、Prometheus语义/双副本采集写入、隔离TLS PostgreSQL/签名身份/API及Chrome合同均有单独通过记录。G0-08/G3-12仍开发中：有效期容量分母、PSI/峰值画像、成本归因、推荐、GPU和闲置策略尚未交付，见[交付记录](resource-observability-delivery-20261012.md)。
 
 G2-07下一子项须先冻结`STOP_AFTER_PLATFORM_IDLE`语义和有界可撤销授权：平台活动槽为空不证明guest无后台工作，启用须满足整VM停止及`instances:hard_stop`授权；后台服务可禁用/保护。配置CAS/幂等、启用计时重置、当前权限及保护复核、启动/重启不被idle取消、未知执行/文件传输保护，与TTL安全停机分开验收。当前后台扫描不能直接作为公开策略上线。
+
+观测首批CI补验检查点（2026-10-12）：已修复Linux本地验收目录权限、Linux测试lint和四平台Terraform锁文件；严格LinuxClippy、真实锁回归、实际Prometheus/WAL/协议链和native Terraform mock通过。远端整套CI按新提交核对，G0-08/G3-12仍开发中，未把GPU或完整资源优化标为完成。见[补验记录](resource-observability-ci-delivery-20261012.md)。

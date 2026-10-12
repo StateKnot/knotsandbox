@@ -63,7 +63,12 @@ def pki(path,nodes):
 def main():
     names=[];server=None;thread=None
     with tempfile.TemporaryDirectory(prefix='sandbox-prometheus-pipeline-') as tmp:
-        path=Path(tmp);s,tf,url=fixture();pki(path,s['nodes'])
+        path=Path(tmp)
+        # The non-root pinned image reads /fixture through a Linux bind mount.
+        # Only this ephemeral fixture root becomes traversable; file modes and
+        # production credential/container configuration remain unchanged.
+        path.chmod(0o755)
+        s,tf,url=fixture();pki(path,s['nodes'])
         for folder in ['receiver','agent-a','agent-b']:(path/folder).mkdir(mode=0o777);(path/folder).chmod(0o777)
         (path/'receiver.yml').write_text('global:\n  scrape_interval: 15s\nscrape_configs: []\n')
         (path/'username').write_text('offline_writer');(path/'password').write_text('OFFLINE_PROTOCOL_ONLY')

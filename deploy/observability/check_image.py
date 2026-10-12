@@ -24,7 +24,12 @@ def run(args):
 
 def main():
     with tempfile.TemporaryDirectory(prefix='sandbox-metrics-check-') as t:
-        path=Path(t); tls_fixture(path)
+        path=Path(t)
+        # Linux bind mounts preserve the root directory's mode. The pinned
+        # image's non-root user must traverse this ephemeral fixture directory;
+        # credential source-file modes and production Secret modes stay intact.
+        path.chmod(0o755)
+        tls_fixture(path)
         for d in ('writer','scraper','wal','wal-samples'):(path/d).mkdir(mode=0o777);(path/d).chmod(0o777)
         for name,target in [('username','writer/username'),('password','writer/password'),('client-cert','scraper/tls.crt'),('client-key','scraper/tls.key'),('server-ca','scraper/ca.crt')]:
             (path/target).write_bytes((path/name).read_bytes());(path/target).chmod(0o444)

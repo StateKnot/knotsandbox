@@ -814,14 +814,18 @@ mod linux {
                 boot_id: uuid::Uuid::new_v4(),
                 profile_sha256: "a".repeat(64),
             }));
-            observer.sandboxes.lock().unwrap().insert(
-                observation.sandbox_id.clone(),
-                PinnedSandbox {
-                    observation: observation.clone(),
-                    cgroup,
-                    processes: vec![],
-                },
-            );
+            observer
+                .sandboxes
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Metrics fixture handles lock is poisoned"))?
+                .insert(
+                    observation.sandbox_id.clone(),
+                    PinnedSandbox {
+                        observation: observation.clone(),
+                        cgroup,
+                        processes: vec![],
+                    },
+                );
             let (sample_observer, sample_observation) = (observer.clone(), observation.clone());
             let sampler = std::thread::spawn(move || sample_observer.metrics(&sample_observation));
             // The writer can open only once the real sampler has reached its
@@ -846,15 +850,19 @@ mod linux {
             let (released, receiver) = std::sync::mpsc::channel();
             let controller = std::thread::spawn(move || {
                 let result = observer.release_handles(&[observation]);
-                released.send(result).unwrap();
+                released
+                    .send(result)
+                    .map_err(|_| anyhow::anyhow!("Metrics fixture release receiver is closed"))
             });
             let release = receiver.recv_timeout(Duration::from_secs(1));
             // Always unblock and join both workers before asserting, including
             // the regression path where lifecycle release had to wait.
             writer.write_all(b"usage_usec 17\n")?;
             drop(writer);
-            let value = sampler.join().unwrap()?;
-            controller.join().unwrap();
+            let sampled = sampler.join();
+            let controlled = controller.join();
+            let value = sampled.map_err(|_| anyhow::anyhow!("Metrics sampler panicked"))??;
+            controlled.map_err(|_| anyhow::anyhow!("Metrics release controller panicked"))??;
             release??;
             assert_eq!(value.cpu_usage_usec, 17);
             assert_eq!(value.memory_bytes, 1024);
