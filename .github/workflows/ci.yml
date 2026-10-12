@@ -207,9 +207,14 @@ jobs:
           bash -n scripts/dev-dependencies.sh deploy/keycloak/postgres-init.sh
           python3 -m py_compile scripts/dev-database-roles.py
           python3 -m unittest discover -s scripts/release/tests -v
+          python3 -m unittest discover -s scripts/tests -p 'test_nodeguard_host_observation.py' -v
           python3 -m json.tool deploy/keycloak/realm.template.json > /dev/null
       - name: Unit and authentication tests
-        run: cargo test --locked --all-targets
+        run: |
+          cargo test --locked --all-targets
+          mkdir -p .local
+          cargo test --locked --lib --no-run --message-format=json > .local/nodeguard-host-artifacts.jsonl
+          python3 scripts/test-nodeguard-host-observation.py --artifacts .local/nodeguard-host-artifacts.jsonl --evidence-dir .local/nodeguard-host-observation
       - name: Required isolated identity and lifecycle review regressions
         run: |
           df -h .
@@ -223,6 +228,9 @@ jobs:
           name: review-regressions-${{ github.sha }}
           path: |
             .local/review-artifacts.jsonl
+            .local/nodeguard-host-artifacts.jsonl
+            .local/nodeguard-host-observation/*.json
+            .local/nodeguard-host-observation/*.log
             .local/review-regressions/*.json
             .local/review-regressions/*.log
           include-hidden-files: true

@@ -1,6 +1,8 @@
 # 开发进度与验收证据
 
-最新开发检查点（2026-10-12）：进一步收尾资源观测跨平台CI。远端已确认云只读锁、SDK/控制台和Linux fmt/Clippy通过；实际Linux volume另复现默认Prometheus owner与普通runner之间的WAL清理权限问题。两检查脚本只在断言后以固定默认owner清理五个自有夹具store，新增四项范围/失败保留回归，部署17/17及真实镜像/TLS/WAL、双副本协议和38告警再次通过。release历史fixture仅在测试内按两锁记录窗口的交集选择合法参考时刻，63项通过；生产安全锁/默认真实时钟/签名门槛不变，当前Debian快照已过期，真实发行仍被阻断。未变更生产Rust/API或正式迁移，远端整套CI继续按新提交实际核对。见[补验记录](../research/resource-observability-ci-delivery-20261012.md)与[发行安全状态](release-security-status.md)。
+最新开发检查点（2026-10-12）：资源观测采集门禁已在远端Linux完整通过，继续修复基线身份证书和宿主权限测试。实际复现OpenSSL3.0主机名不匹配exit0，现public/admin逐一要求完整肯定结果；27项身份回归和37个schema对象通过，密钥/有效期合同保留。宿主用例移入CI必跑权限专项，仅已编译binary sudo、device/inode/身份/指纹/唯一完成marker核对，零测试与权限拒绝均失败并保留回执；Python3.12合同11/11、最终Linux严格Clippy/fmt、Nodeguard普通38/0失败/2明确ignored及宿主真实专项1/1通过，自有容器清理确认。Rust仅test-only两行，无新迁移；生产安全锁未改变，过期快照仍阻断发行。远端整套与普通UID→sudo以本批新提交实际记录为准；G0-08/G3-12及容量/峰值/成本/GPU仍开发中。见[CI补验](../research/resource-observability-ci-delivery-20261012.md)与[开发表](../research/rust-sandbox-development-workbreakdown.md)。
+
+上一开发检查点（2026-10-12）：进一步收尾资源观测跨平台CI。远端已确认云只读锁、SDK/控制台和Linux fmt/Clippy通过；实际Linux volume另复现默认Prometheus owner与普通runner之间的WAL清理权限问题。两检查脚本只在断言后以固定默认owner清理五个自有夹具store，新增四项范围/失败保留回归，部署17/17及真实镜像/TLS/WAL、双副本协议和38告警再次通过。release历史fixture仅在测试内按两锁记录窗口的交集选择合法参考时刻，63项通过；生产安全锁/默认真实时钟/签名门槛不变，当前Debian快照已过期，真实发行仍被阻断。未变更生产Rust/API或正式迁移，远端整套CI继续按新提交实际核对。见[补验记录](../research/resource-observability-ci-delivery-20261012.md)与[发行安全状态](release-security-status.md)。
 
 上一开发检查点（2026-10-12）：资源观测首批公开CI发现的三个跨平台问题已修复：验收夹具根目录允许固定非root镜像读取、Linux专属测试四处unwrap改为错误传播、三份Terraform锁文件补齐四平台h1且保留原版本/zh/native h1。Linux全目标严格Clippy、真实句柄锁1/1、独立Linux目录权限对照、采集13单测、真实Prometheus镜像/TLS/WAL和双节点双副本协议链、原38告警回放通过；三个模块只读init/validate及mock15/15通过（实际macOS arm64）。首轮下载、插件握手和readiness超时日志保留，原断言/期限/生产权限/CI上传门槛不变。未新增产品动作、依赖或迁移，未部署云资源；远端整套CI以新提交实际运行记录为准。见[Linux CI补验](../research/resource-observability-ci-delivery-20261012.md)。
 

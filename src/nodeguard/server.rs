@@ -301,6 +301,7 @@ mod linux {
             Ok(serde_json::from_slice(&body)?)
         }
         #[tokio::test]
+        #[ignore = "requires root and PID1 initial mount namespace; mandatory CI host gate"]
         async fn never_started_control_route_persists_death_and_refreshes_mount_observation()
         -> anyhow::Result<()> {
             let _test_lock = super::super::TEST_WORK_LOCK.lock().await;
@@ -392,6 +393,7 @@ mod linux {
                 )
                 .await?;
             assert_eq!(result.status(), StatusCode::CONFLICT);
+            println!("NODEGUARD_HOST_DEATH_AND_FRESH_MOUNT_OBSERVATION_VERIFIED");
             Ok(())
         }
     }

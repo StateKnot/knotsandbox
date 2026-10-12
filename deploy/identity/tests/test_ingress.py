@@ -66,12 +66,18 @@ class IngressTests(unittest.TestCase):
     def test_real_certificate_san_key_and_validity_checks(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
-            def generate(stem, host):
-                subprocess.run(['openssl','req','-x509','-newkey','rsa:2048','-nodes','-days','8',
-                    '-subj','/CN='+host,'-addext','subjectAltName=DNS:'+host+',DNS:identity-admin.internal.example.com',
+            def generate(stem, cn, hosts, days=8):
+                subprocess.run(['openssl','req','-x509','-newkey','rsa:2048','-nodes','-days',str(days),
+                    '-subj','/CN='+cn,'-addext','subjectAltName='+','.join('DNS:'+host for host in hosts),
                     '-keyout',str(root/(stem+'.key')),'-out',str(root/(stem+'.crt'))],check=True,capture_output=True)
                 for ext in ('.key','.crt'): (root/(stem+ext)).chmod(0o600)
-            generate('good','login.example.com');generate('bad','other.example.com')
+            public='login.example.com';admin='identity-admin.internal.example.com'
+            generate('good',public,(public,admin))
+            generate('public-missing','other.example.com',('other.example.com',admin))
+            generate('admin-missing',public,(public,'other.internal.example.com'))
+            generate('cn-shadow',public,('other.example.com',admin))
+            generate('short',public,(public,admin),days=1)
+            generate('wildcard',public,('*.example.com','*.internal.example.com'))
             s=fixture()
             for name,files in s['secret_files'].items():
                 for key in files:
@@ -82,10 +88,41 @@ class IngressTests(unittest.TestCase):
             s['secret_files']['keycloak-tls']={'tls.crt':str(root/'good.crt'),'tls.key':str(root/'good.key')}
             s['secret_files']['keycloak-trust']={'rds.pem':str(root/'good.crt')}
             identity.validate_secret_material(s)
-            s['secret_files']['keycloak-tls']['tls.key']=str(root/'bad.key')
+            s['secret_files']['keycloak-tls']['tls.key']=str(root/'public-missing.key')
             with self.assertRaises(ValueError):identity.validate_secret_material(s)
-            s['secret_files']['keycloak-tls']={'tls.crt':str(root/'bad.crt'),'tls.key':str(root/'bad.key')}
+            for stem in ('public-missing','admin-missing','cn-shadow','short'):
+                with self.subTest(certificate=stem):
+                    s['secret_files']['keycloak-tls']={'tls.crt':str(root/(stem+'.crt')),'tls.key':str(root/(stem+'.key'))}
+                    with self.assertRaises(ValueError):identity.validate_secret_material(s)
+            # Preserve OpenSSL's wildcard/SAN matching semantics. These are
+            # synthetic local material tests, not public-CA trust assertions.
+            s['secret_files']['keycloak-tls']={'tls.crt':str(root/'wildcard.crt'),'tls.key':str(root/'wildcard.key')}
+            identity.validate_secret_material(s)
+            s['secret_files']['keycloak-tls']={'tls.crt':str(root/'good.crt'),'tls.key':str(root/'good.key')}
+            s['secret_files']['keycloak-trust']={'rds.pem':str(root/'short.crt')}
             with self.assertRaises(ValueError):identity.validate_secret_material(s)
+            s['secret_files']['keycloak-trust']={'rds.pem':str(root/'good.crt')}
+            real_run=subprocess.run
+            for verdict in ('legacy-negative','unexpected-output','other-host-positive'):
+                stem='public-missing' if verdict=='legacy-negative' else 'good'
+                s['secret_files']['keycloak-tls']={'tls.crt':str(root/(stem+'.crt')),'tls.key':str(root/(stem+'.key'))}
+                def reported(command, **options):
+                    result=real_run(command, **options)
+                    if command[:2]==['openssl','x509'] and '-checkhost' in command:
+                        # OpenSSL 3.0 reports real hostname mismatches with
+                        # status zero. Preserve that verified historical case
+                        # even when the test host uses a newer OpenSSL version.
+                        output=result.stdout if verdict=='legacy-negative' else (
+                            b'Unknown hostname verdict\n' if verdict=='unexpected-output' else
+                            b'Hostname other.example.com does match certificate\n')
+                        return subprocess.CompletedProcess(command,0,output,result.stderr)
+                    return result
+                with self.subTest(openssl_verdict=verdict), patch.object(identity.subprocess,'run',side_effect=reported):
+                    with self.assertRaises(ValueError):identity.validate_secret_material(s)
+            s['secret_files']['keycloak-tls']={'tls.crt':str(root/'public-missing.crt'),'tls.key':str(root/'public-missing.key')}
+            with patch.object(identity,'kubectl') as cluster, patch('proxy_resources.install') as proxy_install:
+                with self.assertRaises(ValueError):identity.apply(s)
+                cluster.assert_not_called();proxy_install.assert_not_called()
 
 
 if __name__=='__main__':unittest.main()

@@ -293,7 +293,13 @@ def validate_secret_material(s):
         return r.stdout
     files = s['secret_files']['keycloak-tls']
     for origin in ('public_url', 'admin_url'):
-        openssl(['x509', '-in', files['tls.crt'], '-noout', '-checkhost', urlsplit(s[origin]).hostname])
+        hostname = urlsplit(s[origin]).hostname
+        verdict = openssl(['x509', '-in', files['tls.crt'], '-noout', '-checkhost', hostname])
+        # OpenSSL 3.0 exits zero even for a hostname mismatch. Retain its own
+        # SAN/wildcard matching rules, but require the exact positive verdict
+        # for this origin. This checks local material, not public CA trust.
+        require(verdict.strip() == f'Hostname {hostname} does match certificate'.encode(),
+                'TLS certificate hostname mismatch or unrecognized verdict')
     openssl(['x509', '-in', files['tls.crt'], '-noout', '-checkend', '604800'])
     cert_public = openssl(['x509', '-in', files['tls.crt'], '-noout', '-pubkey'])
     key_public = openssl(['pkey', '-in', files['tls.key'], '-pubout'])
