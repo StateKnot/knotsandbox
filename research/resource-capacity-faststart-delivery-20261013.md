@@ -36,8 +36,8 @@ CPU读取叶级有效cpuset，并取叶级和全部非根祖先有限`cpu.max`�
 | 采集配置、实际Prometheus协议链、告警 | 17配置测试通过；实际mTLS抓取/远程写入/双副本/过滤/恢复通过；38个声明的告警故障场景通过 |
 | 独立TLS PostgreSQL/签名身份/指标HTTP | 精确1通过；两容量选择项、租户隔离、IO期间撤权/epoch、正式迁移账本核对；源码/产物不变及自有资源清理确认 |
 | 独立TLS PostgreSQL/BFF收尾 | 4通过；真实连接角色/唯一标签核对、原登录/撤权/流关闭、会话锁及保留清理；新增用例要求实际普通DROP，不能延期冒充成功 |
-| SDK、控制台、真实浏览器指标合同 | 71、66、4通过；后者使用明确HTTP合同fixture，保留原值、空缺和撤权清理 |
-| 原生响应观测合同 | 10通过、零跳过，使用锁定Chromium |
+| SDK、控制台、真实浏览器HTTP合同 | 71、66、完整28通过；后者包含4项资源指标合同，使用明确HTTP fixture，保留原值、空缺和撤权清理 |
+| 原生响应观测合同 | 账户10项、诊断12项通过、零跳过，使用锁定Chromium；两种业务范围各自有界 |
 | 完整真实Chrome/Keycloak/BFF/API/TLS-PG | 精确1通过；真实账号/授权、诊断/事件、未来策略、通知失ACK及重放、停止受理、撤权；9张截图、业务事实不变、临时realm/进程/PG容器清理确认 |
 
 非root Linux CI入口`scripts/test-nodeguard-capacity.py`消费普通Cargo产物，检查精确忽略用例、ELF/UID/metadata/路径、固定镜像与容器限额，只挂载二进制。创建失ACK按精确随机名字/标签/镜像恢复清理所有权；主失败和清理失败分别保留，未确认不存在不能通过。macOS本地的上述内核用例不等于这个Linux入口已经通过；最终入口与整套远端结果以新提交CI收据为准。
@@ -55,6 +55,18 @@ CPU读取叶级有效cpuset，并取叶级和全部非根祖先有限`cpu.max`�
 BFF修改仅位于测试fixture：为owner/runtime配置与唯一临时库绑定的application_name，保留TLS和其他URI参数；每轮admin独立autocommit查询，只有准确角色/标签、idle、无事务、wait空或ClientRead的尾连接可在2秒总预算内等待。**只有真实零连接才普通DROP**；active、foreign或隐藏状态拒绝。55006竞态复核要求非空且全部为本fixture的空闲OWNER才允许原owner-only延期，runtime不能转为owner记录。application_name用于来源匹配，不是数据库授权；没有terminate、FORCE或生产身份权限变更。[PG17明确state与wait_event相互独立，并说明事务内统计快照缓存](https://www.postgresql.org/docs/17/monitoring-stats.html)。
 
 新增独立TLS-PG的4项BFF验收在既有review入口成为必需套件；只有此套件获得本容器临时admin URI以创建自有随机数据库，其他接口测试仍只获得各自普通登录。新用例从真实PG验证owner/runtime身份与标签，并在close后用新独立admin连接确认数据库消失。最新完整远端CI仍以之后提交为准，不能把容量PASS等同于整个流水线通过。
+
+`d59ea163`的[CI运行38413320610](https://github.com/StateKnot/knotsandbox/actions/runs/38413320610)完成为failure。真实Linux容量入口再次通过（实际core字段存在、退出0和自有清理确认），17组独立PG回归共77项全部通过，包含BFF精确4项；随后PG全套和Keycloak到API集成也通过。两处浏览器失败分别处理，不能把这些成功步骤等同于完整CI通过。
+
+控制台HTTP合同的自动化撤权断言在中间渲染同时匹配两个`RESOURCE_NOT_FOUND`警报。原用例本地普通20次全部通过；相同真实React/HTTP在CDP CPU降速6倍的独立诊断实验中复现strict2，继续观察并保留原错误后，最终警报恰好一个且可见，策略详情/运行详情/创建表单均为零。修正只把这三项已有清除断言移到原严格唯一警报断言之前，没有修改组件、请求、期限或断言。相同降速实验修后20/20通过，正常全套Chromium HTTP合同28/28及format通过；限速/诊断源码仅留在私有证据中。
+
+同次真实身份浏览器已通过服务身份重新启用的200、完成及正文读取，随后在诊断提交故意丢失ACK、页面reload、显式原键重放的202响应读取处发生`RESPONSE_BODY_UNAVAILABLE`。其固定阶段为`diagnosis_management`/`RELOAD_ORIGINAL_REPLAY`；临时进程和fixture清理全部确认。这定位到外部响应观察失败，不能把先前累计的`net::ERR_ABORTED`当成新的业务请求被证明失败，也不能宣称所有CDP留存问题已根治。
+
+诊断补验增加独立的原生响应观察器，仅匹配同origin、UUID实例路径、UUID幂等键的诊断POST 202，在控制台捕获fetch之前初始化。最多16条、每条256KiB原始JSON；来源/status/ETag错误、重复/容量耗尽、非法/截断/取消、凭据字段均拒绝，消费后删除。调用者继续获得原Promise、Request/signal及Response；原202、原键/正文/CSRF、同resource/operation以及journal ACCEPTED断言全部保留，不发替代GET或第二个提交。
+
+新增12项真实Chromium合同通过。有效RED来自同一真实POST的实际CDP requestId：先确认原生SDK与CDP读取同一202，再清除独立观察session的Network状态，实际getResponseBody报错；GREEN仅改外部reader读取原生clone。先前手写throw的探索单独保留且不计有效RED；该实验验证同类外部观察失效的处理，不证明线上CDP留存失效的具体底层原因。两个观察器实际叠加、重载和单请求身份均覆盖；诊断GET及其他业务响应继续走原观察渠道，未宣称覆盖所有CDP问题。
+
+此补验后的完整Chrome/Keycloak/BFF/API/TLS-PG本地流程再次通过：精确1项、两种业务marker、9张截图、通知业务事实一致、源码/产物不变及全部自有资源清理确认。最新完整GitHub CI仍待后续补验提交的独立结果，真实Kata、GPU、云发行安全门禁仍未认证。
 
 本地证据在忽略的`.local/resource-faststart-20261013/`，包含源指纹、普通产物SHA、原失败日志和清理回执；不提交PKI、身份凭据、临时数据库或构建缓存。
 

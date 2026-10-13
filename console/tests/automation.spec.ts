@@ -387,15 +387,15 @@ test("policy management uses each fresh version; run metadata does not require o
     .fill("discard-draft-on-denial");
   denied = true;
   await page.getByRole("button", { name: "重新读取策略", exact: true }).click();
+  await expect(page.getByTestId("automation-detail")).toHaveCount(0);
+  await expect(page.getByTestId("automation-run-detail")).toHaveCount(0);
+  await expect(page.getByTestId("automation-create")).toHaveCount(0);
   await expect(
     page
       .getByTestId("automation-panel")
       .getByRole("alert")
       .filter({ hasText: "RESOURCE_NOT_FOUND" }),
   ).toBeVisible();
-  await expect(page.getByTestId("automation-detail")).toHaveCount(0);
-  await expect(page.getByTestId("automation-run-detail")).toHaveCount(0);
-  await expect(page.getByTestId("automation-create")).toHaveCount(0);
   denied = false;
   await page.getByRole("button", { name: "重新读取策略", exact: true }).click();
   await expect(page.getByTestId("automation-detail")).toHaveAttribute(

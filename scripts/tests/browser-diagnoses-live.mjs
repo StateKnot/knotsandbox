@@ -2,6 +2,7 @@
 // dropped. The worker and authorization changes are coordinated with Rust;
 // neither report bodies nor database results are mocked by this driver.
 import assert from 'node:assert/strict';
+import { diagnosisMutationJson } from './diagnosis-response-observer.mjs';
 
 export async function diagnosesConsole(page, config, coordinate) {
   const step = (name) => process.stderr.write(`DIAGNOSES_LIVE_STEP ${name}\n`);
@@ -84,10 +85,13 @@ export async function diagnosesConsole(page, config, coordinate) {
     await dialog.getByRole('button', { name: '确认提交', exact: true }).click();
     const replay = await retried;
     assert.equal(replay.status(), 202);
+    step('REPLAY_HTTP_202');
     assert.equal(replay.request().headers()['idempotency-key'], original.key);
     assert.equal(replay.request().postData(), original.body);
     assert(replay.request().headers()['x-csrf-token']);
-    const accepted = await replay.json();
+    step('REPLAY_RECEIPT_BODY_READ');
+    const accepted = await diagnosisMutationJson(page, replay);
+    step('REPLAY_RECEIPT_BODY_READ_COMPLETE');
     assert.equal(accepted.resource.id, actualAccepted.resource.id);
     assert.equal(accepted.operation.id, actualAccepted.operation.id);
     await row.getByRole('button', { name: '打开报告', exact: true }).waitFor();
@@ -105,7 +109,9 @@ export async function diagnosesConsole(page, config, coordinate) {
     await row.getByRole('button', { name: '打开报告', exact: true }).click();
     const response = await complete;
     assert.equal(response.status(), 200);
+    step('STRUCTURED_REPORT_BODY_READ');
     const report = await response.json();
+    step('STRUCTURED_REPORT_BODY_READ_COMPLETE');
     assert.equal(report.id, accepted.resource.id);
     assert.equal(report.tenant_id, config.tenant);
     assert.equal(report.project_id, config.project);
@@ -164,6 +170,7 @@ export async function diagnosesConsole(page, config, coordinate) {
     assert.equal(restoredResponse.status(), 200);
     step('READ_RESTORED_HTTP_200');
     const restoredReport = await restoredResponse.json();
+    step('READ_RESTORED_BODY_CHECKED');
     assert.deepEqual(restoredReport, report);
     await page.getByTestId('diagnosis-report').getByText('COMPLETE', { exact: true }).waitFor();
     assert.equal(posts, 2);

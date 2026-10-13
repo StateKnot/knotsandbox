@@ -15,6 +15,7 @@ import { eventsConsole } from './browser-events-live.mjs';
 import { automationsConsole } from './browser-automations-live.mjs';
 import { notificationsConsole } from './browser-notifications-live.mjs';
 import { installServiceClientResponseObserver } from './service-client-response-observer.mjs';
+import { installDiagnosisResponseObserver } from './diagnosis-response-observer.mjs';
 
 
 const screenshotPlan = [
@@ -127,6 +128,7 @@ try {
   page = await context.newPage();
   // BrowserApi captures fetch at construction; observe before console bootstrap.
   await installServiceClientResponseObserver(page, config.origin);
+  await installDiagnosisResponseObserver(page, config.origin);
   page.on('requestfailed', (request) => {
     const code = request.failure()?.errorText;
     if (typeof code === 'string' && /^net::ERR_[A-Z_]+$/.test(code)) transportFailure = code;
