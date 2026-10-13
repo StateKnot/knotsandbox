@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import uuid
 
 REPO = Path(__file__).resolve().parents[1]
@@ -61,6 +62,89 @@ def repository(value):
     if segments[0] in ('index.docker.io', 'registry-1.docker.io'):
         segments[0] = 'docker.io'
     return '/'.join(segments)
+
+
+def reviewed_image_info(images, image):
+    require(isinstance(images, list) and len(images) == 1 and isinstance(images[0], dict),
+            'LOCAL_IMAGE_METADATA_REQUIRED')
+    info = images[0]
+    require(isinstance(info.get('Id'), str) and re.fullmatch(r'sha256:[0-9a-f]{64}', info['Id']),
+            'LOCAL_IMAGE_ID_REQUIRED')
+    digests = info.get('RepoDigests')
+    require(isinstance(digests, list) and sum(isinstance(digest, str)
+            and digest.split('@')[-1] == image.split('@')[-1]
+            and repository(digest) == repository(image) for digest in digests) == 1,
+            'LOCAL_REPOSITORY_DIGEST_BINDING')
+    return info
+
+
+def selected_image_binding(info, container, image):
+    """Bind the actual, not-yet-started container in both Docker image stores.
+
+    API 1.48 exposes the selected manifest for a multi-platform store. Classic
+    stores instead identify the selected image directly. These are explicit
+    data contracts; a malformed descriptor never becomes a classic image.
+    """
+    reviewed_image_info([info], image)
+    require(isinstance(container, dict) and isinstance(container.get('Config'), dict)
+            and container['Config'].get('Image') == image
+            and container.get('Image') == info['Id'] and container.get('Platform') == 'linux',
+            'LOCAL_CREATED_IMAGE_BINDING')
+    selected = None
+    if 'ImageManifestDescriptor' in container:
+        descriptor = container['ImageManifestDescriptor']
+        require(isinstance(descriptor, dict)
+                and descriptor.get('mediaType') in ('application/vnd.oci.image.manifest.v1+json',
+                                                   'application/vnd.docker.distribution.manifest.v2+json')
+                and isinstance(descriptor.get('digest'), str)
+                and re.fullmatch(r'sha256:[0-9a-f]{64}', descriptor['digest'])
+                and isinstance(descriptor.get('platform'), dict)
+                and descriptor['platform'].get('os') == 'linux'
+                and descriptor['platform'].get('architecture') == 'amd64'
+                and descriptor['platform'].get('variant', '') == '',
+                'LOCAL_SELECTED_MANIFEST_BINDING')
+        selected = descriptor['digest']
+        source = 'CREATED_PLATFORM_MANIFEST'
+    else:
+        require(info.get('Os') == 'linux' and info.get('Architecture') == 'amd64',
+                'LOCAL_LINUX_AMD64_IMAGE_REQUIRED')
+        source = 'CLASSIC_IMAGE_METADATA'
+    return {'container_image_id': container['Image'], 'selected_manifest_digest': selected,
+            'selection_source': source, 'os': 'linux', 'architecture': 'amd64'}
+
+
+FAILURE_CATEGORIES = frozenset((
+    'FIXED_REPOSITORY_DIGEST_REQUIRED', 'LOCAL_UNIX_DOCKER_SOCKET_REQUIRED',
+    'ABSOLUTE_INPUT_REQUIRED', 'INPUT_TYPE_OWNER_MODE_OR_BOUND', 'INPUT_SIZE_CHANGED',
+    'INPUT_CHANGED_DURING_SNAPSHOT', 'LINUX_AMD64_EXECUTABLE_ELF_REQUIRED',
+    'ABSOLUTE_BIND_PATH_REQUIRED', 'EXACT_IGNORED_LINUX_TEST_NOT_PASSED',
+    'DOCKER_OUTPUT_BOUND', 'LOCAL_DOCKER_IMAGE_FAILED', 'LOCAL_DOCKER_CREATE_FAILED',
+    'LOCAL_DOCKER_START_FAILED', 'LOCAL_DOCKER_INSPECT_FAILED', 'LOCAL_DOCKER_CONTAINER_FAILED',
+    'LOCAL_DOCKER_STOP_FAILED', 'LOCAL_DOCKER_RM_FAILED', 'EXACT_TEST_CONTAINER_CLEANUP_BINDING',
+    'LOCAL_DOCKER_SOCKET_OWNER_OR_TYPE', 'LOCAL_IMAGE_METADATA_REQUIRED', 'LOCAL_IMAGE_ID_REQUIRED',
+    'LOCAL_REPOSITORY_DIGEST_BINDING', 'LOCAL_CREATED_IMAGE_BINDING',
+    'LOCAL_SELECTED_MANIFEST_BINDING', 'LOCAL_LINUX_AMD64_IMAGE_REQUIRED',
+    'LINUX_TEST_EXIT_OR_RESOURCE_FAILURE', 'LOCAL_TEST_CONTAINER_CLEANUP_FAILED',
+    'SELF_TEST_ACCEPTS_NO_RUNTIME_INPUT', 'STATIC_PROTOCOL_TEST_FAILED',
+    'TEST_ELF_AND_FIXED_IMAGE_REQUIRED', 'CHILD_FAILURE_REQUIRES_NONZERO_EXIT',
+    'CHILD_FAILURE_BYTES_REQUIRED'))
+
+
+def child_failure_receipt(returncode, stdout: bytes, stderr: bytes):
+    """Derive a public failure receipt without publishing any child output."""
+    require(type(returncode) is int and returncode != 0, 'CHILD_FAILURE_REQUIRES_NONZERO_EXIT')
+    require(isinstance(stdout, bytes) and isinstance(stderr, bytes), 'CHILD_FAILURE_BYTES_REQUIRED')
+    category = 'UNKNOWN'
+    if len(stdout) <= OUTPUT_LIMIT and len(stderr) <= OUTPUT_LIMIT:
+        match = re.fullmatch(rb'NODEGUARD_TRUST_LINUX_FAILED category=([A-Z_]+); input values omitted\n?', stderr)
+        if match is not None and match[1].decode('ascii') in FAILURE_CATEGORIES:
+            category = match[1].decode('ascii')
+    return {'linux_projected_trust_test': 'FAIL', 'test': TEST, 'test_execution': 'UNKNOWN',
+            'exit_code': returncode, 'category': category,
+            'stdout_sha256': hashlib.sha256(stdout).hexdigest(), 'stdout_bytes': len(stdout),
+            'stderr_sha256': hashlib.sha256(stderr).hexdigest(), 'stderr_bytes': len(stderr),
+            'harness_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            'diagnostic_scope': 'DERIVED_ALLOWLIST_ONLY_NO_RAW_OUTPUT'}
 
 
 def elf_header(header):
@@ -230,14 +314,9 @@ def run(binary, image, docker_host):
     require(stat.S_ISSOCK(socket.st_mode) and socket.st_uid in (0, os.geteuid())
             and not socket.st_mode & 0o0002, 'LOCAL_DOCKER_SOCKET_OWNER_OR_TYPE')
     immutable_image(image)
-    image_info = json.loads(checked(['image', 'inspect', '--platform', 'linux/amd64', image]))
-    require(isinstance(image_info, list) and len(image_info) == 1
-            and image_info[0]['Os'] == 'linux' and image_info[0]['Architecture'] == 'amd64',
-            'LOCAL_LINUX_AMD64_IMAGE_REQUIRED')
-    image_info = image_info[0]
-    require(any(digest.split('@')[-1] == image.split('@')[-1]
-                and repository(digest) == repository(image)
-                for digest in image_info.get('RepoDigests', [])), 'LOCAL_REPOSITORY_DIGEST_BINDING')
+    # --platform on image inspect requires API 1.49, while the CI Docker 28.0
+    # engine provides 1.48. Select with create, then validate before start.
+    image_info = reviewed_image_info(json.loads(checked(['image', 'inspect', image])), image)
     name = 'sandbox-nodeguard-trust-' + uuid.uuid4().hex
     created = False
     failure = None
@@ -254,6 +333,10 @@ def run(binary, image, docker_host):
             # random name rather than leaking a successfully created container.
             created = True
             checked(create_arguments(image, directory, name))
+            containers = json.loads(checked(['inspect', name]))
+            require(isinstance(containers, list) and len(containers) == 1,
+                    'LOCAL_CREATED_IMAGE_BINDING')
+            binding = selected_image_binding(image_info, containers[0], image)
             output = checked(['start', '--attach', name], 90)
             state = json.loads(checked(['inspect', '--format', '{{json .State}}', name]))
             require(not state['Running'] and not state['OOMKilled'] and state['ExitCode'] == 0,
@@ -274,7 +357,8 @@ def run(binary, image, docker_host):
     if failure is not None:
         raise failure
     print(json.dumps({'linux_projected_trust_test': 'PASS', 'test': TEST,
-        'image': image, 'image_id': image_info['Id'], 'test_elf_sha256': elf_sha,
+        'image': image, 'image_id': binding['container_image_id'], 'image_binding': binding,
+        'test_elf_sha256': elf_sha,
         'harness_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         'public_fixture_sha256': fixture_hashes, 'uid': 10001, 'primary_gid': 10001,
         'supplementary_groups': [10002], 'all_capability_sets_zero': True,
@@ -330,6 +414,110 @@ class ProtocolTests(unittest.TestCase):
         self.assertIn("os.setresuid(10001, 10001, 10001)", STAGE)
         self.assertIn("'CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb'", STAGE)
         with self.assertRaises(CheckError): create_arguments('rust@sha256:' + 'a' * 64, '/tmp/a,b', 'fixed')
+
+    def test_classic_image_and_container_binding(self):
+        image = 'rust@sha256:' + 'a' * 64
+        info = {'Id': 'sha256:' + 'b' * 64, 'Os': 'linux', 'Architecture': 'amd64',
+                'RepoDigests': [image]}
+        container = {'Image': info['Id'], 'Config': {'Image': image}, 'Platform': 'linux'}
+        self.assertEqual(selected_image_binding(info, container, image),
+                         {'container_image_id': info['Id'], 'selected_manifest_digest': None,
+                          'selection_source': 'CLASSIC_IMAGE_METADATA', 'os': 'linux', 'architecture': 'amd64'})
+        for change in ({'Architecture': 'arm64'}, {'Os': 'windows'}, {'RepoDigests': []},
+                       {'Id': 'sha256:' + 'c' * 64}):
+            with self.subTest(change=change), self.assertRaises(CheckError):
+                selected_image_binding({**info, **change}, container, image)
+        for change in ({'Image': 'sha256:' + 'c' * 64}, {'Config': {'Image': 'rust:latest'}},
+                       {'Platform': 'windows'}, {'ImageManifestDescriptor': None}):
+            with self.subTest(change=change), self.assertRaises(CheckError):
+                selected_image_binding(info, {**container, **change}, image)
+
+    def test_selected_manifest_preserves_actual_platform_over_index_metadata(self):
+        image = 'rust@sha256:' + 'a' * 64
+        info = {'Id': 'sha256:' + 'a' * 64, 'Os': 'linux', 'Architecture': 'arm64',
+                'RepoDigests': [image]}
+        descriptor = {'digest': 'sha256:' + 'b' * 64,
+                      'mediaType': 'application/vnd.oci.image.manifest.v1+json',
+                      'platform': {'os': 'linux', 'architecture': 'amd64'}}
+        container = {'Image': info['Id'], 'Config': {'Image': image}, 'Platform': 'linux',
+                     'ImageManifestDescriptor': descriptor}
+        binding = selected_image_binding(info, container, image)
+        self.assertEqual(binding['container_image_id'], info['Id'])
+        self.assertEqual(binding['selected_manifest_digest'], descriptor['digest'])
+        self.assertEqual(binding['architecture'], 'amd64')
+        for change in ({'digest': ''}, {'digest': 'sha256:' + 'B' * 64},
+                       {'mediaType': 'application/vnd.oci.image.index.v1+json'},
+                       {'platform': {'os': 'linux', 'architecture': 'arm64'}},
+                       {'platform': {'os': 'windows', 'architecture': 'amd64'}},
+                       {'platform': None}, {'platform': {'os': 'linux'}}):
+            with self.subTest(change=change), self.assertRaises(CheckError):
+                selected_image_binding(info, {**container, 'ImageManifestDescriptor': {**descriptor, **change}}, image)
+        for change in ({'Config': {'Image': 'other@sha256:' + 'a' * 64}},
+                       {'Image': 'sha256:' + 'c' * 64}):
+            with self.subTest(change=change), self.assertRaises(CheckError):
+                selected_image_binding(info, {**container, **change}, image)
+        with self.assertRaises(CheckError):
+            selected_image_binding({**info, 'RepoDigests': ['other@sha256:' + 'a' * 64]}, container, image)
+
+    def test_invalid_created_binding_is_cleaned_before_any_start(self):
+        image = 'rust@sha256:' + 'a' * 64
+        info = {'Id': 'sha256:' + 'b' * 64, 'Os': 'linux', 'Architecture': 'amd64',
+                'RepoDigests': [image]}
+        container = {'Image': info['Id'], 'Config': {'Image': image}, 'Platform': 'linux'}
+        invalid = ({**container, 'Image': 'sha256:' + 'c' * 64},
+                   {**container, 'Config': {'Image': 'rust:latest'}},
+                   {**container, 'ImageManifestDescriptor': None},
+                   {**container, 'ImageManifestDescriptor': {}},
+                   {**container, 'ImageManifestDescriptor': {
+                       'digest': 'sha256:' + 'd' * 64,
+                       'mediaType': 'application/vnd.oci.image.manifest.v1+json',
+                       'platform': {'os': 'linux', 'architecture': 'arm64'}}})
+        socket = os.stat_result((stat.S_IFSOCK | 0o600, 0, 0, 1, os.geteuid(), 0, 0, 0, 0, 0))
+        for record in invalid:
+            calls, cleaned = [], []
+            def docker(arguments, timeout=30):
+                calls.append(arguments)
+                if arguments[:2] == ['image', 'inspect']: return json.dumps([info]).encode()
+                if arguments[0] == 'create': return b'PUBLIC_CONTAINER_ID\n'
+                if arguments[0] == 'inspect': return json.dumps([record]).encode()
+                raise AssertionError('Invalid binding must not start a container')
+            with self.subTest(record=record), patch.object(Path, 'stat', return_value=socket), \
+                    patch.dict(globals(), {'checked': docker, 'snapshot': lambda *args: 'e' * 64,
+                                           'cleanup': lambda name: cleaned.append(name)}):
+                with self.assertRaises(CheckError): run(Path('/public-elf'), image, 'unix:///local-socket')
+            self.assertEqual(sum(command[0] == 'create' for command in calls), 1)
+            self.assertFalse(any(command[0] == 'start' for command in calls))
+            self.assertEqual(len(cleaned), 1)
+
+    def test_child_failure_receipt_from_real_nonzero_child(self):
+        child = subprocess.run([sys.executable, str(Path(__file__).resolve())],
+                               capture_output=True, timeout=10)
+        self.assertNotEqual(child.returncode, 0)
+        receipt = child_failure_receipt(child.returncode, child.stdout, child.stderr)
+        self.assertEqual(receipt['linux_projected_trust_test'], 'FAIL')
+        self.assertEqual(receipt['category'], 'TEST_ELF_AND_FIXED_IMAGE_REQUIRED')
+        self.assertEqual(receipt['test_execution'], 'UNKNOWN')
+        self.assertEqual(receipt['stderr_sha256'], hashlib.sha256(child.stderr).hexdigest())
+        self.assertEqual(receipt['stderr_bytes'], len(child.stderr))
+
+    def test_child_failure_receipt_never_reflects_unknown_or_secret_output(self):
+        known = b'NODEGUARD_TRUST_LINUX_FAILED category=LOCAL_DOCKER_IMAGE_FAILED; input values omitted\n'
+        secret = b'https://private:password@operator.invalid/path?token=PRIVATE_BODY'
+        good = child_failure_receipt(1, b'', known)
+        self.assertEqual(good['category'], 'LOCAL_DOCKER_IMAGE_FAILED')
+        for stdout, stderr in ((b'', known + secret), (secret, secret),
+                               (b'', known.replace(b'LOCAL_DOCKER_IMAGE_FAILED', b'INVENTED_CATEGORY')),
+                               (b'', known * 2), (b'', known + b'x' * OUTPUT_LIMIT)):
+            with self.subTest(length=len(stderr)):
+                receipt = child_failure_receipt(1, stdout, stderr)
+                self.assertEqual(receipt['category'], 'UNKNOWN')
+                self.assertEqual(receipt['linux_projected_trust_test'], 'FAIL')
+                encoded = json.dumps(receipt).encode()
+                for raw in (b'password', b'operator.invalid', b'PRIVATE_BODY', b'INVENTED_CATEGORY'):
+                    self.assertNotIn(raw, encoded)
+                self.assertEqual(receipt['stderr_sha256'], hashlib.sha256(stderr).hexdigest())
+        with self.assertRaises(CheckError): child_failure_receipt(0, b'', b'')
+        with self.assertRaises(CheckError): child_failure_receipt(True, b'', b'')
 
     def test_one_executed_test_required(self):
         output = ('running 1 test\ntest ' + TEST + ' ... ok\n'

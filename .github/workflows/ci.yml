@@ -212,6 +212,7 @@ jobs:
           python3 -m unittest discover -s scripts/tests -p 'test_nodeguard_host_observation.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_console_browser.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_automation_diagnostics.py' -v
+          python3 scripts/test-nodeguard-trust-linux.py --self-test
           python3 -m json.tool deploy/keycloak/realm.template.json > /dev/null
       - name: Unit and authentication tests
         run: |
@@ -380,6 +381,38 @@ jobs:
           subprocess.run(['docker', 'pull', lock['prometheus_image']], check=True)
           PY
           cargo test --locked --lib metrics::tests::official_prometheus -- --ignored
+      - name: Verify projected Nodeguard credentials with actual Linux UID and group boundaries
+        shell: bash
+        run: |
+          CARGO_INCREMENTAL=0 cargo test --locked --test termination_credentials --no-run --message-format=json > .local/nodeguard-trust-build.jsonl
+          python3 - <<'PY'
+          import importlib.util, json, pathlib, re, subprocess
+          messages = [json.loads(line) for line in pathlib.Path('.local/nodeguard-trust-build.jsonl').read_text().splitlines()]
+          executables = {message['executable'] for message in messages
+                         if message.get('reason') == 'compiler-artifact'
+                         and message.get('target', {}).get('name') == 'termination_credentials'
+                         and message.get('profile', {}).get('test') is True
+                         and message.get('executable')}
+          assert len(executables) == 1, 'Expected exact credential test ELF'
+          image = re.search(r'^ARG RUST_IMAGE=(\S+)$', pathlib.Path('Dockerfile').read_text(), re.M).group(1)
+          assert re.fullmatch(r'rust:[A-Za-z0-9.-]+@sha256:[a-f0-9]{64}', image), 'Fixed reviewed build image required'
+          subprocess.run(['docker', 'pull', '--platform', 'linux/amd64', image], check=True)
+          result = subprocess.run(['python3', 'scripts/test-nodeguard-trust-linux.py',
+                                   '--test-binary', str(pathlib.Path(next(iter(executables))).resolve()),
+                                   '--image', image], capture_output=True)
+          receipt = pathlib.Path('.local/nodeguard-credential-evidence/projected-trust.json')
+          receipt.parent.mkdir(parents=True, exist_ok=True)
+          if result.returncode != 0:
+              spec = importlib.util.spec_from_file_location('nodeguard_trust_receipt', 'scripts/test-nodeguard-trust-linux.py')
+              helper = importlib.util.module_from_spec(spec)
+              spec.loader.exec_module(helper)
+              evidence = helper.child_failure_receipt(result.returncode, result.stdout, result.stderr)
+              receipt.write_text(json.dumps(evidence, sort_keys=True) + '\n')
+              raise SystemExit('Nodeguard projected credential verification failed; category=' + evidence['category'])
+          evidence = json.loads(result.stdout)
+          assert evidence['linux_projected_trust_test'] == 'PASS'
+          receipt.write_bytes(result.stdout)
+          PY
       - name: Build and smoke-test non-root service and runner images
         run: |
           docker build --pull --target runtime --tag sandbox-platform:ci .
@@ -404,37 +437,18 @@ jobs:
           PY
           .local/release/nodeguard-linux-amd64/sandbox-nodeguard --help > .local/release/nodeguard-linux-amd64/help.txt
           printf 'source_commit=%s\nrust_toolchain=1.98.1\nplatform=linux/amd64\ncertification=not-certified\nsignature=unsigned\n' '${{ github.sha }}' > .local/release/nodeguard-linux-amd64/build.txt
+          cp .local/nodeguard-credential-evidence/projected-trust.json .local/release/nodeguard-linux-amd64/projected-trust.json
           cd .local/release/nodeguard-linux-amd64
           sha256sum sandbox-nodeguard > SHA256SUMS
           sha256sum --check SHA256SUMS
-      - name: Verify projected Nodeguard credentials with actual Linux UID and group boundaries
-        shell: bash
-        run: |
-          CARGO_INCREMENTAL=0 cargo test --locked --test termination_credentials --no-run --message-format=json > .local/nodeguard-trust-build.jsonl
-          python3 - <<'PY'
-          import json, pathlib, re, subprocess
-          messages = [json.loads(line) for line in pathlib.Path('.local/nodeguard-trust-build.jsonl').read_text().splitlines()]
-          executables = {message['executable'] for message in messages
-                         if message.get('reason') == 'compiler-artifact'
-                         and message.get('target', {}).get('name') == 'termination_credentials'
-                         and message.get('profile', {}).get('test') is True
-                         and message.get('executable')}
-          assert len(executables) == 1, 'Expected exact credential test ELF'
-          image = re.search(r'^ARG RUST_IMAGE=(\S+)$', pathlib.Path('Dockerfile').read_text(), re.M).group(1)
-          assert re.fullmatch(r'rust:[A-Za-z0-9.-]+@sha256:[a-f0-9]{64}', image), 'Fixed reviewed build image required'
-          subprocess.run(['docker', 'pull', '--platform', 'linux/amd64', image], check=True)
-          result = subprocess.run(['python3', 'scripts/test-nodeguard-trust-linux.py',
-                                   '--test-binary', str(pathlib.Path(next(iter(executables))).resolve()),
-                                   '--image', image], check=True, capture_output=True, text=True)
-          evidence = json.loads(result.stdout)
-          assert evidence['linux_projected_trust_test'] == 'PASS'
-          pathlib.Path('.local/release/nodeguard-linux-amd64/projected-trust.json').write_text(result.stdout)
-          PY
       - name: Retain the unsigned host binary and checksum for release review
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sandbox-nodeguard-linux-amd64-${{ github.sha }}
-          path: .local/release/nodeguard-linux-amd64/
+          path: |
+            .local/release/nodeguard-linux-amd64/
+            .local/nodeguard-credential-evidence/projected-trust.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14

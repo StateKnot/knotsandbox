@@ -126,6 +126,20 @@ BFF修改仅位于测试fixture：为owner/runtime配置与唯一临时库绑定
 
 补验收尾：两轴复核发现并修复了GET fixture到达等待的取消清理缺口与诊断超长数字解析缺口。真实首GET已发起但尚未到HTTP handler的受控取消实验，修前自有browser/server仍开放，修后确认全部关闭；预期cancelled实验不计业务PASS。最终受影响30项全部通过，原37项引用未变core及合同源码的已通过记录。正式自动化完整runner的18项业务、5项通知PG、1项真实签名HTTP/SDK和1项原完整进程矩阵全部精确通过，零失败/零忽略；正常43个正式迁移（1..37+39..44）的SHA384、自有进程/容器清理、源码/SDK/制品前后绑定另有收据核对。新提交的完整浏览器链和远端全部CI仍单独核验。
 
+## eeb6c6ec 完整CI：后置投射凭证入口失败
+
+精确提交`eeb6c6ece164fa293e773a917fcd0abc9acee37d`的[CI 38451451190](https://github.com/StateKnot/knotsandbox/actions/runs/38451451190)结束，四个独立作业成功、verify失败。真实Linux容量、18组78项独立PG（含BEGIN取消）、9项安全诊断、完整PG/OIDC、67项Chromium合同及27.137秒完整产品链通过；981个逐文件SHA与Git执行权限匹配，普通文件的600/644权限差异单列，不能声称全物理mode一致。产品链9截图已由原runner验证并保留收据；该CI artifact不含这9份PNG。正式自动化18+5+1+1全部EXACT_PASS，两数据库各43项正常迁移，源码及清理收据已核对。
+
+此前跳过的第20步官方Prometheus（1项实际通过）、第21步非root服务/runner镜像及第22步Linux amd64宿主ELF导出/帮助/校验和均实际成功。首次失败为第23步投射凭证wrapper返回1；父调用`capture_output=True`与`check=True`只留下CalledProcessError，丢失子stderr。现有四份artifact没有该失败回执或测试ELF，原内部分类和是否执行了信任测试仍UNKNOWN。第24步unsigned宿主上传实际跳过，第25步依赖停止成功。
+
+[该runner软件清单](https://github.com/actions/runner-images/blob/ubuntu24/20261004.327/images/ubuntu/Ubuntu2404-Readme.md)声明Docker Client/Server28.0.4；[官方API版本表](https://docs.docker.com/reference/api/engine/)对应API1.48，而[`image inspect --platform`](https://docs.docker.com/reference/cli/docker/image/inspect/)要求API1.49。本地以同一原wrapper和真正普通Cargo编译的AMD64 ELF，单命令强制API1.48，精确复现LOCAL_DOCKER_IMAGE_FAILED；这里证明的是入口兼容缺陷，不倒填原CI丢失的具体错误。
+
+直接删除platform参数会在多平台存储中读到宿主默认ARM元数据，不能拿它证明实际AMD容器。修复依据[官方API1.48存储合同](https://docs.docker.com/reference/api/engine/version-history/)：先核唯一approved repo digest及image ID，create固定linux/amd64且不pull，在start之前核实际Config.Image和Image ID；多平台存储必须有严格合法的platform-specific ImageManifestDescriptor，经典存储只有在descriptor确实不存在且实际image元数据严格为Linux/AMD64时才可通过。空/坏descriptor、错误平台、Image ID、Config.Image或repo digest全部拒绝，不捕获失败后降级。image ID与selected manifest digest分开记录，不把清单digest冒充image ID。
+
+原Rust信任测试与固定staging脚本保持：真实10001主UID/GID、补充组10002、所有capability集合清零、NoNewPrivs、root:10001的0440身份和投射symlink通过，可读但错误补充组/组可写/公开身份/非root组身份及可写CA均拒绝。原失败、修复后的API1.48和当前API均绑定同一AMD64 ELF和三个公开PEM的前后SHA；两次修后各精确1项实际PASS。两次本地验收使用多平台存储，经典分支仅有严格协议fixture及负例，其真实执行仍待下一CI。10项静态协议与负例通过，真实非零子进程及敏感文本污染证明派生FAIL回执不复制原stdout/stderr，只输出闭集分类、大小和SHA；未知不变成成功。
+
+CI新增强制静态协议门；子进程失败先写projected-trust.json再以固定分类失败退出，always保留失败收据。实际凭证门移至昂贵发行镜像构建之前，仍独立执行完整原测试；成功回执在宿主导出后复制入原交付目录。没有跳过、重试、放宽真实身份规则或更改生产信任代码。普通AMD64编译复用原Linux目标卷的独立架构目录，不复制target，保留9.1GiB缓存，剩余空间359GiB；自有测试容器确认清空。新精确提交仍须全部CI门通过，不能以本地通过签发云/Kata/GPU认证。
+
 ## 下一交付与发布门
 
 按表继续有效期request/limit/overhead和归属账本、PSI/峰值画像，建立可解释的利用率/浪费原因；再做受预算与撤销/GC约束的镜像和节点预准备。GPU先完成独占设备租约、真实归属/显存/计算利用率采集、故障回收和数据残留验收，再评估MIG等共享模式。
