@@ -310,7 +310,7 @@ export async function observeReadResponse(page, origin, target, tenant, trigger)
   if (typeof trigger !== 'function') throw new Error('READ_OBSERVER_TRIGGER');
   if (new URL(origin).origin !== origin) throw new Error('READ_OBSERVER_ORIGIN');
   readBusy.add(page);
-  let ticket, timer, onResponse, onNavigation, onClosed, onFailed, cancelled = false, rejectInvalidation;
+  let ticket, timer, onRequest, onResponse, onNavigation, onClosed, onFailed, cancelled = false, rejectInvalidation;
   const invalidation = new Promise((_, reject) => { rejectInvalidation = reject; });
   const deadline = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error('READ_OBSERVER_TIMEOUT')), readTimeout);
@@ -330,31 +330,38 @@ export async function observeReadResponse(page, origin, target, tenant, trigger)
         await page.evaluate(({ slot, ticket }) => window[slot]?.read.cancel(ticket.token), { slot, ticket });
         throw new Error('READ_OBSERVER_EXPIRED');
       }
+      let selectedRequest, duplicateRequest = false;
       const responsePromise = new Promise((resolve) => {
-        onResponse = (response) => {
-          const actual = new URL(response.url());
-          if (response.request().method() === 'GET' && (ticket.loose ? actual.origin === origin && actual.pathname === ticket.path : actual.href === ticket.url)) resolve(response);
-        };
-        onFailed = (request) => {
+        onRequest = (request) => {
           const actual = new URL(request.url());
-          if (request.method() === 'GET' && (ticket.loose ? actual.origin === origin && actual.pathname === ticket.path : actual.href === ticket.url)) rejectInvalidation(new Error('READ_OBSERVER_FETCH_FAILED'));
+          if (request.method() !== 'GET' || (ticket.loose ? actual.origin !== origin || actual.pathname !== ticket.path : actual.href !== ticket.url)) return;
+          if (selectedRequest && selectedRequest !== request) duplicateRequest = true;
+          else selectedRequest = request;
         };
+        // URL/status/ETag are insufficient: an older in-flight GET can have
+        // identical metadata. Only the actual Request first emitted after this
+        // arm may supply either the Response or a native failure event.
+        onResponse = (response) => { if (response.request() === selectedRequest) resolve(response); };
+        onFailed = (request) => { if (request === selectedRequest) rejectInvalidation(new Error('READ_OBSERVER_FETCH_FAILED')); };
         onNavigation = (frame) => { if (frame === page.mainFrame()) rejectInvalidation(new Error('READ_OBSERVER_NAVIGATION')); };
         onClosed = () => rejectInvalidation(new Error('READ_OBSERVER_PAGE_CLOSED'));
-        page.on('response', onResponse); page.on('requestfailed', onFailed); page.on('framenavigated', onNavigation); page.on('close', onClosed); page.on('crash', onClosed);
+        page.on('request', onRequest); page.on('response', onResponse); page.on('requestfailed', onFailed); page.on('framenavigated', onNavigation); page.on('close', onClosed); page.on('crash', onClosed);
       });
       // Await the original UI trigger as well as its original network response;
       // duplicates issued by that trigger are rejected before consumption.
       const [response] = await Promise.all([responsePromise, Promise.resolve().then(trigger)]);
+      if (duplicateRequest) throw new Error('READ_OBSERVER_DUPLICATE');
       const request = response.request();
       const metadata = { method: request.method(), requestUrl: request.url(), url: response.url(), tenant: await request.headerValue('x-tenant-id'),
         status: response.status(), etag: await response.headerValue('etag'), instanceEtag: await response.headerValue('x-instance-etag') };
       const body = await page.evaluate(({ slot, ticket, metadata }) => window[slot].read.take(ticket, metadata), { slot, ticket, metadata });
+      if (duplicateRequest) throw new Error('READ_OBSERVER_DUPLICATE');
       return { response, body };
     };
     return await Promise.race([work(), deadline, invalidation]);
   } finally {
     cancelled = true; clearTimeout(timer);
+    if (onRequest) page.off('request', onRequest);
     if (onResponse) page.off('response', onResponse);
     if (onFailed) page.off('requestfailed', onFailed);
     if (onNavigation) page.off('framenavigated', onNavigation);

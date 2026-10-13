@@ -35,6 +35,107 @@ ROLES = {
     "TEST_BACKUP_DATABASE_URL": "sandbox_backup",
     "TEST_AUTOMATION_DATABASE_URL": "sandbox_automation",
 }
+PROCESS_TEST = "automation_check_bind_error_and_same_pod_restarts_drain_actual_backends"
+TEST_GROUPS = {
+    "formal_acceptance": ("acceptance.log", 18, "automation::tests::"),
+    "automation::notification_tests": ("notifications.log", 5, "automation::notification_tests::"),
+    "automation::notification_http_tests": ("notifications-http.log", 1, "automation::notification_http_tests::"),
+    "worker_process": ("process.log", 1, PROCESS_TEST),
+}
+PROCESS_ASSERTIONS = (
+    ("FORMAL_SCHEMA_MISMATCH", "tests/automation_process.rs",
+     "Process test requires formal 1..37+39..",
+     ("Process test requires formal 1..37+39..43 and no invented migration38",
+      "Process test requires formal 1..37+39..44 and no invented migration38"),
+     "The strict process-test migration set differs from the normally migrated database."),
+    ("STARTUP_LOCK_WINDOW", "tests/automation_process.rs",
+     "Actual connected startup blocker was not observed within original window",
+     ("Actual connected startup blocker was not observed within original window",
+      "Startup backend observation acknowledgment was late"),
+     "The owned connected startup observation did not finish within its existing window."),
+    ("PROCESS_EXIT_CONTRACT", "tests/automation_process.rs",
+     "Actual automation binary did not preserve its intended business exit",
+     ("Actual automation binary did not preserve its intended business exit",),
+     "The owned process did not preserve the expected exit status."),
+    ("READINESS_WINDOW", "tests/automation_process.rs",
+     "Actual automation readiness returned after its original deadline",
+     ("Actual automation readiness returned after its original deadline",),
+     "The owned process did not become ready within its existing window."),
+    ("DATABASE_DRAIN", "tests/automation_process.rs",
+     "Actual connected wrapper did not finish its single database drain",
+     ("Actual connected wrapper did not finish its single database drain",),
+     "The owned connected process did not record exactly one completed pool drain."),
+    ("PROCESS_OUTPUT_BOUND", "tests/automation_process.rs",
+     "Owned process output exceeded fixed bound",
+     ("Owned process output exceeded fixed bound",),
+     "The owned process output exceeded its existing bound."),
+)
+PROCESS_PHASES = {
+    "CHECK": ("START", "CONNECTED_TLS_BLOCKED", "BACKENDS_ABSENT", "OUTPUT_JOINED"),
+    "BIND_ERROR": ("START", "CONNECTED_TLS_BLOCKED", "BACKENDS_ABSENT", "OUTPUT_JOINED"),
+    "READY_SIGTERM": ("START", "CONNECTED_TLS_BLOCKED", "BACKENDS_ABSENT", "OUTPUT_JOINED"),
+    "RUNTIME_CLAIM_PERMISSION": ("START", "BLOCKED_READY_503", "FATAL_BACKENDS_HEALTH_ABSENT", "OUTPUT_JOINED"),
+    "RUNTIME_EXECUTION_PERMISSION": ("START", "BLOCKED_READY_503", "FATAL_BACKENDS_HEALTH_ABSENT", "ORIGINAL_INTENT_NATURAL_LEASE_EXACTLY_ONCE", "OUTPUT_JOINED"),
+    "RUNTIME_TRANSIENT": ("START", "DEGRADED_BACKOFF_SAME_PROCESS_RECOVERED", "OUTPUT_JOINED"),
+    "ACCEPT_QUOTA_TRANSIENT": ("START", "UNKNOWN_ROLLBACK_ALIVE_READY_503", "SAME_PROCESS_ORIGINAL_INTENT_EXACTLY_ONCE", "OUTPUT_JOINED"),
+    "ACCEPT_FINAL_SAFE_MODE_FENCE": ("START", "UNKNOWN_ROLLBACK_ALIVE_READY_503", "SAME_PROCESS_ORIGINAL_INTENT_EXACTLY_ONCE", "OUTPUT_JOINED"),
+}
+
+
+def test_diagnostic(path, group, exit_code, *, timed_out=False):
+    """Only fixed enums/literals reach CI. Original test output stays private."""
+    _, expected_count, selector = TEST_GROUPS[group]
+    digest = hashlib.sha256()
+    chunks = []
+    size = 0
+    with path.open("rb") as stream:
+        while chunk := stream.read(65536):
+            digest.update(chunk)
+            size += len(chunk)
+            if size <= 1024 * 1024:
+                chunks.append(chunk)
+    text = b"".join(chunks).decode("utf8", errors="replace") if size <= 1024 * 1024 else ""
+    summaries = re.findall(
+        r"(?m)^test result: (ok|FAILED)\. ([0-9]{1,6}) passed; ([0-9]{1,6}) failed; ([0-9]{1,6}) ignored; ([0-9]{1,6}) measured; ([0-9]{1,6}) filtered out;", text)
+    observed = re.findall(r"(?m)^test (" + re.escape(selector)
+                          + (r") \.\.\." if group == "worker_process" else r"[^\s]*) \.\.\."), text)
+    verdict = "NO_EXACT_TEST_VERDICT"
+    if timed_out:
+        verdict = "TEST_TIMEOUT"
+    elif size > 1024 * 1024:
+        verdict = "DIAGNOSTIC_LOG_BOUND"
+    elif len(summaries) == 1 and len(observed) == expected_count:
+        kind, passed, failed, ignored, measured, _ = summaries[0]
+        if (kind, int(passed), int(failed), int(ignored), int(measured), exit_code) == (
+                "ok", expected_count, 0, 0, 0, 0):
+            verdict = "EXACT_PASS"
+        elif kind == "FAILED" and int(passed) + int(failed) == expected_count \
+                and int(failed) > 0 and int(ignored) == 0 and int(measured) == 0 and exit_code != 0:
+            verdict = "EXACT_FAILURE"
+    assertions = []
+    markers = []
+    if group == "worker_process":
+        for classification, filename, anchor, messages, summary in PROCESS_ASSERTIONS:
+            if not any(message in text for message in messages):
+                continue
+            source = ROOT / filename
+            source_bytes = source.read_bytes()
+            lines = source_bytes.decode("utf8").splitlines()
+            assertions.append({"classification": classification, "summary": summary,
+                               "sourceFile": filename,
+                               "sourceLine": next((i for i, line in enumerate(lines, 1) if anchor in line), None),
+                               "sourceSha256": hashlib.sha256(source_bytes).hexdigest()})
+        allowed = {"AUTOMATION_PROCESS_STEP " + phase + " " + step
+                   for phase, steps in PROCESS_PHASES.items() for step in steps}
+        for line in text.splitlines():
+            line = line.removeprefix("test " + PROCESS_TEST + " ... ")
+            if line in allowed:
+                markers.append(line)
+    return {"name": group, "expectedCount": expected_count, "testSelector": selector,
+            "testVerdict": verdict, "exitCode": exit_code, "logSha256": digest.hexdigest(),
+            "logBytes": size, "classification": assertions[0]["classification"] if assertions else verdict,
+            "assertions": assertions, "fixedMarkers": markers,
+            "scope": "DERIVED_ALLOWLIST_ONLY_RAW_LOG_REMAINS_PRIVATE"}
 
 
 def approved_image():
@@ -222,6 +323,19 @@ def run(args):
     process_migrated = False
     failed_stage = None
     port = None
+    test_exit_codes = {}
+    test_diagnostics = {}
+    timed_out_groups = set()
+
+    def record_test_group(group, code):
+        test_exit_codes[group] = code
+        filename, _, _ = TEST_GROUPS[group]
+        diagnostic = test_diagnostic(evidence / filename, group, code)
+        # Preserve the safe child verdict before later ledger/cleanup failures.
+        private_json(evidence / (filename.removesuffix(".log") + ".diagnostic.json"), diagnostic)
+        test_diagnostics[group] = diagnostic
+        return diagnostic["testVerdict"] == "EXACT_PASS"
+
     try:
         container = invoke([
             *docker, "run", "--detach", "--name", name,
@@ -298,10 +412,8 @@ def run(args):
                                             stdout=log, stderr=subprocess.STDOUT,
                                             start_new_session=True)
             result_code = test_process.wait(timeout=600)
-        if result_code == 0:
-            output = (evidence / "acceptance.log").read_text()
-            if not re.search(r"test result: ok\. 18 passed; 0 failed; 0 ignored;", output):
-                result_code = 1
+        if not record_test_group(stage, result_code):
+            result_code = 1
         for namespace, count, filename in (
                 ("automation::notification_tests::", 5, "notifications.log"),
                 ("automation::notification_http_tests::", 1, "notifications-http.log")):
@@ -315,9 +427,7 @@ def run(args):
                     cwd=ROOT, env=test_env, stdout=log, stderr=subprocess.STDOUT,
                     start_new_session=True)
                 result_code = test_process.wait(timeout=180)
-            output = (evidence / filename).read_text()
-            if not re.search(r"test result: ok\. " + str(count)
-                             + r" passed; 0 failed; 0 ignored;", output):
+            if not record_test_group(stage, result_code):
                 result_code = 1
         if result_code == 0:
             stage = "worker_process_migration"
@@ -341,15 +451,14 @@ def run(args):
             stage = "worker_process"
             fd = os.open(evidence / "process.log", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, "w") as log:
-                test_process = subprocess.Popen([str(process_binary), "--ignored", "--test-threads=1",
+                test_process = subprocess.Popen([str(process_binary), PROCESS_TEST, "--exact", "--ignored", "--test-threads=1",
                                                 "--nocapture"], cwd=ROOT, env=process_env, stdout=log,
                                                 stderr=subprocess.STDOUT, start_new_session=True)
                 # The process matrix includes three independent natural
                 # 30-second lease/eligibility recoveries. Per-trial deadlines
                 # and production SQL timeouts remain unchanged.
                 result_code = test_process.wait(timeout=240)
-            output = (evidence / "process.log").read_text()
-            if not re.search(r"test result: ok\. 1 passed; 0 failed; 0 ignored;", output):
+            if not record_test_group(stage, result_code):
                 result_code = 1
         failed_stage = stage if result_code else None
         stage = "final_ledger"
@@ -373,11 +482,13 @@ def run(args):
             result_code = 1
             raise RuntimeError("automation inputs changed during acceptance")
         stage = "completed" if result_code == 0 else "acceptance_failed"
-    except BaseException:
+    except BaseException as error:
         # A setup/ledger exception after an earlier successful child must not
         # leave a green receipt. Cleanup still runs before the exception returns.
         result_code = 1
         failed_stage = failed_stage or stage
+        if isinstance(error, subprocess.TimeoutExpired) and stage in TEST_GROUPS:
+            timed_out_groups.add(stage)
         raise
     finally:
         cleanup_errors = []
@@ -419,6 +530,14 @@ def run(args):
                 cleanup_errors.append("OWNED_CONTAINER_ABSENCE_UNCONFIRMED")
         if not cleanup_confirmed or not process_cleanup_confirmed:
             result_code = 1
+        for group, (filename, _, _) in TEST_GROUPS.items():
+            path = evidence / filename
+            if path.is_file() and group not in test_diagnostics:
+                code = test_exit_codes.get(group)
+                if group == failed_stage and test_process is not None:
+                    code = test_process.returncode
+                test_diagnostics[group] = test_diagnostic(
+                    path, group, code, timed_out=group in timed_out_groups)
         private_json(evidence / "evidence.json", {
             "environment": "DISPOSABLE_LOOPBACK_FIXTURE_NOT_CLOUD_CERTIFICATION",
             "started_at": started, "finished_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -437,6 +556,9 @@ def run(args):
                                      "notification_postgres": 5,
                                      "notification_signed_http_sdk": 1,
                                      "automation_worker_process": 1},
+            "test_diagnostics": test_diagnostics,
+            "formal_migration_count": len(ledger) if ledger is not None else None,
+            "process_formal_migration_count": len(process_ledger) if process_ledger is not None else None,
             "source_sha256": digest,
         })
     print("isolated automation acceptance exit " + str(result_code) + "; evidence: " + str(evidence))

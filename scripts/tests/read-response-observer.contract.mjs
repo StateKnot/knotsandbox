@@ -500,3 +500,100 @@ test('standalone read setup followed by mutation registration keeps one shared w
     assert.deepEqual(await page.evaluate(() => [window.nativeCalls, window.cloneCalls]), [2, 2]);
   } finally { await page.close(); }
 });
+
+// Actual prior-request identity regression: both original HTTP requests keep
+// product-style no-store cache semantics and carry no observer header/ticket.
+async function inflightScenario(abortOld, signal) {
+  const target = detail;
+  const requests = [], upstreams = [], timers = [];
+  let browser, page, firstArrivedResolve, firstArrivedReject;
+  const firstArrived = new Promise((resolve, reject) => { firstArrivedResolve = resolve; firstArrivedReject = reject; });
+  const onFirstArrivalCancelled = () => firstArrivedReject(signal.reason);
+  const server = createServer((req, res) => {
+    if (req.url === '/') { res.setHeader('content-type', 'text/html'); res.end('<p>Actual in-flight read correlation</p><script>window.sdkSend=fetch.bind(window)</script>'); return; }
+    if (req.url !== target) { res.writeHead(204); res.end(); return; }
+    assert.equal(req.method, 'GET'); assert.equal(req.headers['x-tenant-id'], tenant);
+    const body = { sequence: requests.length + 1, cutoff: new Date().toISOString() };
+    requests.push({ method: req.method, target: req.url, tenant: req.headers['x-tenant-id'], body }); upstreams.push(res);
+    if (requests.length === 1) firstArrivedResolve();
+    if (requests.length === 2) {
+      const reply = (index) => { upstreams[index].writeHead(200, { 'content-type': 'application/json', etag: '"4"' }); upstreams[index].end(JSON.stringify(requests[index].body)); };
+      if (!abortOld) { timers.push(setTimeout(() => reply(0), 100)); timers.push(setTimeout(() => reply(1), 200)); }
+      else {
+        res.writeHead(200, { 'content-type': 'application/json', etag: '"4"' }); res.write('{');
+        timers.push(setTimeout(() => res.end(JSON.stringify(body).slice(1)), 200));
+      }
+    }
+  });
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
+  const origin = 'http://127.0.0.1:' + server.address().port;
+  try {
+    browser = await chromium.launch({ headless: true, executablePath: process.argv[3] }); page = await browser.newPage();
+    await page.addInitScript(() => {
+      const nativeFetch = window.fetch, clone = Response.prototype.clone;
+      window.nativeRecords = []; window.cloneCalls = 0; window.states = {};
+      Response.prototype.clone = function () { window.cloneCalls++; return Reflect.apply(clone, this, []); };
+      window.fetch = function (...args) {
+        const promise = Reflect.apply(nativeFetch, this, args), record = { input: args[0], promise };
+        window.nativeRecords.push(record); promise.then((response) => { record.response = response; }, () => {}); return promise;
+      };
+    });
+    await installMutationResponseObserver(page, origin, ['DIAGNOSIS']); await page.goto(origin);
+    const start = async (label) => page.evaluate(({ label, url, tenant }) => {
+      const control = new AbortController(), input = new Request(url, { cache: 'no-store', headers: { 'X-Tenant-ID': tenant }, signal: control.signal });
+      const promise = window.sdkSend(input), record = window.nativeRecords.at(-1);
+      const state = { input, control, promiseSame: record.promise === promise }; window.states[label] = state;
+      state.done = promise.then(async (response) => { state.responseSame = record.response === response; state.body = await response.json(); }, () => { state.fetchFailed = true; });
+    }, { label, url: origin + target, tenant });
+    const oldStarted = page.waitForRequest((request) => request.url() === origin + target);
+    await start('old'); const oldRequest = await oldStarted;
+    // A Playwright request event proves browser initiation, not HTTP arrival.
+    // Gate on the actual server handler before asserting the first request.
+    signal.addEventListener('abort', onFirstArrivalCancelled, { once: true });
+    if (signal.aborted) onFirstArrivalCancelled();
+    try { await firstArrived; }
+    finally { signal.removeEventListener('abort', onFirstArrivalCancelled); }
+    assert.equal(requests.length, 1);
+    const newStarted = page.waitForRequest((request) => request.url() === origin + target);
+    let actual, failure;
+    try {
+      actual = await observeReadResponse(page, origin, target, tenant, async () => {
+        await start('new');
+        if (abortOld) {
+          await page.waitForFunction(() => window.states.new.responseSame === true);
+          await page.evaluate(() => { setTimeout(() => window.states.old.control.abort(), 100); });
+        }
+        await page.evaluate(() => window.states.new.done);
+      });
+    } catch (error) { failure = error; }
+    const newRequest = await newStarted;
+    await page.evaluate(() => Promise.all([window.states.old.done, window.states.new.done]));
+    const native = await page.evaluate(() => ({
+      calls: window.nativeRecords.length, clones: window.cloneCalls,
+      old: { body: window.states.old.body, fetchFailed: !!window.states.old.fetchFailed, promiseSame: window.states.old.promiseSame, responseSame: window.states.old.responseSame },
+      fresh: { body: window.states.new.body, promiseSame: window.states.new.promiseSame, responseSame: window.states.new.responseSame },
+      identities: window.nativeRecords.every((record, index) => record.input === window.states[index ? 'new' : 'old'].input && record.input.signal === window.states[index ? 'new' : 'old'].input.signal),
+    }));
+    assert.equal(requests.length, 2); assert.equal(native.calls, 2); assert.equal(native.clones, 1); assert.equal(native.identities, true);
+    assert.equal(native.old.promiseSame, true); assert.equal(native.fresh.promiseSame, true); assert.equal(native.fresh.responseSame, true);
+    assert.deepEqual(native.fresh.body, requests[1].body);
+    if (!abortOld) {
+      assert.equal(native.old.responseSame, true); assert.deepEqual(native.old.body, requests[0].body); assert.ifError(failure);
+      console.log('ACTUAL_SAME_URL_TENANT_STATUS_ETAG_INFLIGHT_GETS', JSON.stringify({ responseSequence: (await actual.response.json()).sequence, cloneSequence: actual.body.sequence, requests: requests.length, clones: native.clones, oldRequestMatched: actual.response.request() === oldRequest, newRequestMatched: actual.response.request() === newRequest }));
+      assert.equal(actual.response.request() === newRequest, true, 'Must return the newly armed actual Request object, never an older same-URL response');
+      assert.deepEqual(actual.body, requests[1].body);
+    } else {
+      assert.equal(native.old.fetchFailed, true);
+      console.log('ACTUAL_PRE_ARM_OLD_GET_ABORT_WITH_FRESH_NATIVE_BODY_SUCCESS', JSON.stringify({ failure: failure?.message, freshSequence: native.fresh.body.sequence, requests: requests.length, clones: native.clones }));
+      assert.ifError(failure); assert.equal(actual.response.request() === newRequest, true); assert.deepEqual(actual.body, requests[1].body);
+    }
+  } finally {
+    signal.removeEventListener('abort', onFirstArrivalCancelled);
+    for (const timer of timers) clearTimeout(timer);
+    try { await browser?.close(); }
+    finally { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
+  }
+}
+
+test('older same-URL same-tenant GET response cannot be combined with the newly armed native clone', options, (context) => inflightScenario(false, context.signal));
+test('older same-URL same-tenant in-flight GET abort cannot invalidate the newly armed original GET', options, (context) => inflightScenario(true, context.signal));

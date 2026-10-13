@@ -211,6 +211,7 @@ jobs:
           python3 -m unittest discover -s scripts/release/tests -v
           python3 -m unittest discover -s scripts/tests -p 'test_nodeguard_host_observation.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_console_browser.py' -v
+          python3 -m unittest discover -s scripts/tests -p 'test_automation_diagnostics.py' -v
           python3 -m json.tool deploy/keycloak/realm.template.json > /dev/null
       - name: Unit and authentication tests
         run: |
@@ -336,7 +337,7 @@ jobs:
           import pathlib, re
           output = pathlib.Path('.local/console-observer-ci/read-response-observer-contract.log').read_text()
           assert all(re.search(r'^' + line + r'$', output, re.M) for line in
-                     (r'1\.\.28', r'# tests 28', r'# pass 28', r'# fail 0', r'# skipped 0'))
+                     (r'1\.\.30', r'# tests 30', r'# pass 30', r'# fail 0', r'# skipped 0'))
           PY
           python3 scripts/test-console-browser.py \
             --node "$(command -v node)" --chrome "$sandbox_live_chrome" \

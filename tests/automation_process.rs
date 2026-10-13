@@ -491,7 +491,7 @@ async fn process_trial(
 }
 
 #[tokio::test]
-#[ignore = "requires fresh formal1..37+39 loopback PostgreSQL/TLS, exact owner and automation LOGINs, and actual sandbox-automation binary; no cloud or Kubernetes certification"]
+#[ignore = "requires fresh formal1..37+39..44 loopback PostgreSQL/TLS, exact owner and automation LOGINs, and actual sandbox-automation binary; no cloud or Kubernetes certification"]
 async fn automation_check_bind_error_and_same_pod_restarts_drain_actual_backends()
 -> anyhow::Result<()> {
     let expected_worker = std::env::var("TEST_AUTOMATION_WORKER_BINARY")
@@ -541,10 +541,10 @@ async fn automation_check_bind_error_and_same_pod_restarts_drain_actual_backends
         )
         .fetch_all(&monitor.pool)
         .await?;
-        let expected: Vec<i64> = (1..=37).chain([39, 40, 41, 42, 43]).collect();
+        let expected: Vec<i64> = (1..=37).chain([39, 40, 41, 42, 43, 44]).collect();
         ensure!(
             versions == expected,
-            "Process test requires formal 1..37+39..43 and no invented migration38"
+            "Process test requires formal 1..37+39..44 and no invented migration38"
         );
         let pod = Uuid::new_v4();
         let mut identities = std::collections::BTreeSet::new();

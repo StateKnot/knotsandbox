@@ -108,6 +108,24 @@ BFF修改仅位于测试fixture：为owner/runtime配置与唯一临时库绑定
 
 按资源开发表同时实现数量/provision校验，见[资源数量交付记录](runtime-resource-contract-delivery-20261014.md)。本轮最终普通Rust all-targets 453项通过，257项环境专用用例保留独立门；严格all-targets Clippy和完整格式检查通过。launch来源、有效期配额账本、利用率分母、warm和GPU仍待开发，新提交远端完整CI必须单独核对。
 
+## 72754128 完整CI：浏览器通过，正式自动化进程门失败
+
+精确提交`7275412890a08acd83bf39c2527b5f8551ce3c3f`的[CI 38444257078](https://github.com/StateKnot/knotsandbox/actions/runs/38444257078)最终失败。四个独立作业通过；verify的资源数量回归、真实Linux容量、18组78项独立PG、全部PG及OIDC/API门通过。第16步65项Chromium观察合同和完整真实Keycloak→BFF→API→TLS PostgreSQL产品链均通过；9份截图、980个逐文件源码SHA、产物保持及自有清理已核对。
+
+首个失败为第18步正式自动化的`worker_process`。原上传内容只有`evidence.json`，没有`process.log`，因此无法直接确定该次CI的具体失败断言。后续Prometheus、镜像、Linux host导出及投射凭证第20–24步实际跳过；第25步依赖停止成功。不能把前置门或always-upload成功计为完整CI成功。
+
+本地用同一原进程测试源码及正常迁移到0044的独立TLS PostgreSQL两次复现：测试严格期待正式1..37+39..43，数据库实际为1..37+39..44，均在进程场景之前失败。源码及迁移校验匹配，支持清单过期这一判断；不把本地断言冒充缺日志的原CI断言。修复只更新完整版本集合、固定错误说明及ignore的环境说明，0038继续不存在，原进程、角色、租约、业务和期限断言全部保留。
+
+正式runner新增现有`evidence.json`内的派生诊断：每组精确选择/计数、退出码、日志SHA及大小、固定分类/源位置和闭集阶段标记。原始错误、连接串、密码、请求/响应正文继续留在本地私有日志；未知输出与超界、超时、错测试或非零退出不能形成成功回执。新增9项诊断检查涵盖敏感文本污染、超长/非ASCII计数及失败关闭，CI强制执行；不额外上传原始进程日志。
+
+## 同URL旧在途GET的真实Request归属修复
+
+原观察票只按URL/method监听外部response/requestfailed时，arm之前已经发出的同URL GET可能抢先到达。本地实际Chromium/HTTP两项RED证明：旧response与新原生clone正文错误配对，或旧请求失败错误终止新GET。每项都保留两次原生GET、一条clone与原生对象身份；没有伪造Response、CDP异常或额外业务重试。
+
+修复绑定arm之后唯一匹配的实际Playwright `Request`，response与requestfailed必须归属于这个对象；第二匹配请求仍严格拒绝，消费前后及finally保持清理。新增两项合同各自通过；原28项合同字节前缀及原37项合同源保持不变。新fixture等待真实HTTP处理方的首次到达回执，再检查原请求计数，不假定Playwright事件与HTTP处理顺序；30秒期限保持，无sleep、retry或额外请求。最终30+37共67项真实Chromium合同通过，零失败/跳过/取消，CI强制30项新计数。完整产品链、独立审查及下一精确提交CI仍须单独核验。
+
+补验收尾：两轴复核发现并修复了GET fixture到达等待的取消清理缺口与诊断超长数字解析缺口。真实首GET已发起但尚未到HTTP handler的受控取消实验，修前自有browser/server仍开放，修后确认全部关闭；预期cancelled实验不计业务PASS。最终受影响30项全部通过，原37项引用未变core及合同源码的已通过记录。正式自动化完整runner的18项业务、5项通知PG、1项真实签名HTTP/SDK和1项原完整进程矩阵全部精确通过，零失败/零忽略；正常43个正式迁移（1..37+39..44）的SHA384、自有进程/容器清理、源码/SDK/制品前后绑定另有收据核对。新提交的完整浏览器链和远端全部CI仍单独核验。
+
 ## 下一交付与发布门
 
 按表继续有效期request/limit/overhead和归属账本、PSI/峰值画像，建立可解释的利用率/浪费原因；再做受预算与撤销/GC约束的镜像和节点预准备。GPU先完成独占设备租约、真实归属/显存/计算利用率采集、故障回收和数据残留验收，再评估MIG等共享模式。
