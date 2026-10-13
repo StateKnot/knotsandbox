@@ -32,6 +32,7 @@ pub mod request;
 pub mod runner;
 pub mod runtime;
 pub mod runtime_manifest;
+mod runtime_resource_contract;
 pub mod timers;
 
 pub mod worker;

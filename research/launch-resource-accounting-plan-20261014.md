@@ -1,6 +1,6 @@
 # 逐次启动资源账本：下一完整交付方案
 
-状态：**待开发**。宿主CPU/内存容量上界和CRI调用往返耗时已经实现；本方案补齐解释浪费所需的配置与授权账。实施与验收完成前，不开放利用率百分比、自动调档、预热池或GPU共享。首批保留普通CPU三种Flavor及request=limit，不改变已有配额政策。
+状态：**进行中**。宿主CPU/内存容量上界和CRI调用往返耗时已经实现；2026-10-14已开发有界数量类型及实际provision校验，见[数量子项交付记录](runtime-resource-contract-delivery-20261014.md)。来源/缺证据状态、不可变launch合同、配额回执和有效期账本仍待开发。本方案补齐解释浪费所需的配置与授权账。实施与验收完成前，不开放利用率百分比、自动调档、预热池或GPU共享。首批保留普通CPU三种Flavor及request=limit，不改变已有配额政策。
 
 ## 数据与身份合同
 
@@ -14,7 +14,7 @@
 
 | 顺序 | 需要开发什么 | 技术落点与完成条件 |
 | --- | --- | --- |
-| 1 | 确定可归一化的CPU/内存数量、来源与缺证据状态 | 新`runtime_resource_contract`深模块。只接受受支持的资源键与有界Quantity，拒绝负数、溢出、额外设备和sidecar。用户请求、实际调度资源、配额授权额和宿主上界用不同类型/字段表示。 |
+| 1 | 确定可归一化的CPU/内存数量、来源与缺证据状态 | **数量/provision校验已实现，来源与缺证据模型待开发。** 新`runtime_resource_contract`深模块接入实际生成、创建前/回读后和RuntimeClass入口；工作负载支持原CPU、memory、ephemeral-storage三个键，overhead只允许CPU/memory，拒绝负数、溢出、额外设备和sidecar。后续用户请求、实际调度资源、配额授权额和宿主上界用不同类型/字段表示，不能把当前校验值当历史证据。 |
 | 2 | 不可变launch请求与配额回执 | 新迁移、`db`/`lifecycle`受理事务。PENDING与原受理一起提交；START/RESTART有新launch，renew不改资源合同。保存实际受理/观察时间，不伪装精确COMMIT时间。双层租户/项目配额分列，不相加为物理占用。 |
 | 3 | 受控RuntimeClass配置与Pod资源回读 | `runtime`/`runtime_manifest`/`worker`保存版本配置观察并校验实际Pod资源。UID或值冲突拒绝；无法建立一致证据时UNKNOWN，不回填当前值。保持原CRI许可、节点/卷归属和期限。 |
 | 4 | 可信观察登记 | `gateway_runtime`、`termination_runtime`把已校验的Pod资源带入原许可登记事务；沿用workspace→instance→operation/node fence顺序。同UID相同内容幂等，冲突拒绝，COMMIT ACK丢失复用原登记。API/普通调用者不能伪造登记。 |

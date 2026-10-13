@@ -4,7 +4,7 @@
 // The future ONCE trigger is never dispatched and no response body is mocked.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mutationResponseJson } from './mutation-response-observer.mjs';
+import { mutationResponseJson, observeReadResponse } from './mutation-response-observer.mjs';
 
 export async function automationsConsole(page, config, coordinate) {
   const step = (name) => process.stderr.write(`AUTOMATIONS_LIVE_STEP ${name}\n`);
@@ -187,22 +187,20 @@ export async function automationsConsole(page, config, coordinate) {
     step('POLICY_AND_RUNS_WITHOUT_OPERATION_READ');
     const policyPath = `/v1/automations/${actual.resource.id}`;
     const runsPath = policyPath + '/runs';
-    const opening = page.waitForResponse((reply) => match(reply, 'GET', policyPath));
-    await row.getByRole('button', { name: '打开自动化策略', exact: true }).click();
-    const opened = await opening;
+    const { response: opened, body: openedPolicy } = await observeReadResponse(page, origin, policyPath, config.tenant,
+      () => row.getByRole('button', { name: '打开自动化策略', exact: true }).click());
     assert.equal(opened.status(), 200);
     assert.equal(opened.headers().etag, '"1"');
     step('POLICY_GET_BODY_READ');
-    assert.deepEqual(await opened.json(), actual.resource);
+    assert.deepEqual(openedPolicy, actual.resource);
     step('POLICY_GET_BODY_READ_COMPLETE');
     await state(actual.resource.id, 'ACTIVE', 1);
-    const runs = page.waitForResponse((reply) => match(reply, 'GET', runsPath));
-    await panel.getByRole('button', { name: '刷新运行历史', exact: true }).click();
-    const history = await runs;
+    const { response: history, body: historyBody } = await observeReadResponse(page, origin,
+      runsPath + `?project_id=${config.project}&instance_id=${config.instance}&limit=20`, config.tenant,
+      () => panel.getByRole('button', { name: '刷新运行历史', exact: true }).click());
     assert.equal(history.status(), 200);
     assert.equal(new URL(history.url()).searchParams.get('project_id'), config.project);
     step('RUN_HISTORY_GET_BODY_READ');
-    const historyBody = await history.json();
     step('RUN_HISTORY_GET_BODY_READ_COMPLETE');
     assert.deepEqual(historyBody.items, []);
     assert.equal(historyBody.next_cursor, null);
@@ -255,12 +253,11 @@ export async function automationsConsole(page, config, coordinate) {
     await coordinate('automations_changed', 'automation_read_revoked');
 
     step('REAL_READ_REVOCATION_CLEARS_POLICY_AND_RUNS');
-    const denial = page.waitForResponse((reply) => match(reply, 'GET', policyPath));
-    await panel.getByRole('button', { name: '重新读取策略', exact: true }).click();
-    const denied = await denial;
+    const { response: denied, body: deniedPolicy } = await observeReadResponse(page, origin, policyPath, config.tenant,
+      () => panel.getByRole('button', { name: '重新读取策略', exact: true }).click());
     assert.equal(denied.status(), 404);
     step('POLICY_DENIED_GET_BODY_READ');
-    assert.equal((await denied.json()).code, 'RESOURCE_NOT_FOUND');
+    assert.equal(deniedPolicy.code, 'RESOURCE_NOT_FOUND');
     step('POLICY_DENIED_GET_BODY_READ_COMPLETE');
     await panel.getByRole('alert').filter({ hasText: 'RESOURCE_NOT_FOUND' }).first().waitFor();
     assert.equal(await detail().count(), 0);
@@ -271,13 +268,11 @@ export async function automationsConsole(page, config, coordinate) {
     await coordinate('automation_read_denied', 'automations_permissions_restored');
 
     step('EXPLICIT_READ_RESTORED_WITHOUT_NEW_POLICY');
-    const rereading = page.waitForResponse((reply) => match(reply, 'GET', policyPath));
-    await panel.getByRole('button', { name: '重新读取策略', exact: true }).click();
-    const restored = await rereading;
+    const { response: restored, body: restoredPolicy } = await observeReadResponse(page, origin, policyPath, config.tenant,
+      () => panel.getByRole('button', { name: '重新读取策略', exact: true }).click());
     assert.equal(restored.status(), 200);
     assert.equal(restored.headers().etag, '"4"');
     step('POLICY_RESTORED_GET_BODY_READ');
-    const restoredPolicy = await restored.json();
     step('POLICY_RESTORED_GET_BODY_READ_COMPLETE');
     assert.equal(restoredPolicy.id, actual.resource.id);
     assert.equal(restoredPolicy.status, 'REVOKED');

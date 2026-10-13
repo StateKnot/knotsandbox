@@ -16,7 +16,7 @@ import { automationsConsole } from './browser-automations-live.mjs';
 import { notificationsConsole } from './browser-notifications-live.mjs';
 import { installServiceClientResponseObserver } from './service-client-response-observer.mjs';
 import { installDiagnosisResponseObserver } from './diagnosis-response-observer.mjs';
-import { installMutationResponseObserver } from './mutation-response-observer.mjs';
+import { installMutationResponseObserver, observeReadResponse } from './mutation-response-observer.mjs';
 
 
 const screenshotPlan = [
@@ -216,17 +216,13 @@ try {
   });
   await screenshotEvidence.capture('notification_acknowledged', page);
   stage = 'fresh_instance_details_navigation';
-  const currentInstance = page.waitForResponse((response) => {
-    const url = new URL(response.url());
-    return url.origin === config.origin && url.pathname === `/v1/instances/${config.instance}/details`
-      && response.request().method() === 'GET';
+  const { response: instanceResponse, body: currentDetails } = await observeReadResponse(page, config.origin,
+    `/v1/instances/${config.instance}/details`, config.tenant, async () => {
+      await page.getByRole('button', { name: '实例', exact: true }).click();
+      await page.getByRole('button', { name: config.name, exact: true }).click();
   });
-  await page.getByRole('button', { name: '实例', exact: true }).click();
-  await page.getByRole('button', { name: config.name, exact: true }).click();
-  const instanceResponse = await currentInstance;
   stage = 'fresh_instance_details_version_verification';
   assert.equal(instanceResponse.status(), 200);
-  const currentDetails = await instanceResponse.json();
   const currentResource = currentDetails.instance;
   assert.equal(currentResource.id, config.instance);
   assert.equal(currentResource.tenant_id, config.tenant);
@@ -298,9 +294,16 @@ try {
   const evidenceCodes = { EACCES: 'EVIDENCE_PERMISSION_DENIED', EPERM: 'EVIDENCE_PERMISSION_DENIED',
     EEXIST: 'EVIDENCE_PATH_EXISTS', ENOENT: 'EVIDENCE_PATH_MISSING',
     ENOSPC: 'EVIDENCE_DISK_FULL', EIO: 'EVIDENCE_IO_ERROR' };
+  const readObserverCodes = new Set(['SCOPE', 'QUERY', 'ORIGIN', 'TENANT', 'TENANT_MISMATCH',
+    'CONCURRENT', 'BUDGET_OR_DUPLICATE', 'EXPIRED', 'DUPLICATE', 'TIMEOUT', 'NAVIGATION',
+    'PAGE_CLOSED', 'UNMATCHED', 'MISMATCH', 'STATUS_REJECTED', 'BODY_TOO_LARGE',
+    'BODY_MISSING', 'BODY_UNAVAILABLE', 'CREDENTIAL_FIELD_REJECTED', 'FETCH_FAILED', 'TRIGGER']);
+  const readObserverCode = /\bREAD_OBSERVER_([A-Z_]{2,40})\b/.exec(errorText)?.[1];
   if (Object.hasOwn(evidenceCodes, error?.code)) {
     diagnostics.errorCode = error.code;
     diagnostics.errorCategory = evidenceCodes[error.code];
+  } else if (readObserverCodes.has(readObserverCode)) {
+    diagnostics.errorCategory = 'READ_OBSERVER_' + readObserverCode;
   } else if (/strict mode violation/.test(errorText)) {
     diagnostics.errorCategory = 'STRICT_LOCATOR_AMBIGUOUS';
   } else if (/Page\.captureScreenshot|Unable to capture screenshot|Failed to capture screenshot/.test(errorText)) {

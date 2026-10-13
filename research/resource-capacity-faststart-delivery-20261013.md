@@ -90,6 +90,24 @@ BFF修改仅位于测试fixture：为owner/runtime配置与唯一临时库绑定
 
 版权与出处贯穿实际交付链：当前manifest v3强制签名`sqlx-postgres-notices.json`，包含原双许可证全文和补丁来源；v1/v2只保留历史读取。OCI/宿主导出和离线安装均保留通知，只有原八ELF执行集合；发布合同87项通过，包含真正本地文件复制、改字节拒绝、旧版下载名单和许可证截短负例。该结果没有签发本项目正式发布，签名、镜像扫描和云验收仍是各自独立的发布门。
 
+## b66177be 完整CI：诊断读权限恢复后的GET正文观察失败
+
+精确提交`b66177be3475e161e7a4b33625096759f8cf57bc`的[CI 38435165070](https://github.com/StateKnot/knotsandbox/actions/runs/38435165070)最终失败。四个独立作业通过；verify的普通Rust、18组78项独立PG回归（含真实BEGIN取消归池）、真实Linux容量、全部PG与OIDC/API链均通过。第16步的原10/12与新15项Chromium observer合同全部通过、零失败/零跳过，但实际产品浏览器在诊断读权限恢复后失败。
+
+最后完成标记为`READ_RESTORED_HTTP_200`，未达到`READ_RESTORED_BODY_CHECKED`；实际失败入口为`browser-diagnoses-live.mjs`的原`restoredResponse.json()`，固定分类`RESPONSE_BODY_UNAVAILABLE`。此时账号恢复、诊断原键202重放、首次结构化GET和撤权GET 404均已通过。不能将本次失败归为早先的账号数据库503或mutation回执。977个源文件逐一匹配该提交，浏览器源码经过Cargo校验，自有进程与数据库清理成功。
+
+后续正式自动化验收、Prometheus、服务镜像、Linux host导出与投射凭证门均实际跳过；always-upload成功不代表这些验收通过。第25步依赖停止成功。固定报告与原失败日志保留在本机`.local/resource-faststart-20261013/publication-shared-native/ci-private/`，修复不重跑此失败提交，不加入业务重试或移除原断言。
+
+## 显式一次性GET观察与资源数量子项
+
+针对上述GET失败，观察深模块新增`observeReadResponse`，使用原单fetch包装和16条/每条256KiB raw JSON预算。仅显式一次性票据的闭合业务GET能捕获；实际请求/响应完整URL、租户、status、ETag及实例详情的instance ETag必须一致。第二调用、重入、匹配两个GET、导航、请求失败、坏JSON、超界、认证字段和期限均失败关闭，消费与finally清理只取消clone分支。没有新增GET、网络关联header、retry或替代正文。
+
+机器身份分页的opaque cursor由原SDK请求生成，因此只有这个list可显式按path arm，仍保存实际完整URL并逐字核对；其他query精确匹配。认证、未arming及其他路由不读关联头或正文。一个真实GET首先证明原生与CDP正文一致，实际清除该CDP会话状态后原外部正文读取精确失败；随后独立副本仍来自同一请求。该回归不推定GitHub底层为何失去正文。原25项首次运行24通过/1失败捕获真实fetch失败不产生response事件的问题；已监听实际`requestfailed`，不follow或重试。fixture和入口错误分别保留，未当有效RED。
+
+新增28项与原37项共65项真实Chromium合同通过，零失败/取消/跳过，原三个合同源字节不变。五消费者原断言均保留，账户多一项cursor检查；route.fetch、APIRequestContext和原生页面内读取保持。CI强制新增28项门禁及日志保留，原完整产品链继续独立执行。Standards与Spec静态审查分别零阻断；这不是本项目云运行或正式发布认证。
+
+按资源开发表同时实现数量/provision校验，见[资源数量交付记录](runtime-resource-contract-delivery-20261014.md)。本轮最终普通Rust all-targets 453项通过，257项环境专用用例保留独立门；严格all-targets Clippy和完整格式检查通过。launch来源、有效期配额账本、利用率分母、warm和GPU仍待开发，新提交远端完整CI必须单独核对。
+
 ## 下一交付与发布门
 
 按表继续有效期request/limit/overhead和归属账本、PSI/峰值画像，建立可解释的利用率/浪费原因；再做受预算与撤销/GC约束的镜像和节点预准备。GPU先完成独占设备租约、真实归属/显存/计算利用率采集、故障回收和数据残留验收，再评估MIG等共享模式。

@@ -4,7 +4,7 @@
 // No business response, identity, source event or notification is mocked.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mutationResponseJson } from './mutation-response-observer.mjs';
+import { mutationResponseJson, observeReadResponse } from './mutation-response-observer.mjs';
 
 export async function notificationsConsole(page, config, coordinate) {
   const step = (name) => process.stderr.write(`NOTIFICATIONS_LIVE_STEP ${name}\n`);
@@ -73,12 +73,10 @@ export async function notificationsConsole(page, config, coordinate) {
     await page.getByRole('table', { name: '自动化异常通知列表', exact: true }).waitFor();
   };
   const openNotice = async () => {
-    const reading = page.waitForResponse((reply) => match(reply, 'GET', detailPath));
-    await panel().getByRole('button', { name: `查看通知 ${source.notice_id}`, exact: true }).click();
-    const reply = await reading;
+    const { response: reply, body: resource } = await observeReadResponse(page, origin, detailPath, config.tenant,
+      () => panel().getByRole('button', { name: `查看通知 ${source.notice_id}`, exact: true }).click());
     assert.equal(reply.status(), 200);
     step('DETAIL_GET_BODY_READ');
-    const resource = await reply.json();
     step('DETAIL_GET_BODY_READ_COMPLETE');
     checkSource(resource);
     assert.equal(reply.headers().etag, `"${resource.version}"`);
@@ -253,13 +251,12 @@ export async function notificationsConsole(page, config, coordinate) {
     await coordinate('notifications_write_denied', 'notification_read_revoked');
 
     step('CURRENT_READ_REVOCATION_CLEARS_LIST_AND_DETAIL');
-    const deniedRefresh = page.waitForResponse((reply) => match(reply, 'GET', listPath)
-      || match(reply, 'GET', detailPath));
-    await panel().getByRole('button', { name: '刷新通知', exact: true }).click();
-    const refreshDenial = await deniedRefresh;
+    const { response: refreshDenial, body: refreshDeniedBody } = await observeReadResponse(page, origin,
+      `${listPath}?project_id=${config.project}&limit=20`, config.tenant,
+      () => panel().getByRole('button', { name: '刷新通知', exact: true }).click());
     assert.equal(refreshDenial.status(), 404);
     step('REFRESH_DENIED_GET_BODY_READ');
-    assert.equal((await refreshDenial.json()).code, 'RESOURCE_NOT_FOUND');
+    assert.equal(refreshDeniedBody.code, 'RESOURCE_NOT_FOUND');
     step('REFRESH_DENIED_GET_BODY_READ_COMPLETE');
     await panel().getByRole('alert').filter({ hasText: 'RESOURCE_NOT_FOUND' }).first().waitFor();
     await page.waitForFunction(() => !document.querySelector('[data-testid="automation-notification-detail"]')
@@ -270,12 +267,11 @@ export async function notificationsConsole(page, config, coordinate) {
     assert.equal(listDenied.status, 404);
     assert.equal(listDenied.body.code, 'RESOURCE_NOT_FOUND');
     await page.getByRole('button', { name: '请求记录', exact: true }).click();
-    const deniedRead = page.waitForResponse((reply) => match(reply, 'GET', detailPath));
-    await retry();
-    const readReply = await deniedRead;
+    const { response: readReply, body: readDeniedBody } = await observeReadResponse(page, origin, detailPath, config.tenant,
+      retry);
     assert.equal(readReply.status(), 404);
     step('JOURNAL_DENIED_GET_BODY_READ');
-    assert.equal((await readReply.json()).code, 'RESOURCE_NOT_FOUND');
+    assert.equal(readDeniedBody.code, 'RESOURCE_NOT_FOUND');
     step('JOURNAL_DENIED_GET_BODY_READ_COMPLETE');
     await page.getByRole('alert').filter({ hasText: 'RESOURCE_NOT_FOUND' }).first().waitFor();
     await assertUnknown();

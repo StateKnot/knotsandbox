@@ -10,6 +10,375 @@ use sandbox_platform::runtime_manifest::{
 use serde_json::{Value, json};
 use uuid::Uuid;
 
+#[tokio::test]
+async fn all_flavors_preserve_equal_requests_and_limits_and_supported_ephemeral_storage()
+-> anyhow::Result<()> {
+    use axum::{
+        body::Body,
+        http::{Request, Response},
+    };
+    use kube::{Client, client::Body as KubeBody};
+    use sandbox_platform::runtime::KubernetesRuntime;
+    use std::convert::Infallible;
+
+    for (cpu_millis, memory_mib, cpu_quantity, memory_quantity) in [
+        (1000, 2048, "1", "2Gi"),
+        (2000, 4096, "2", "4Gi"),
+        (4000, 8192, "4", "8Gi"),
+    ] {
+        for (ephemeral_mib, ephemeral_quantity) in [(128, "128Mi"), (1024, "1Gi"), (32768, "32Gi")]
+        {
+            let mut context = context();
+            context.cpu_millis = cpu_millis;
+            context.memory_mib = memory_mib;
+            let mut config = config();
+            config.ephemeral_storage_mib = ephemeral_mib;
+            config.tmp_size_mib = 64;
+            let manifests = build_manifests(&context, &config)?;
+            let mut observed = serde_json::to_value(observed_pod(&manifests.pod))?;
+            let resources = json!({"cpu":cpu_quantity,"memory":memory_quantity,"ephemeral-storage":ephemeral_quantity});
+            assert_eq!(
+                observed["spec"]["containers"][0]["resources"],
+                json!({"requests":resources,"limits":resources})
+            );
+            observed["spec"]["overhead"] = json!({"cpu":"0.250","memory":"512M"});
+            let known_uid = observed["metadata"]["uid"].as_str().unwrap().to_owned();
+            let service = tower::service_fn(move |request: Request<KubeBody>| {
+                assert_eq!(request.method(), axum::http::Method::GET);
+                let body = observed.to_string();
+                async move {
+                    Ok::<_, Infallible>(
+                        Response::builder()
+                            .status(200)
+                            .header("content-type", "application/json")
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                }
+            });
+            let runtime = KubernetesRuntime::from_client(Client::new(service, "test"));
+            let accepted = runtime.ensure_pod(&manifests, Some(&known_uid)).await?;
+            assert_eq!(
+                accepted.spec.unwrap().containers[0].resources,
+                manifests.pod.spec.unwrap().containers[0].resources
+            );
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn invalid_provision_requests_are_rejected_before_any_kubernetes_request()
+-> anyhow::Result<()> {
+    use axum::{
+        body::Body,
+        http::{Request, Response},
+    };
+    use kube::{Client, client::Body as KubeBody};
+    use sandbox_platform::runtime::KubernetesRuntime;
+    use std::{
+        convert::Infallible,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+    };
+
+    for case in [
+        "negative",
+        "precision",
+        "overflow",
+        "zero_memory",
+        "unequal",
+        "missing_requests",
+        "missing_ephemeral",
+        "gpu",
+        "hugepages",
+        "claims",
+        "pod_claims",
+        "pod_resources",
+        "sidecar",
+        "init",
+        "ephemeral_container",
+        "unsupported_ephemeral_unit",
+    ] {
+        let mut manifests = build_manifests(&context(), &config())?;
+        let mut value = serde_json::to_value(&manifests.pod)?;
+        match case {
+            "negative" => {
+                value["spec"]["containers"][0]["resources"]["requests"]["cpu"] = json!("-1")
+            }
+            "precision" => {
+                value["spec"]["containers"][0]["resources"]["requests"]["cpu"] = json!("0.0001")
+            }
+            "overflow" => {
+                value["spec"]["containers"][0]["resources"]["requests"]["memory"] =
+                    json!("9223372036854775808")
+            }
+            "zero_memory" => {
+                value["spec"]["containers"][0]["resources"]["requests"]["memory"] = json!("0")
+            }
+            "unequal" => value["spec"]["containers"][0]["resources"]["limits"]["cpu"] = json!("2"),
+            "missing_requests" => {
+                value["spec"]["containers"][0]["resources"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("requests");
+            }
+            "missing_ephemeral" => {
+                value["spec"]["containers"][0]["resources"]["requests"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("ephemeral-storage");
+            }
+            "gpu" => {
+                value["spec"]["containers"][0]["resources"]["requests"]["nvidia.com/gpu"] =
+                    json!("1")
+            }
+            "hugepages" => {
+                value["spec"]["containers"][0]["resources"]["limits"]["hugepages-2Mi"] =
+                    json!("2Mi")
+            }
+            "claims" => {
+                value["spec"]["containers"][0]["resources"]["claims"] = json!([{"name":"device"}])
+            }
+            "pod_claims" => {
+                value["spec"]["resourceClaims"] =
+                    json!([{"name":"device","resourceClaimName":"foreign"}])
+            }
+            "pod_resources" => {
+                value["spec"]["resources"] = value["spec"]["containers"][0]["resources"].clone()
+            }
+            "sidecar" => {
+                let extra = value["spec"]["containers"][0].clone();
+                value["spec"]["containers"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(extra);
+            }
+            "init" => {
+                value["spec"]["initContainers"] = json!([value["spec"]["containers"][0].clone()])
+            }
+            "ephemeral_container" => {
+                value["spec"]["ephemeralContainers"] = json!([{"name":"debug"}])
+            }
+            "unsupported_ephemeral_unit" => {
+                value["spec"]["containers"][0]["resources"]["requests"]["ephemeral-storage"] =
+                    json!("1.5Gi")
+            }
+            _ => unreachable!(),
+        }
+        manifests.pod = serde_json::from_value(value)?;
+        let requests = Arc::new(AtomicUsize::new(0));
+        let captured = requests.clone();
+        let service = tower::service_fn(move |_: Request<KubeBody>| {
+            captured.fetch_add(1, Ordering::SeqCst);
+            async {
+                Ok::<_, Infallible>(Response::builder().status(500).body(Body::empty()).unwrap())
+            }
+        });
+        let runtime = KubernetesRuntime::from_client(Client::new(service, "test"));
+        assert!(
+            runtime.ensure_pod(&manifests, None).await.is_err(),
+            "invalid provision request: {case}"
+        );
+        assert_eq!(
+            requests.load(Ordering::SeqCst),
+            0,
+            "Kubernetes was contacted for {case}"
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_created_pod_with_unsupported_overhead_is_not_returned_as_a_valid_launch()
+-> anyhow::Result<()> {
+    use axum::{
+        body::Body,
+        http::{Method, Request, Response},
+    };
+    use kube::{Client, client::Body as KubeBody};
+    use sandbox_platform::runtime::KubernetesRuntime;
+    use std::{
+        convert::Infallible,
+        sync::{Arc, Mutex},
+    };
+
+    let manifests = build_manifests(&context(), &config())?;
+    let mut created = serde_json::to_value(observed_pod(&manifests.pod))?;
+    created["spec"]["overhead"] = json!({"cpu":"0.0001"});
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let captured = requests.clone();
+    let service = tower::service_fn(move |request: Request<KubeBody>| {
+        captured.lock().unwrap().push(request.method().clone());
+        let (status, body) = match *request.method() {
+            Method::GET => (404, json!({"apiVersion":"v1","kind":"Status","status":"Failure","reason":"NotFound","code":404,"message":"fixture absent"}).to_string()),
+            Method::POST => (201, created.to_string()),
+            _ => panic!("unexpected Kubernetes mutation"),
+        };
+        async move {
+            Ok::<_, Infallible>(
+                Response::builder()
+                    .status(status)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+        }
+    });
+    let runtime = KubernetesRuntime::from_client(Client::new(service, "test"));
+    assert!(runtime.ensure_pod(&manifests, None).await.is_err());
+    assert_eq!(*requests.lock().unwrap(), [Method::GET, Method::POST]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn provisioning_rejects_request_plus_overhead_integer_overflow() -> anyhow::Result<()> {
+    use axum::{
+        body::Body,
+        http::{Request, Response},
+    };
+    use kube::{Client, client::Body as KubeBody};
+    use sandbox_platform::runtime::KubernetesRuntime;
+    use std::convert::Infallible;
+
+    for overhead in [
+        json!({"memory":"9223372036854775807"}),
+        json!({"cpu":"9223372036854775807m"}),
+    ] {
+        let manifests = build_manifests(&context(), &config())?;
+        let mut observed = serde_json::to_value(observed_pod(&manifests.pod))?;
+        observed["spec"]["overhead"] = overhead;
+        let known_uid = observed["metadata"]["uid"].as_str().unwrap().to_owned();
+        let service = tower::service_fn(move |_: Request<KubeBody>| {
+            let body = observed.to_string();
+            async move {
+                Ok::<_, Infallible>(
+                    Response::builder()
+                        .status(200)
+                        .header("content-type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+            }
+        });
+        let runtime = KubernetesRuntime::from_client(Client::new(service, "test"));
+        assert!(
+            runtime
+                .ensure_pod(&manifests, Some(&known_uid))
+                .await
+                .is_err()
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn provisioning_keeps_the_full_pod_comparison_strict_for_quantity_aliases()
+-> anyhow::Result<()> {
+    use axum::{
+        body::Body,
+        http::{Request, Response},
+    };
+    use kube::{Client, client::Body as KubeBody};
+    use sandbox_platform::runtime::KubernetesRuntime;
+    use std::{
+        convert::Infallible,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+    };
+
+    let manifests = build_manifests(&context(), &config())?;
+    let mut observed = serde_json::to_value(observed_pod(&manifests.pod))?;
+    for field in ["requests", "limits"] {
+        observed["spec"]["containers"][0]["resources"][field]["cpu"] = json!("1000m");
+        observed["spec"]["containers"][0]["resources"][field]["memory"] = json!("2048Mi");
+    }
+    let known_uid = observed["metadata"]["uid"].as_str().unwrap().to_owned();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let captured = requests.clone();
+    let service = tower::service_fn(move |_: Request<KubeBody>| {
+        captured.fetch_add(1, Ordering::SeqCst);
+        let body = observed.to_string();
+        async move {
+            Ok::<_, Infallible>(
+                Response::builder()
+                    .status(200)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+        }
+    });
+    let runtime = KubernetesRuntime::from_client(Client::new(service, "test"));
+    assert!(
+        runtime
+            .ensure_pod(&manifests, Some(&known_uid))
+            .await
+            .is_err()
+    );
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn provisioning_rejects_bad_overhead_but_safety_stop_still_targets_the_old_uid()
+-> anyhow::Result<()> {
+    use axum::{
+        body::Body,
+        http::{Method, Request, Response},
+    };
+    use kube::{Client, client::Body as KubeBody};
+    use sandbox_platform::runtime::KubernetesRuntime;
+    use std::{
+        convert::Infallible,
+        sync::{Arc, Mutex},
+    };
+
+    let manifests = build_manifests(&context(), &config())?;
+    let mut observed = serde_json::to_value(observed_pod(&manifests.pod))?;
+    observed["metadata"]["resourceVersion"] = json!("fixture-version");
+    observed["spec"]["overhead"] = json!({"cpu":"-250m","memory":"160Mi"});
+    let known_uid = observed["metadata"]["uid"].as_str().unwrap().to_owned();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let captured = requests.clone();
+    let service = tower::service_fn(move |request: Request<KubeBody>| {
+        captured.lock().unwrap().push(request.method().clone());
+        let body = observed.to_string();
+        async move {
+            Ok::<_, Infallible>(
+                Response::builder()
+                    .status(200)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+        }
+    });
+    let runtime = KubernetesRuntime::from_client(Client::new(service, "test"));
+    assert!(
+        runtime
+            .ensure_pod(&manifests, Some(&known_uid))
+            .await
+            .is_err()
+    );
+    assert!(runtime.find_stop_target(&manifests.pod).await?.is_some());
+    assert!(
+        runtime
+            .request_stop(&manifests.pod, &known_uid)
+            .await?
+            .is_some()
+    );
+    assert_eq!(
+        *requests.lock().unwrap(),
+        [Method::GET, Method::GET, Method::GET, Method::DELETE]
+    );
+    Ok(())
+}
+
 #[test]
 fn maximum_workspace_keeps_the_kubernetes_canonical_tib_quantity() {
     let mut ctx = context();

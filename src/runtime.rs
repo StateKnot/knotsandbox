@@ -172,6 +172,13 @@ impl KubernetesRuntime {
         {
             return Err(RuntimeError::InvalidRuntimeClass);
         }
+        crate::runtime_resource_contract::validate_overhead(
+            class
+                .overhead
+                .as_ref()
+                .and_then(|overhead| overhead.pod_fixed.as_ref()),
+        )
+        .map_err(|_| RuntimeError::InvalidRuntimeClass)?;
         Ok(())
     }
 
@@ -236,6 +243,8 @@ impl KubernetesRuntime {
         known_uid: Option<&str>,
     ) -> Result<Pod, RuntimeError> {
         let expected = &manifests.pod;
+        crate::runtime_resource_contract::validate_provision_resources(expected, expected)
+            .map_err(|_| ManifestError::SpecificationDrift("runtime resource quantities"))?;
         let (namespace, name) = identity(&expected.metadata)?;
         let api: Api<Pod> = Api::namespaced(self.client.clone(), namespace);
         let pod = match api.get_opt(name).await? {
@@ -250,6 +259,8 @@ impl KubernetesRuntime {
             },
         };
         validate_existing_pod(&pod, expected, known_uid)?;
+        crate::runtime_resource_contract::validate_provision_resources(&pod, expected)
+            .map_err(|_| ManifestError::SpecificationDrift("runtime resource quantities"))?;
         Ok(pod)
     }
 
@@ -312,6 +323,128 @@ mod tests {
         convert::Infallible,
         sync::{Arc, Mutex},
     };
+
+    fn runtime_class_response(overhead: serde_json::Value) -> KubernetesRuntime {
+        let class = serde_json::json!({
+            "apiVersion":"node.k8s.io/v1", "kind":"RuntimeClass",
+            "metadata":{"name":"kata-qemu"}, "handler":"kata-qemu",
+            "scheduling":{"nodeSelector":{"sandbox.platform/worker-pool":"kata"}},
+            "overhead":overhead
+        });
+        let service = tower::service_fn(move |request: Request<KubeBody>| {
+            assert_eq!(
+                request.uri().path(),
+                "/apis/node.k8s.io/v1/runtimeclasses/kata-qemu"
+            );
+            let body = class.to_string();
+            async move {
+                Ok::<_, Infallible>(
+                    Response::builder()
+                        .status(200)
+                        .header("content-type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap_or_else(|_| Response::new(Body::empty())),
+                )
+            }
+        });
+        KubernetesRuntime::from_client(Client::new(service, "test"))
+    }
+
+    #[tokio::test]
+    async fn runtime_class_accepts_the_documented_quantity_subset_and_absent_overhead() {
+        for overhead in [
+            serde_json::Value::Null,
+            serde_json::json!({}),
+            serde_json::json!({"podFixed":{}}),
+            serde_json::json!({"podFixed":{"cpu":"250m","memory":"160Mi"}}),
+            serde_json::json!({"podFixed":{"cpu":"0.25","memory":"512M"}}),
+            serde_json::json!({"podFixed":{"cpu":"0.001","memory":"1Ki"}}),
+            serde_json::json!({"podFixed":{"cpu":"0","memory":"0"}}),
+            serde_json::json!({"podFixed":{"cpu":"1.000","memory":"1G"}}),
+            serde_json::json!({"podFixed":{"cpu":"1","memory":"1000k"}}),
+            serde_json::json!({"podFixed":{"memory":"1T"}}),
+            serde_json::json!({"podFixed":{"memory":"1Ti"}}),
+            serde_json::json!({"podFixed":{"cpu":"9223372036854775807m","memory":"9223372036854775807"}}),
+        ] {
+            assert!(
+                runtime_class_response(overhead.clone())
+                    .verify_runtime_class()
+                    .await
+                    .is_ok(),
+                "supported configuration was refused: {overhead}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn runtime_class_rejects_unsupported_precision_units_keys_and_overflow() {
+        for values in [
+            serde_json::json!({"cpu":"0.0001"}),
+            serde_json::json!({"cpu":"1000.0m"}),
+            serde_json::json!({"cpu":"1e0"}),
+            serde_json::json!({"cpu":"+1"}),
+            serde_json::json!({"cpu":"1 "}),
+            serde_json::json!({"cpu":"NaN"}),
+            serde_json::json!({"cpu":"1\u{a0}"}),
+            serde_json::json!({"cpu":"9223372036854775808m"}),
+            serde_json::json!({"cpu":"18446744073709551615"}),
+            serde_json::json!({"cpu":"9".repeat(65)}),
+            serde_json::json!({"cpu":"9".repeat(64)}),
+            serde_json::json!({"memory":"-1"}),
+            serde_json::json!({"memory":"1.5Gi"}),
+            serde_json::json!({"memory":"1m"}),
+            serde_json::json!({"memory":"1E"}),
+            serde_json::json!({"memory":"9223372036854775808"}),
+            serde_json::json!({"memory":"16777216Ti"}),
+            serde_json::json!({"memory":""}),
+            serde_json::json!({"nvidia.com/gpu":"1"}),
+            serde_json::json!({"ephemeral-storage":"1Gi"}),
+            serde_json::json!({"hugepages-2Mi":"2Mi"}),
+        ] {
+            let overhead = serde_json::json!({"podFixed":values});
+            assert!(
+                matches!(
+                    runtime_class_response(overhead)
+                        .verify_runtime_class()
+                        .await,
+                    Err(RuntimeError::InvalidRuntimeClass)
+                ),
+                "invalid resources were accepted: {values}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn runtime_class_rejects_negative_cpu_overhead_from_the_api() -> anyhow::Result<()> {
+        let class = serde_json::json!({
+            "apiVersion":"node.k8s.io/v1", "kind":"RuntimeClass",
+            "metadata":{"name":"kata-qemu"}, "handler":"kata-qemu",
+            "scheduling":{"nodeSelector":{"sandbox.platform/worker-pool":"kata"}},
+            "overhead":{"podFixed":{"cpu":"-250m","memory":"160Mi"}}
+        });
+        let service = tower::service_fn(move |request: Request<KubeBody>| {
+            assert_eq!(
+                request.uri().path(),
+                "/apis/node.k8s.io/v1/runtimeclasses/kata-qemu"
+            );
+            let body = class.to_string();
+            async move {
+                Ok::<_, Infallible>(
+                    Response::builder()
+                        .status(200)
+                        .header("content-type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap_or_else(|_| Response::new(Body::empty())),
+                )
+            }
+        });
+        let runtime = KubernetesRuntime::from_client(Client::new(service, "test"));
+        assert!(matches!(
+            runtime.verify_runtime_class().await,
+            Err(RuntimeError::InvalidRuntimeClass)
+        ));
+        Ok(())
+    }
 
     #[tokio::test]
     async fn a_missing_recorded_volume_is_never_recreated() -> anyhow::Result<()> {

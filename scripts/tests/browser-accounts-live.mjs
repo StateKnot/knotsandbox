@@ -2,7 +2,7 @@
 // dropped; no response body, identity or database result is synthesized.
 import assert from 'node:assert/strict';
 import { serviceClientMutationJson } from './service-client-response-observer.mjs';
-import { mutationResponseJson } from './mutation-response-observer.mjs';
+import { mutationResponseJson, observeReadResponse } from './mutation-response-observer.mjs';
 
 export async function accountConsole(page, config, coordinate) {
   const step = (name) => process.stderr.write(`ACCOUNT_LIVE_STEP ${name}\n`);
@@ -75,17 +75,19 @@ export async function accountConsole(page, config, coordinate) {
   await page.getByRole('button', { name: `查看机器身份 ${created[1].display_name}`, exact: true }).waitFor();
   step('CLIENT_PAGE_ONE_ROW_VISIBLE');
   step('CLIENT_PAGE_TWO_RESPONSE_LISTENER');
-  const next = page.waitForResponse((r) => match(r, 'GET', '/v1/service-clients') && new URL(r.url()).searchParams.has('cursor'));
   step('CLIENT_PAGE_NEXT_BUTTON_CLICK');
-  await page.getByRole('button', { name: '机器身份下一页', exact: true }).click();
+  // The opaque cursor belongs to the UI's current server page. The one-shot
+  // observer records the exact native URL and refuses a second list request.
+  const { response: pageTwo, body: pageTwoBody } = await observeReadResponse(page, origin, '/v1/service-clients', config.tenant,
+    () => page.getByRole('button', { name: '机器身份下一页', exact: true }).click());
   step('CLIENT_PAGE_NEXT_BUTTON_CLICKED');
   step('CLIENT_PAGE_TWO_RESPONSE_WAIT');
-  const pageTwo = await next;
   step('CLIENT_PAGE_TWO_RESPONSE_RECEIVED');
   assert.equal(pageTwo.status(), 200);
+  assert(new URL(pageTwo.url()).searchParams.has('cursor'));
   assert.equal(new URL(pageTwo.url()).searchParams.get('limit'), '1');
   step('CLIENT_PAGE_TWO_BODY_VERIFY');
-  assert.deepEqual((await pageTwo.json()).items.map((v) => v.id), [created[0].id]);
+  assert.deepEqual(pageTwoBody.items.map((v) => v.id), [created[0].id]);
   step('CLIENT_PAGE_TWO_BODY_VERIFIED');
   step('CLIENT_PAGE_TWO_ROW_CLICK');
   await page.getByRole('button', { name: `查看机器身份 ${created[0].display_name}`, exact: true }).click();

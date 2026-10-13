@@ -3,6 +3,7 @@
 // neither report bodies nor database results are mocked by this driver.
 import assert from 'node:assert/strict';
 import { diagnosisMutationJson } from './diagnosis-response-observer.mjs';
+import { observeReadResponse } from './mutation-response-observer.mjs';
 
 export async function diagnosesConsole(page, config, coordinate) {
   const step = (name) => process.stderr.write(`DIAGNOSES_LIVE_STEP ${name}\n`);
@@ -105,12 +106,10 @@ export async function diagnosesConsole(page, config, coordinate) {
 
     step('STRUCTURED_REPORT_WITHOUT_OPERATION_READ');
     const reportPath = `/v1/diagnoses/${accepted.resource.id}`;
-    const complete = page.waitForResponse((response) => match(response, 'GET', reportPath));
-    await row.getByRole('button', { name: '打开报告', exact: true }).click();
-    const response = await complete;
+    const { response, body: report } = await observeReadResponse(page, origin, reportPath, config.tenant,
+      () => row.getByRole('button', { name: '打开报告', exact: true }).click());
     assert.equal(response.status(), 200);
     step('STRUCTURED_REPORT_BODY_READ');
-    const report = await response.json();
     step('STRUCTURED_REPORT_BODY_READ_COMPLETE');
     assert.equal(report.id, accepted.resource.id);
     assert.equal(report.tenant_id, config.tenant);
@@ -150,12 +149,11 @@ export async function diagnosesConsole(page, config, coordinate) {
     await coordinate('diagnosis_report_checked', 'diagnosis_read_revoked');
 
     step('READ_REVOCATION_CLEARS_EVIDENCE');
-    const denied = page.waitForResponse((reply) => match(reply, 'GET', reportPath));
-    await page.getByRole('button', { name: '刷新报告', exact: true }).click();
-    const denial = await denied;
+    const { response: denial, body: denialBody } = await observeReadResponse(page, origin, reportPath, config.tenant,
+      () => page.getByRole('button', { name: '刷新报告', exact: true }).click());
     assert.equal(denial.status(), 404);
     step('READ_REVOCATION_HTTP_404');
-    assert.equal((await denial.json()).code, 'RESOURCE_NOT_FOUND');
+    assert.equal(denialBody.code, 'RESOURCE_NOT_FOUND');
     step('READ_REVOCATION_BODY_CHECKED');
     await page.getByRole('alert').filter({ hasText: 'RESOURCE_NOT_FOUND' }).first().waitFor();
     assert.equal(await page.getByTestId('diagnosis-report').count(), 0);
@@ -164,12 +162,10 @@ export async function diagnosesConsole(page, config, coordinate) {
     step('READ_REVOCATION_UI_CLEARED');
     await coordinate('diagnosis_read_denied', 'diagnosis_permissions_restored');
     step('READ_PERMISSION_RESTORED');
-    const restored = page.waitForResponse((reply) => match(reply, 'GET', reportPath));
-    await page.getByRole('button', { name: '刷新报告', exact: true }).click();
-    const restoredResponse = await restored;
+    const { response: restoredResponse, body: restoredReport } = await observeReadResponse(page, origin, reportPath, config.tenant,
+      () => page.getByRole('button', { name: '刷新报告', exact: true }).click());
     assert.equal(restoredResponse.status(), 200);
     step('READ_RESTORED_HTTP_200');
-    const restoredReport = await restoredResponse.json();
     step('READ_RESTORED_BODY_CHECKED');
     assert.deepEqual(restoredReport, report);
     await page.getByTestId('diagnosis-report').getByText('COMPLETE', { exact: true }).waitFor();

@@ -329,6 +329,15 @@ jobs:
           assert all(re.search(r'^' + line + r'$', output, re.M) for line in
                      (r'1\.\.15', r'# tests 15', r'# pass 15', r'# fail 0', r'# skipped 0'))
           PY
+          node --test-reporter=tap scripts/tests/read-response-observer.contract.mjs \
+            --chrome "$sandbox_live_chrome" \
+            > .local/console-observer-ci/read-response-observer-contract.log 2>&1
+          python3 - <<'PY'
+          import pathlib, re
+          output = pathlib.Path('.local/console-observer-ci/read-response-observer-contract.log').read_text()
+          assert all(re.search(r'^' + line + r'$', output, re.M) for line in
+                     (r'1\.\.28', r'# tests 28', r'# pass 28', r'# fail 0', r'# skipped 0'))
+          PY
           python3 scripts/test-console-browser.py \
             --node "$(command -v node)" --chrome "$sandbox_live_chrome" \
             --identity-python "$PWD/.local/cluster-venv/bin/python" \
@@ -345,6 +354,7 @@ jobs:
             .local/console-observer-ci/response-observer-contract.log
             .local/console-observer-ci/diagnosis-response-observer-contract.log
             .local/console-observer-ci/mutation-response-observer-contract.log
+            .local/console-observer-ci/read-response-observer-contract.log
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14

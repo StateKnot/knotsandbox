@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::runtime_resource_contract::WorkloadResources;
 use k8s_openapi::api::core::v1::{PersistentVolumeClaim, Pod};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use kube::core::DynamicObject;
@@ -89,7 +90,7 @@ pub fn build_manifests(
     context: &RuntimeManifestContext,
     config: &RuntimeManifestConfig,
 ) -> Result<RuntimeManifests, ManifestError> {
-    validate_context(context, config)?;
+    let resources = validate_context(context, config)?.requirements();
     let stable_labels = stable_labels(context);
     let mut launch_labels = stable_labels.clone();
     launch_labels.insert(
@@ -104,11 +105,6 @@ pub fn build_manifests(
         format!("{LABEL_PREFIX}cluster-epoch"),
         context.cluster_epoch.to_string(),
     );
-    let resources = json!({
-        "cpu": (context.cpu_millis / 1000).to_string(),
-        "memory": quantity_mib(context.memory_mib),
-        "ephemeral-storage": quantity_mib(config.ephemeral_storage_mib),
-    });
     let pod: Pod = serde_json::from_value(json!({
         "apiVersion":"v1", "kind":"Pod",
         "metadata": {
@@ -150,7 +146,7 @@ pub fn build_manifests(
                     "privileged":false,"allowPrivilegeEscalation":false,"readOnlyRootFilesystem":true,
                     "capabilities":{"drop":["ALL"]},"seccompProfile":{"type":"RuntimeDefault"}
                 },
-                "resources":{"requests":resources,"limits":resources},
+                "resources":resources,
                 "volumeMounts":[
                     {"name":"workspace","mountPath":"/workspace","readOnly":false},
                     {"name":"tmp","mountPath":"/tmp","readOnly":false},
@@ -392,7 +388,7 @@ fn validate_metadata(
 fn validate_context(
     context: &RuntimeManifestContext,
     config: &RuntimeManifestConfig,
-) -> Result<(), ManifestError> {
+) -> Result<WorkloadResources, ManifestError> {
     if [
         context.tenant_id,
         context.project_id,
@@ -465,17 +461,22 @@ fn validate_context(
     {
         return Err(ManifestError::InvalidImage);
     }
-    if !matches!(
-        (context.cpu_millis, context.memory_mib),
-        (1000, 2048) | (2000, 4096) | (4000, 8192)
-    ) || !(20..=1024).contains(&context.workspace_size_gib)
-        || !(128..=32768).contains(&config.ephemeral_storage_mib)
+    let resources = WorkloadResources::baseline(
+        context.cpu_millis,
+        context.memory_mib,
+        config.ephemeral_storage_mib,
+    )
+    .map_err(|_| ManifestError::InvalidConfiguration("resource bounds"))?;
+    if !(20..=1024).contains(&context.workspace_size_gib)
         || config.tmp_size_mib < 1
-        || config.tmp_size_mib > config.ephemeral_storage_mib - 64
+        || config
+            .ephemeral_storage_mib
+            .checked_sub(64)
+            .is_none_or(|maximum| config.tmp_size_mib > maximum)
     {
         return Err(ManifestError::InvalidConfiguration("resource bounds"));
     }
-    Ok(())
+    Ok(resources)
 }
 
 fn dns_label(value: &str) -> bool {

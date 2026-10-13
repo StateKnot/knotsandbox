@@ -263,3 +263,13 @@ Ubuntu容量入口已在967f705通过（实际core字段存在、容量断言与
 9c42b2dc远端已通过四个独立作业、真实容量、全部PG及实际诊断/事件；后续自动化原键创建回执仍遇外部正文失留存。已将已知mutation观察统一到单原生fetch包装和单全局16×256KiB预算，闭合profile覆盖实际服务身份/诊断/自动化/授权/通知ACK/STOP；通知200/404按原键顺序消费，原业务/版本/身份/请求次数及239项断言保持。原10/12加新15共37项真实Chromium合同全部通过，GET/auth仍未扩。最终产品全链与完整CI继续单独核验；资源利用率分母、warm及GPU开发状态不因测试基础设施收尾提前完成。
 
 2026-10-14真实浏览器补验另行捕获数据库锁等待503。真实TLS-PG回归确认SQLx 0.8.6的BEGIN取消会把未结束事务归池；按上游已合并修复做原包有限回移后，同一物理连接的空闲、下一写入自动提交及事务锁释放检查通过。原应用期限和业务请求保持，临时探针全部移除，默认独立PG矩阵新增精确一项必需检查。普通Rust290项与固定源码/篡改边界通过；产品全链及最新完整CI仍分别核验。详细来源/失败事实见[交付记录](resource-capacity-faststart-delivery-20261013.md)；下一项按[逐次启动资源账本方案](launch-resource-accounting-plan-20261014.md)开发，再进入预准备预算、冷暖实测和GPU认证。
+
+### 12.4 受控资源数量与Pod创建校验（2026-10-14）
+
+| 工作包 | 已开发子项 | 验收范围 | 下一步 |
+| --- | --- | --- | --- |
+| G0-08/G1-09/G3-12 | `runtime_resource_contract`深模块分别封装CPU millicores、内存bytes与临时磁盘bytes，检查有界Quantity及总量；接入实际Pod生成、创建前/回读后与RuntimeClass overhead校验 | 三Flavor、request=limit及原ephemeral范围/规范表示保持；拒绝负数、精度损失、溢出、额外设备/claims/sidecar。三个实际入口RED/GREEN、26项限定回归与严格lib/tests Clippy通过。保留原完整spec及UID检查；停止和清理不新增当前RuntimeClass依赖。真实集群认证仍待做 | 不可变launch请求、PENDING/ALLOCATED/RELEASED回执、可信Pod来源及释放历史；API/SDK/UI来源与UNKNOWN模型；再进入预准备预算、冷暖实测和GPU |
+
+详细限制和证明范围见[资源数量交付记录](runtime-resource-contract-delivery-20261014.md)。第12节整体及逐次启动账本仍进行中；数量校验不能作为历史来源、专属预留或利用率分母。
+
+b66177be完整CI已确认资源容量与18组PG等前置门通过，但真实诊断恢复GET 200正文观察失败，后续正式门实际跳过。已为同原生GET增加显式一次性观察票，共享原16×256KiB raw预算，绑定租户、完整URL、status及ETag，重复/并发/导航/失败/期限拒绝；不新增业务GET或重试。新增28项与原37项Chromium合同均通过，五个原驱动断言保留，账户增加cursor检查。最终产品链、两轴审查和新提交完整CI继续分别核验，不能将本机模块合同计为云上线验收。
