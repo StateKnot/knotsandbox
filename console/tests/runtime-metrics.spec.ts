@@ -50,7 +50,27 @@ const pressureMetrics = [
   },
 ];
 
-function response(metric: string, unit: string, missing = false) {
+const capacityMetrics = [
+  {
+    metric: "VM_CPU_CAPACITY_CORES",
+    label: "CPU 容量上界",
+    unit: "cores",
+    values: [0.75, 2.5],
+  },
+  {
+    metric: "VM_MEMORY_CAPACITY_BYTES",
+    label: "内存容量上界",
+    unit: "bytes",
+    values: [536870912, 8589934592],
+  },
+];
+
+function response(
+  metric: string,
+  unit: string,
+  missing = false,
+  values = [0, 2.4],
+) {
   return {
     instance_id: instance,
     generation: resource.runtime_generation,
@@ -66,7 +86,7 @@ function response(metric: string, unit: string, missing = false) {
         {
           evaluated_at: now,
           observed_at: missing ? null : now,
-          value: missing ? null : 0,
+          value: missing ? null : values[0],
           status: missing ? "MISSING" : "FRESH",
           collector_replica: missing ? null : "collector-a",
         },
@@ -87,7 +107,7 @@ function response(metric: string, unit: string, missing = false) {
         {
           evaluated_at: now,
           observed_at: missing ? null : now,
-          value: missing ? null : 2.4,
+          value: missing ? null : values[1],
           status: missing ? "MISSING" : "FRESH",
           collector_replica: missing ? null : "collector-a",
         },
@@ -156,9 +176,11 @@ test("pressure selections query the authorized metric and preserve zero and gaps
   const select = panel.getByRole("combobox", { name: "指标", exact: true });
   await expect(select.locator("option")).toHaveText([
     "CPU 消耗核数",
+    "CPU 容量上界",
     "CPU 限流周期速率",
     "CPU 限流时间速率",
     "内存总用量",
+    "内存容量上界",
     "匿名内存用量",
     "文件内存用量",
     "内存不足事件速率",
@@ -213,6 +235,88 @@ test("pressure selections query the authorized metric and preserve zero and gaps
     ...pressureMetrics.map((item) => item.metric),
   ]);
 });
+
+for (const item of capacityMetrics) {
+  test(`${item.label} keeps raw trusted capacity values, gaps and live revocation`, async ({
+    page,
+  }) => {
+    let missing = false;
+    let revoked = false;
+    const queried: string[] = [];
+    const panel = await openMetrics(page, async (route, url) => {
+      const metric = url.searchParams.get("metric") ?? "";
+      queried.push(metric);
+      if (revoked) {
+        await route.fulfill({
+          status: 404,
+          contentType: "application/problem+json",
+          json: { code: "RESOURCE_NOT_FOUND" },
+        });
+        return;
+      }
+      await route.fulfill({
+        json: response(
+          metric,
+          metric === item.metric ? item.unit : "cores",
+          missing,
+          item.values,
+        ),
+      });
+    });
+    await expect(panel.getByRole("img")).toBeVisible();
+    await panel
+      .getByRole("combobox", { name: "指标", exact: true })
+      .selectOption({ label: item.label });
+    await expect(
+      panel.getByRole("img", { name: new RegExp(`^${item.label}；`) }),
+    ).toBeVisible();
+    await expect(
+      panel.locator("p").filter({ hasText: `（${item.unit}）` }),
+    ).toBeVisible();
+    await expect(
+      panel.locator("p").filter({ hasText: "可信宿主 cgroup 观测" }),
+    ).toContainText("可能由父级共享");
+    await expect(
+      panel.locator("p").filter({ hasText: "可信宿主 cgroup 观测" }),
+    ).toContainText("不是专属预留、可用余量或节点利用率");
+    const rows = panel.getByRole("table").locator("tbody tr");
+    await expect(rows).toHaveCount(4);
+    await expect(rows.nth(0).locator("td").nth(2)).toHaveText(
+      String(item.values[0]),
+    );
+    await expect(rows.nth(3).locator("td").nth(2)).toHaveText(
+      String(item.values[1]),
+    );
+    await expect(rows.nth(1).locator("td").nth(2)).toHaveText("—");
+    await expect(rows.nth(1).locator("td").nth(3)).toHaveText("MISSING");
+    await expect(rows.nth(2).locator("td").nth(2)).toHaveText("—");
+    await expect(rows.nth(2).locator("td").nth(3)).toHaveText("STALE");
+    await expect(panel.locator("svg circle")).toHaveCount(2);
+    await expect(panel).not.toContainText("%");
+    await expect(panel.getByRole("button")).toHaveText(["查询最近 15 分钟"]);
+
+    missing = true;
+    await panel.getByRole("button", { name: "查询最近 15 分钟" }).click();
+    await expect(panel.locator("svg circle")).toHaveCount(0);
+    await expect(rows).toHaveCount(4);
+    for (const row of await rows.all()) {
+      await expect(row.locator("td").nth(2)).toHaveText("—");
+      await expect(row.locator("td").nth(3)).toHaveText("MISSING");
+    }
+    missing = false;
+    await panel.getByRole("button", { name: "查询最近 15 分钟" }).click();
+    await expect(panel.locator("svg circle")).toHaveCount(2);
+    revoked = true;
+    await panel.getByRole("button", { name: "查询最近 15 分钟" }).click();
+    await expect(panel.getByRole("alert")).toHaveText("RESOURCE_NOT_FOUND");
+    await expect(panel.getByRole("img")).toHaveCount(0);
+    await expect(panel.getByRole("table")).toHaveCount(0);
+    await expect(
+      panel.getByText("HOST_VM_RUNTIME", { exact: false }),
+    ).toHaveCount(0);
+    expect(queried).toEqual(["VM_CPU_CORES", ...Array(4).fill(item.metric)]);
+  });
+}
 
 test("an unsupported pressure series stays missing and a permission-hidden refresh removes its prior chart", async ({
   page,

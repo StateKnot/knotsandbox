@@ -70,17 +70,19 @@ kubectl --context reviewed-cluster -n sandbox-observability rollout status state
 
 ## 数据合同与容量
 
-15秒抓取；每 nodeguard 目标最多256个实例、12条raw metric/实例（11项资源加1项基础观察标记）、2MB响应、3072 samples、13标签、标签值128字节。精确白名单在[RAW_METRICS](observability.py)中枚举：原五项用量及观察标记，加CPU自身CFS节流周期/时间、匿名/文件内存与宿主OOM事件/终止进程计数；不开放任意`sandbox_vm_*`。身份标签验证 node UID/boot/epoch/deployment 和非nil UUID 格式，去除其他标签；不接受guest指定路径或时间戳。资源计数包括 VMM/virtiofs/cgroup page cache，tasks指宿主线程，均不等于guest应用健康或退出证明。六项新指标可缺失，基础`observation_success=1`不代表它们全部可用，详见[运行指标合同](../../docs/runtime-metrics.md)。
+15秒抓取；每 nodeguard 目标最多256个实例、14条raw metric/实例（13项资源加1项基础观察标记）、2MB响应、3584 samples、13标签、标签值128字节。精确白名单在[RAW_METRICS](observability.py)中枚举：原五项用量及观察标记，加CPU自身CFS节流周期/时间、匿名/文件内存、宿主OOM事件/终止进程计数和CPU/内存容量上界；不开放任意`sandbox_vm_*`。身份标签验证 node UID/boot/epoch/deployment 和非nil UUID 格式，去除其他标签；不接受guest指定路径或时间戳。资源计数包括 VMM/virtiofs/cgroup page cache，tasks指宿主线程，均不等于guest应用健康或退出证明。六项压力指标和两项容量均可缺失，基础`observation_success=1`不代表它们全部可用，详见[运行指标合同](../../docs/runtime-metrics.md)。
+
+新增`sandbox_vm_cpu_capacity_cores`与`sandbox_vm_memory_capacity_bytes`是宿主真实采样的gauge。CPU取叶级有效cpuset及全祖先有限`cpu.max`的最紧名义CFS/fair class上界；内存取全祖先最紧有限`memory.max`。父级限制可能共享，不能当作实例专属预留、可用余量或节点利用率。内存全为`max`或输入缺失/非法时省略该容量，明确的`memory.max=0`保留零；CPU与内存变化各自缺测，不抹掉基本计数。前后双采样用于检查稳定性，不是原子快照。只读查询和控制台当前提供13个固定资源选择项，不提供利用率百分比或自动调档。
 
 原生 `up` 由 Prometheus 生成；节点目标使用独立 `scrape_node_uid`/`scrape_host_boot_id` 静态标签，不用目标标签覆盖被验证的 exporter 身份。VM 序列继续保持原13标签，剔除这两个目标标签。nodeguard 返回的同名 `up` 或采集器指标会被丢弃。[metric relabel 不处理自动生成的 `up`](https://prometheus.io/docs/prometheus/latest/configuration/configuration/)，因此远程写入白名单单独保留它。
 
 每副本仅增加一个 `127.0.0.1:9090` 自采目标，无新网络授权或 K8s 权限。固定白名单为 `prometheus_remote_storage_samples_pending`、`samples_failed_total`、`samples_retried_total`、`queue_highest_sent_timestamp_seconds`、`shards`、`shard_capacity`（前六项共享 `prometheus_remote_storage_` 前缀），以及 `prometheus_tsdb_wal_storage_size_bytes`、`prometheus_tsdb_wal_writes_failed_total`、`prometheus_agent_corruptions_total`。指标名和类型已在锁定镜像实测；该镜像没有 `prometheus_remote_storage_samples_dropped_total`。自身指标限制64 samples、3标签、2MiB响应，`url`/`remote_name` 在入 WAL 前去掉；不把租户或实例标签加入自身指标。
 
-每项指标的两份序列始终保留 `collector_replica=a|b`。托管后端必须保留这个标签、不能启用移除该标签的HA去重。API按真实原始样本时间选一个新鲜副本，不相加；超过60秒只返回陈旧/缺失，不填0。不把remote write延迟当成采集时刻，也不将重放样本改写为当前时间。CPU/IO及节流/OOM计数器速率在查询侧 `rate(...[2m])` 计算。
+每项指标的两份序列始终保留 `collector_replica=a|b`。托管后端必须保留这个标签、不能启用移除该标签的HA去重。API按真实原始样本时间选一个新鲜副本，不相加；超过60秒只返回陈旧/缺失，不填0。不把remote write延迟当成采集时刻，也不将重放样本改写为当前时间。CPU/IO及节流/OOM计数器速率在查询侧 `rate(...[2m])` 计算；容量gauge保留原值，不计算rate、用量比率或剩余容量。
 
 每副本队列最多4 shards，每shard10000排队样本、每批2000；429/5xx有界退避，失败回积WAL；HTTP401/403等不可恢复错误不能靠WAL承诺自动补回，需立刻处理并记录数据缺口。WAL压缩，最少保留5分钟，最多6小时强制截断；超过6小时写入故障、磁盘耗尽、损坏、重建/误删PVC都可能丢数据，**不宣称无损**。磁盘硬上限是PVC容量，Prometheus agent没有按字节自动缩减WAL的开关；不能套用server TSDB retention-size。预算包括全部 VM 样本、自采64样本上限及每目标五条原生抓取报告；报告即使被远程写过滤也先进入 WAL。预算以每个采样1KiB包含label/churn再乘2 checkpoint余量建模，预留30%磁盘，需现场测量实际压缩率和实例启动频率；内存限4Gi也需要容量压测，OOM/丢样本必须验收而非忽略。
 
-2026-10-12扩展后须重新渲染并审核capacity报告，白名单和3072样本上限一起生效。只按旧六序列准备的WAL配置可能被新预算拒绝；不得单独放宽70%门槛或默认扩容。资源变更、PVC扩容和宿主升级仍需现有运维授权与实际容量/恢复验收，见[本批上线顺序](../../research/resource-observability-delivery-20261012.md#3-采集部署与资源预算)。
+2026-10-13增加容量gauge后须重新渲染并审核capacity报告，14条raw白名单和3584样本上限一起生效。按旧六条或十二条raw序列准备的WAL配置可能被新预算拒绝；不得单独放宽70%门槛或默认扩容。资源变更、PVC扩容和宿主升级仍需现有运维授权与实际容量/恢复验收，首批安装顺序见[资源观测上线顺序](../../research/resource-observability-delivery-20261012.md#3-采集部署与资源预算)。
 
 两个PVC名字分别 `wal-sandbox-metrics-agent-a-0` 与 `wal-sandbox-metrics-agent-b-0`。缩容或删StatefulSet均保留PVC；删PVC后云盘由StorageClass Retain保留，不自动销毁。相同StatefulSet/PVC名称可重建接原WAL；不得同时给两个进程挂同一WAL、禁用lockfile、删除旧卷再假称续传。单可用区故障时另一副本继续抓取，故障副本等原区/卷安全恢复；不强制多挂载或无证明force-detach。若因升级需要改WAL尺寸，先显式扩各PVC并确认文件系统容量，volumeClaimTemplates变更不可直接通过普通StatefulSet patch完成。卸载后的计费卷由独立受控存储清理流程处置。
 
@@ -115,8 +117,8 @@ Python依赖沿用仓库 `deploy/cluster/requirements.lock.txt`；只运行已�
 OBSERVABILITY_PYTHON=.local/cluster-venv/bin/python bash deploy/observability/check.sh
 ```
 
-包括13项配置/权限/身份/新增指标白名单检查、14个对象的固定官方 Kubernetes/Cilium schema、镜像内实际 `promtool check config --agent`、TLS文件验证、无网络 agent 启动和真实本地采样 WAL 跨重启。`check_rules.py` 在无网络、只读根文件系统和128MiB临时内存盘内运行原生 `promtool check rules` / `test rules`，回放38个独立故障场景，包含首样本已记录故障、清零、严格新鲜度、错 epoch/boot、断流恢复及整体故障抑制。
+包括配置/权限/身份/指标白名单检查、14个对象的固定官方 Kubernetes/Cilium schema、镜像内实际 `promtool check config --agent`、TLS文件验证、无网络 agent 启动和真实本地采样 WAL 跨重启。`check_rules.py` 在无网络、只读根文件系统和128MiB临时内存盘内运行原生 `promtool check rules` / `test rules`，回放38个独立故障场景，包含首样本已记录故障、清零、严格新鲜度、错 epoch/boot、断流恢复及整体故障抑制。
 
-本批新增六项raw序列的实际双节点/双副本写入、真实零值、身份与私有标签过滤，以及失败/恢复验证；原35秒截止不变。2026-10-12实际结果与剩余生产门见[资源观测交付](../../research/resource-observability-delivery-20261012.md)。
+2026-10-12新增六项raw序列的实际双节点/双副本写入、真实零值、身份与私有标签过滤，以及失败/恢复验证；原35秒截止不变，历史结果见[资源观测交付](../../research/resource-observability-delivery-20261012.md)。本轮容量gauge扩展后的渲染、采样预算、写入与缺测合同须另行保留绑定当前源码的结果，不能用该历史记录代替本轮验收。真实Kata/QEMU、云端收数、跨区WAL/CSI和通知链仍需现场验收；GPU未纳入本采集部署。
 
 另以仅指向本机的 mTLS 夹具连接两个真实 agent 和一个真实 Prometheus 接收端，验证 BasicAuth、503重试、HA副本分离、错身份/额外标签过滤、忽略源端伪造时间戳、原生节点 `up` 的503失败/恢复、自身九项指标和 guest 同名伪造拒绝。故障和恢复共享原35秒截止；失败不产生零用量。该管线需要本机 TCP 监听和 Docker bridge，使用生成的测试证书/合成凭据，不连接外部网络目标。规则回放验证引擎语义，管线验证真实数据合同，两者未组成云端告警通知链。2026-10-09最终本地完整检查通过，输入与日志收据见 `.local/observability-alerts-20261009/final-2/record.json`。该本地协议证据不等于阿里云远程写入、Kata裸金属或 CSI 卷认证。官方配置/队列/agent保留语义见 [Prometheus配置](https://prometheus.io/docs/prometheus/3.13/configuration/configuration/)、[remote write调优](https://prometheus.io/docs/practices/remote_write/)、[Cilium节点策略](https://docs.cilium.io/en/stable/security/policy/layer3/)。

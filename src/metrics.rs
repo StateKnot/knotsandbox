@@ -36,9 +36,11 @@ type Result<T> = std::result::Result<T, MetricsError>;
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RuntimeMetric {
     VmCpuCores,
+    VmCpuCapacityCores,
     VmCpuThrottledPeriodsPerSecond,
     VmCpuThrottledSecondsPerSecond,
     VmMemoryBytes,
+    VmMemoryCapacityBytes,
     VmMemoryAnonBytes,
     VmMemoryFileBytes,
     VmMemoryOomEventsPerSecond,
@@ -63,9 +65,11 @@ impl RuntimeMetric {
     pub(crate) fn name(&self) -> &'static str {
         match self {
             Self::VmCpuCores => "sandbox_vm_cpu_seconds_total",
+            Self::VmCpuCapacityCores => "sandbox_vm_cpu_capacity_cores",
             Self::VmCpuThrottledPeriodsPerSecond => "sandbox_vm_cpu_throttled_periods_total",
             Self::VmCpuThrottledSecondsPerSecond => "sandbox_vm_cpu_throttled_seconds_total",
             Self::VmMemoryBytes => "sandbox_vm_memory_bytes",
+            Self::VmMemoryCapacityBytes => "sandbox_vm_memory_capacity_bytes",
             Self::VmMemoryAnonBytes => "sandbox_vm_memory_anon_bytes",
             Self::VmMemoryFileBytes => "sandbox_vm_memory_file_bytes",
             Self::VmMemoryOomEventsPerSecond => "sandbox_vm_memory_oom_events_total",
@@ -77,10 +81,13 @@ impl RuntimeMetric {
     }
     pub fn unit(&self) -> &'static str {
         match self {
-            Self::VmCpuCores => "cores",
+            Self::VmCpuCores | Self::VmCpuCapacityCores => "cores",
             Self::VmCpuThrottledPeriodsPerSecond => "periods_per_second",
             Self::VmCpuThrottledSecondsPerSecond => "seconds_per_second",
-            Self::VmMemoryBytes | Self::VmMemoryAnonBytes | Self::VmMemoryFileBytes => "bytes",
+            Self::VmMemoryBytes
+            | Self::VmMemoryCapacityBytes
+            | Self::VmMemoryAnonBytes
+            | Self::VmMemoryFileBytes => "bytes",
             Self::VmMemoryOomEventsPerSecond | Self::VmMemoryOomKillsPerSecond => {
                 "events_per_second"
             }

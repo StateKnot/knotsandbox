@@ -572,12 +572,16 @@ mod linux {
                 Ok(())
             };
             still_live()?;
+            // Optional capacity is observed from the same registered host
+            // inode. Snapshot limits before the accounting and recheck them
+            // afterwards; an incomplete hierarchy never erases base usage.
+            let capacity = super::super::capacity::CapacityRead::begin(&pinned.cgroup).ok();
             let root = PathBuf::from(format!("/proc/self/fd/{}", pinned.cgroup.as_raw_fd()));
             // Controller-specific files are optional; bounded reads through
             // the pinned inode preserve the same identity as the base sample.
             let memory_stat = read_text(&root.join("memory.stat"), 65536).ok();
             let memory_events = read_text(&root.join("memory.events"), 65536).ok();
-            let result = super::super::metrics::parse(
+            let mut result = super::super::metrics::parse(
                 &read_text(&root.join("cpu.stat"), 65536)?,
                 &read_text(&root.join("memory.current"), 64)?,
                 &read_text(&root.join("io.stat"), 65536)?,
@@ -585,6 +589,10 @@ mod linux {
                 memory_stat.as_deref(),
                 memory_events.as_deref(),
             )?;
+            if let Some((cpu, memory)) = capacity.and_then(|capacity| capacity.finish().ok()) {
+                result.cpu_capacity_cores = cpu;
+                result.memory_capacity_bytes = memory;
+            }
             // Exit/migration during sampling invalidates the entire observation.
             still_live()?;
             Ok(result)
@@ -870,11 +878,25 @@ mod linux {
             assert_eq!(value.memory_file_bytes, None);
             assert_eq!(value.memory_oom_events, Some(2));
             assert_eq!(value.memory_oom_kills, Some(0));
+            assert_eq!(value.cpu_capacity_cores, None);
+            assert_eq!(value.memory_capacity_bytes, None);
             Ok(())
         }
         #[test]
         #[ignore = "requires Linux and a complete read-only cgroup v2 mount, Docker --cgroupns=host"]
         fn actual_kernel_cgroup_counters_reject_pid_exit_and_changed_inode() -> anyhow::Result<()> {
+            actual_kernel_cgroup_contract(false)
+        }
+
+        #[test]
+        #[ignore = "requires Linux, Docker --cgroupns=host --cpus=0.75 --memory=268435456 and a complete read-only cgroup v2 mount"]
+        fn actual_kernel_cgroup_capacity_uses_trusted_full_hierarchy() -> anyhow::Result<()> {
+            actual_kernel_cgroup_contract(true)?;
+            println!("NODEGUARD_TRUSTED_CAPACITY_REAL_KERNEL_VERIFIED");
+            Ok(())
+        }
+
+        fn actual_kernel_cgroup_contract(capacity_required: bool) -> anyhow::Result<()> {
             let executable = std::fs::canonicalize("/usr/bin/sleep")?;
             let file = PinnedFile {
                 sha256: digest_file(&executable)?,
@@ -942,6 +964,13 @@ mod linux {
                 };
                 let values = observer.metrics(&obs)?;
                 assert!(values.tasks >= 1 && values.memory_bytes > 0);
+                // The runner bounds this own disposable container. This tests
+                // a real full kernel hierarchy, not synthetic controller files
+                // or a production Kata registration/capacity certification.
+                if capacity_required {
+                    assert_eq!(values.cpu_capacity_cores, Some(0.75));
+                    assert_eq!(values.memory_capacity_bytes, Some(268_435_456));
+                }
                 let mut wrong = obs.clone();
                 wrong.cgroup.inode += 1;
                 assert!(matches!(

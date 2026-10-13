@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
 import { createSandboxClient } from '../dist/index.js';
 const tenant = '00000000-0000-4000-8000-000000000001';
 const resource = '00000000-0000-4000-8000-000000000002';
@@ -83,5 +85,76 @@ test('host efficiency metrics keep fixed selectors, units, genuine zero and miss
     assert.equal(result.data.series.unit, unit);
     assert.equal(result.data.series.points[0].value, value);
     assert.equal(result.data.series.points[1].value, null);
+  }
+});
+
+test('capacity metrics use real HTTP, retain raw cores/bytes and gaps, and never reuse a denied series', async () => {
+  const samples = new Map([
+    ['VM_CPU_CAPACITY_CORES', { unit: 'cores', values: [0.75, 2.5] }],
+    ['VM_MEMORY_CAPACITY_BYTES', { unit: 'bytes', values: [536870912, 8589934592] }],
+  ]);
+  const received = [];
+  const denied = new Set();
+  const server = createServer((request, response) => {
+    const url = new URL(request.url, 'http://127.0.0.1');
+    const metric = url.searchParams.get('metric');
+    assert.equal(request.method, 'GET');
+    assert.equal(url.pathname, `/v1/instances/${resource}/metrics`);
+    assert.equal(request.headers.authorization, 'Bearer test-access-token');
+    assert.equal(request.headers['x-tenant-id'], tenant);
+    assert.equal(request.headers['idempotency-key'], undefined);
+    assert.equal(request.headers['if-match'], undefined);
+    assert.equal(url.searchParams.get('launch_id'), resource);
+    assert.equal(url.searchParams.get('start'), '2026-10-13T00:00:00Z');
+    assert.equal(url.searchParams.get('end'), '2026-10-13T00:01:00Z');
+    assert.equal(url.searchParams.get('step_seconds'), '15');
+    assert(samples.has(metric));
+    received.push(metric);
+    if (denied.has(metric)) {
+      response.writeHead(404, { 'content-type': 'application/problem+json', 'cache-control': 'no-store' });
+      response.end(JSON.stringify({ code: 'RESOURCE_NOT_FOUND', retryable: false }));
+      return;
+    }
+    const sample = samples.get(metric);
+    response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    response.end(JSON.stringify({ instance_id: resource, launch_id: resource,
+      generation: 1, cluster_epoch: tenant, queried_at: '2026-10-13T00:01:00Z', series: {
+      metric, unit: sample.unit, source: 'HOST_VM_RUNTIME', stale_after_seconds: 60, points: [
+        { evaluated_at: '2026-10-13T00:00:00Z', observed_at: '2026-10-13T00:00:00Z', value: sample.values[0], status: 'FRESH', collector_replica: 'a' },
+        { evaluated_at: '2026-10-13T00:00:15Z', observed_at: null, value: null, status: 'MISSING', collector_replica: null },
+        { evaluated_at: '2026-10-13T00:00:30Z', observed_at: '2026-10-12T23:58:00Z', value: null, status: 'STALE', collector_replica: 'a' },
+        { evaluated_at: '2026-10-13T00:00:45Z', observed_at: '2026-10-13T00:00:45Z', value: sample.values[1], status: 'FRESH', collector_replica: 'a' },
+      ],
+    } }));
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  try {
+    const client = createSandboxClient({
+      baseUrl: `http://127.0.0.1:${server.address().port}`, allowLoopbackHttp: true,
+      tenantId: tenant, tokenProvider: { getToken: async () => 'test-access-token' },
+    });
+    for (const [metric, sample] of samples) {
+      const params = { path: { id: resource }, header: { 'X-Tenant-ID': tenant }, query: {
+        metric, start: '2026-10-13T00:00:00Z', end: '2026-10-13T00:01:00Z', step_seconds: 15, launch_id: resource,
+      } };
+      const result = await client.GET('/v1/instances/{id}/metrics', { params });
+      assert.equal(result.response.status, 200);
+      assert.equal(result.data.series.metric, metric);
+      assert.equal(result.data.series.unit, sample.unit);
+      assert.equal(result.data.series.source, 'HOST_VM_RUNTIME');
+      assert.deepEqual(result.data.series.points.map(point => [point.value, point.status]), [
+        [sample.values[0], 'FRESH'], [null, 'MISSING'], [null, 'STALE'], [sample.values[1], 'FRESH'],
+      ]);
+      denied.add(metric);
+      const revoked = await client.GET('/v1/instances/{id}/metrics', { params });
+      assert.equal(revoked.response.status, 404);
+      assert.equal(revoked.data, undefined);
+      assert.equal(revoked.error.code, 'RESOURCE_NOT_FOUND');
+    }
+    assert.deepEqual(received, [...samples.keys()].flatMap(metric => [metric, metric]));
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
   }
 });

@@ -6,6 +6,11 @@ export const runtimeMetrics = {
     description:
       "最近两分钟的平均 CPU 消耗，单位为核；这是用量，不是利用率百分比。",
   },
+  VM_CPU_CAPACITY_CORES: {
+    label: "CPU 容量上界",
+    description:
+      "可信宿主 cgroup 观测的公平调度 CPU 带宽容量上界，可能由父级共享；不是专属预留、可用余量或节点利用率。",
+  },
   VM_CPU_THROTTLED_PERIODS_PER_SECOND: {
     label: "CPU 限流周期速率",
     description:
@@ -20,6 +25,11 @@ export const runtimeMetrics = {
     label: "内存总用量",
     description:
       "宿主侧运行时的当前内存用量，包含缓存；不能直接当作应用必需内存。",
+  },
+  VM_MEMORY_CAPACITY_BYTES: {
+    label: "内存容量上界",
+    description:
+      "可信宿主 cgroup 观测的内存容量上界，可能由父级共享；不是专属预留、可用余量或节点利用率。",
   },
   VM_MEMORY_ANON_BYTES: {
     label: "匿名内存用量",

@@ -258,7 +258,10 @@ impl CriProxy {
             .map_err(failure)?;
         let response = tokio::time::timeout(
             Duration::from_secs(120),
-            self.upstream.clone().run_pod_sandbox(request),
+            super::runtime_observation::observe_run(
+                launch.launch_id,
+                self.upstream.clone().run_pod_sandbox(request),
+            ),
         )
         .await;
         let result = async {

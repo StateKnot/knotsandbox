@@ -216,6 +216,7 @@ jobs:
           mkdir -p .local
           cargo test --locked --lib --no-run --message-format=json > .local/nodeguard-host-artifacts.jsonl
           python3 scripts/test-nodeguard-host-observation.py --artifacts .local/nodeguard-host-artifacts.jsonl --evidence-dir .local/nodeguard-host-observation
+          python3 scripts/test-nodeguard-capacity.py --artifacts .local/nodeguard-host-artifacts.jsonl --evidence-dir .local/nodeguard-capacity
       - name: Required isolated identity and lifecycle review regressions
         run: |
           df -h .
@@ -232,6 +233,8 @@ jobs:
             .local/nodeguard-host-artifacts.jsonl
             .local/nodeguard-host-observation/*.json
             .local/nodeguard-host-observation/*.log
+            .local/nodeguard-capacity/*.json
+            .local/nodeguard-capacity/*.log
             .local/review-regressions/*.json
             .local/review-regressions/*.log
           include-hidden-files: true
@@ -296,6 +299,16 @@ jobs:
           # database accounts/volumes are retained. No business HTTP is mocked.
           export RESTORE_TEST_DOCKER_HOST="$(docker context inspect --format '{{.Endpoints.docker.Host}}')"
           sandbox_live_chrome="$(node --input-type=module -e 'import { chromium } from "./console/node_modules/playwright-core/index.mjs"; process.stdout.write(chromium.executablePath())')"
+          mkdir -p .local/console-observer-ci
+          node --test-reporter=tap scripts/tests/service-client-response-observer.contract.mjs \
+            --chrome "$sandbox_live_chrome" \
+            > .local/console-observer-ci/response-observer-contract.log 2>&1
+          python3 - <<'PY'
+          import pathlib, re
+          output = pathlib.Path('.local/console-observer-ci/response-observer-contract.log').read_text()
+          assert all(re.search(r'^' + line + r'$', output, re.M) for line in
+                     (r'1\.\.10', r'# tests 10', r'# pass 10', r'# fail 0', r'# skipped 0'))
+          PY
           python3 scripts/test-console-browser.py \
             --node "$(command -v node)" --chrome "$sandbox_live_chrome" \
             --identity-python "$PWD/.local/cluster-venv/bin/python" \
@@ -309,6 +322,7 @@ jobs:
             .local/console-notifications-ci/record.json
             .local/console-notifications-ci/source-manifest.json
             .local/console-notifications-ci/browser.log
+            .local/console-observer-ci/response-observer-contract.log
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14

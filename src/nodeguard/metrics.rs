@@ -4,8 +4,10 @@
 use super::GuardError;
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub struct CgroupCounters {
+    pub cpu_capacity_cores: Option<f64>,
+    pub memory_capacity_bytes: Option<u64>,
     pub cpu_usage_usec: u64,
     pub cpu_throttled_periods: Option<u64>,
     pub cpu_throttled_usec: Option<u64>,
@@ -97,6 +99,8 @@ pub(super) fn parse(
     let memory_stat = memory_stat.and_then(|value| stats(value).ok());
     let memory_events = memory_events.and_then(|value| stats(value).ok());
     Ok(CgroupCounters {
+        cpu_capacity_cores: None,
+        memory_capacity_bytes: None,
         cpu_usage_usec: *cpu.get("usage_usec").ok_or(GuardError::Invalid)?,
         cpu_throttled_periods: cpu.get("nr_throttled").copied(),
         cpu_throttled_usec: cpu.get("throttled_usec").copied(),
@@ -136,6 +140,8 @@ mod tests {
         assert_eq!(
             c,
             CgroupCounters {
+                cpu_capacity_cores: None,
+                memory_capacity_bytes: None,
                 cpu_usage_usec: 1250000,
                 cpu_throttled_periods: None,
                 cpu_throttled_usec: None,

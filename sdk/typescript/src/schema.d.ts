@@ -1804,10 +1804,10 @@ export interface components {
             cutoff: string;
         };
         /**
-         * @description Fixed host VM cgroup metrics including virtualization overhead. Optional throttle/memory-stat/event series may be absent on older collectors or unsupported controllers; missing values stay null. These are neither utilization percentages nor health/termination proof.
+         * @description Fixed host VM cgroup metrics including virtualization overhead. Optional series may be absent on older collectors or unsupported controllers; missing values stay null. CPU/memory capacities are sampled upper bounds of the verified host cgroup hierarchy; ancestor limits can be shared and are not exclusive reservations, free capacity or node occupancy. Unlimited or unknown memory capacity is missing; kernel-reported zero remains zero. CPU capacity is a nominal fair-class scheduler bandwidth bound; periods/burst can exceed it in short windows and other scheduling classes are not limited by cpu.max. These are neither utilization percentages nor health/termination proof.
          * @enum {string}
          */
-        RuntimeMetric: "VM_CPU_CORES" | "VM_MEMORY_BYTES" | "VM_IO_READ_BYTES_PER_SECOND" | "VM_IO_WRITE_BYTES_PER_SECOND" | "VM_TASKS" | "VM_CPU_THROTTLED_PERIODS_PER_SECOND" | "VM_CPU_THROTTLED_SECONDS_PER_SECOND" | "VM_MEMORY_ANON_BYTES" | "VM_MEMORY_FILE_BYTES" | "VM_MEMORY_OOM_EVENTS_PER_SECOND" | "VM_MEMORY_OOM_KILLS_PER_SECOND";
+        RuntimeMetric: "VM_CPU_CORES" | "VM_MEMORY_BYTES" | "VM_IO_READ_BYTES_PER_SECOND" | "VM_IO_WRITE_BYTES_PER_SECOND" | "VM_TASKS" | "VM_CPU_THROTTLED_PERIODS_PER_SECOND" | "VM_CPU_THROTTLED_SECONDS_PER_SECOND" | "VM_MEMORY_ANON_BYTES" | "VM_MEMORY_FILE_BYTES" | "VM_MEMORY_OOM_EVENTS_PER_SECOND" | "VM_MEMORY_OOM_KILLS_PER_SECOND" | "VM_CPU_CAPACITY_CORES" | "VM_MEMORY_CAPACITY_BYTES";
         MetricPoint: {
             /** Format: date-time */
             evaluated_at: string;

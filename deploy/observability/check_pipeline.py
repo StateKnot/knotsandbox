@@ -28,6 +28,8 @@ from observability import LOCK,SELF_METRICS,prometheus,require
 from fixture_cleanup import fixture_directory
 
 RAW_VALUES = {
+    'sandbox_vm_cpu_capacity_cores': 0.75,
+    'sandbox_vm_memory_capacity_bytes': 268435456,
     'sandbox_vm_memory_bytes': 4096,
     'sandbox_vm_cpu_throttled_periods_total': 3,
     'sandbox_vm_cpu_throttled_seconds_total': 2.5,

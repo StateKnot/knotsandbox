@@ -2,7 +2,7 @@
 
 `GET /v1/instances/{id}/metrics` 提供已授权实例某一次 launch 的宿主资源时间序列。采集源是 nodeguard 已登记并固定的 VM cgroup，不接受租户提供的 exporter、标签或 PromQL。它用于资源观察，不构成应用健康、VM 死亡、卷卸载或配额释放证据。
 
-2026-10-12首批资源效率开发已将固定指标从5项扩展为11项，补充CPU自身限额节流、匿名/文件内存和宿主OOM观察。尚无有效期request/limit/overhead分母、利用率百分比、规格推荐或节点成本治理，也不包含GPU。idle公开策略配置与安全委派仍待开发，`idle_timeout_seconds` 默认NULL。完整计划见[61项开发表](../research/rust-sandbox-development-workbreakdown.md#11-资源效率与gpu新增交付顺序)，本批实现、上线顺序和实际验收见[交付记录](../research/resource-observability-delivery-20261012.md)。
+2026-10-12首批资源效率开发将固定指标从5项扩展为11项，补充CPU自身限额节流、匿名/文件内存和宿主OOM观察；2026-10-13新增宿主真实采样的CPU、内存容量上界，当前共13项。容量上界不是有效期request/limit/overhead账本，也不是专属预留、可用余量或节点利用率；尚未提供利用率百分比、规格推荐、节点成本治理或GPU指标。idle公开策略配置与安全委派仍待开发，`idle_timeout_seconds` 默认NULL。完整计划见[61项开发表](../research/rust-sandbox-development-workbreakdown.md#11-资源效率与gpu新增交付顺序)，首批实现与验收见[交付记录](../research/resource-observability-delivery-20261012.md)，本轮开发边界见[容量与CRI观测子项](../research/rust-sandbox-development-workbreakdown.md#123-宿主容量与cri启动调用观测2026-10-13)。
 
 ## 调用合同
 
@@ -10,7 +10,7 @@
 
 | 参数 | 规则 |
 | --- | --- |
-| `metric` | 以下11个固定枚举之一 |
+| `metric` | 以下13个固定枚举之一 |
 | `start`、`end` | RFC3339；最近 90 天内，不接受未来时间；内部按整秒计算 |
 | `step_seconds` | 15–3600；单次范围不超过 7 天且最多 1441 点 |
 | `launch_id` | 可选；省略时查询当前 launch。显式历史 launch 必须属于该实例且仍在当前平台恢复纪元 |
@@ -18,7 +18,9 @@
 | 指标 | 单位与含义 |
 | --- | --- |
 | `VM_CPU_CORES` | `cpu.stat usage_usec` 的 2 分钟速率，单位核，包含虚拟化开销；可能大于 1 |
+| `VM_CPU_CAPACITY_CORES` | 宿主cgroup有效cpuset与全祖先有限`cpu.max`共同约束的名义CFS/fair class容量上界，单位核；父级容量可能共享 |
 | `VM_MEMORY_BYTES` | `memory.current`，单位字节，包含内核记账的缓存 |
+| `VM_MEMORY_CAPACITY_BYTES` | 宿主cgroup及全祖先最紧的有限`memory.max`，单位字节；父级容量可能共享，不是可用内存 |
 | `VM_IO_READ_BYTES_PER_SECOND` | `io.stat rbytes` 的 2 分钟速率，跨宿主块设备求和 |
 | `VM_IO_WRITE_BYTES_PER_SECOND` | `io.stat wbytes` 的 2 分钟速率，跨宿主块设备求和 |
 | `VM_TASKS` | `pids.current` 中的宿主任务/线程数，不是 guest 进程数 |
@@ -42,6 +44,14 @@ I/O 是宿主 cgroup 记账值；设备层级可能使同一次 I/O 在多个设
 两台采集器的值不会累加。读取器从允许的 `collector_replica` 中选择可用且最新的一份；新副本正在预热时不会遮住仍新鲜的另一副本。Prometheus stale marker 后残留在速率窗口中的旧值被原始序列存在性条件过滤，不会显示成仍在采集。
 
 无可用 launch 绑定返回 `409 METRICS_RUNTIME_UNBOUND`；查询期间当前 launch 改变返回 `409 METRICS_RUNTIME_CHANGED`。配置缺失、凭据错误或后端不可用返回 503；后端数据不完整、越界标签、重复点、非有限值等返回 `502 METRICS_RESPONSE_INVALID`。未知查询字段和重复参数拒绝。响应禁止缓存。
+
+## 容量上界的解释
+
+CPU容量从当前VM cgroup的`cpuset.cpus.effective`实际在线CPU数量开始，逐级读取该cgroup至完整宿主根之间所有非根层级的`cpu.max`，取有限`quota/period`与cpuset数量的最小值。它描述CFS/fair class的名义带宽上界，不是CPU独占或最低性能保证；最紧祖先还可能被其他cgroup共享。内存容量取同一路径上全部有限`memory.max`的最小值；全部为`max`时没有可报告的有限内存上界，返回缺失。文件缺失、非法值或无法证明完整路径也返回缺失；内核明确给出的`memory.max=0`保留真实零值。
+
+容量来自固定cgroup FD的真实内核读取，不使用guest上报值或配置中的Flavor替代。读取前后各采样一次限制与cpuset，复核完整挂载、祖先目录device/inode和父子关系；CPU输入变化只使CPU容量缺失，内存输入变化只使内存容量缺失，容量失败不抹掉基础用量。两次采样不是原子快照，不能保证采样之间没有变化，也不构成容量历史或资源预留账本。
+
+基础用量与容量的采样、速率窗口和父级共享语义不同，不能直接相除作为利用率百分比，或相减作为剩余资源。短时用量也不保证始终小于这个名义上界；API和控制台保留原值，不把它钳制到上界，不据此自动停机或调档。两项容量沿用上述`FRESH`、`STALE`、`MISSING`和撤权规则，缺测或陈旧不显示为零。
 
 ## 后端与凭据
 
@@ -77,7 +87,7 @@ nodeguard 可配置独立 `metrics`：同一登记私网 IP、9445 端口、depl
 
 每次读取先按本机 boot 账本选出未完成可信终止的普通工作负载，备份 VM 不进入产品实例指标。读取器核对固定 cgroup FD 的 device/inode，以及各已登记 pidfd 和进程 cgroup 归属，再经固定目录 FD 读内核计数器；读取后重复身份检查。身份不匹配或读取失败时只输出 `sandbox_vm_observation_success=0`，不会制造资源零值。采集不改变启动、终止或配额账本。
 
-`sandbox_vm_observation_success=1`仅表示原五项必需计数读取成功，不保证六项可选指标齐全。新内存文件各限64KiB；每个文件失败仅省略该文件的新序列。采集和写入白名单精确包含11项资源序列及1项基础观察标记，每节点上限为`256 × 12 = 3072`个样本。WAL容量报告同时计入这些序列、原生抓取记录及采集器自身指标；原70%磁盘预算门槛、保留期限和内存上限保持。已有安装须重新渲染并审核容量报告，不能仅手工放宽白名单。
+`sandbox_vm_observation_success=1`仅表示原五项必需计数读取成功，不保证六项压力指标和两项容量齐全。可选内存记账文件各限64KiB；每个文件失败仅省略该文件的新序列。采集和写入白名单精确包含13项资源序列及1项基础观察标记，每节点上限为`256 × 14 = 3584`个样本。两项容量是gauge，不计算计数器速率。WAL容量报告同时计入这些序列、原生抓取记录及采集器自身指标；原70%磁盘预算门槛、保留期限和内存上限保持。已有安装须重新渲染并审核容量报告，不能仅手工放宽白名单。
 
 每宿主最多一个并发采集、256 个登记观察体和 2 MiB 输出；批次具有 2 秒处理期限、HTTP 3 秒期限。固定观察锁使用非阻塞取得，仅在锁内复制已有 cgroup 和 pidfd 句柄；实际 proc/cgroup 读取在锁外完成。用户态超时无法解除内核不可中断 I/O；后台任务仍持有唯一槽位，避免超时后不断创建阻塞线程。这是故障限制，不是节点容量认证。
 
@@ -85,6 +95,6 @@ nodeguard 可配置独立 `metrics`：同一登记私网 IP、9445 端口、depl
 
 ## 验证边界
 
-普通 Rust 测试覆盖固定查询、HA 合并、原始样本时间、坏标签/数值/响应、凭据轮换、重定向拒绝，以及真实 TLS CA 验证。PromQL 语义使用固定版本的真实 promtool 验证。独立 Linux 测试覆盖双 CA 越权拒绝、SQLite 只读投影、pidfd/cgroup 身份；实际内核子进程采样仍不等于真实 Kata/QEMU 配置认证。数据库/API 集成专项使用隔离 PostgreSQL、实际 JWT/JWKS 和 HTTP 后端；生产集群仍须独立完成验收。
+普通 Rust 测试覆盖固定查询、HA 合并、原始样本时间、坏标签/数值/响应、凭据轮换、重定向拒绝，以及真实 TLS CA 验证。PromQL 语义使用固定版本的真实 promtool 验证。独立 Linux 测试覆盖双 CA 越权拒绝、SQLite 只读投影、pidfd/cgroup 身份。容量新增合同覆盖全祖先约束、非法/缺失/全无限内存、真实零值与CPU/内存独立变化；`scripts/test-nodeguard-capacity.py`使用普通用户编译的精确测试程序，在固定镜像、受限且仅挂载该程序的本机容器中验收真实内核cgroup。实际内核采样仍不等于真实Kata/QEMU配置或云容量认证。SDK与控制台合同核对两项容量的原值、单位、缺测/陈旧和撤权清图表；数据库/API集成专项使用隔离PostgreSQL、实际JWT/JWKS和HTTP后端。各专项结果须绑定实际源码和原始证据，生产集群仍须独立完成验收。
 
 语义参考：[Linux cgroup v2](https://docs.kernel.org/admin-guide/cgroup-v2.html)、[Prometheus timestamp](https://prometheus.io/docs/prometheus/latest/querying/functions/#timestamp)、[Prometheus 单元测试格式](https://prometheus.io/docs/prometheus/latest/configuration/unit_testing_rules/)。

@@ -21,6 +21,14 @@ RuntimeClass 固定 `kata-qemu`、handler 固定 `kata-qemu`，并选择 `sandbo
 
 Worker 启动立即扫描已有操作，随后在提示、任务完成和固定500ms恢复扫描时填充可用并发槽。0044的空通知只提示重新查询；领取仍由原路由/期限/租约SQL决定。连接池上限包含一个监听连接，max=1使用轮询。详见[队列调度与调用观测](worker-dispatch.md)，包括部署、数据库预算、缺提示恢复和观测范围。
 
+### 宿主CRI启动调用观测
+
+nodeguard为通过现有owner/许可检查的受管启动记录实际后端`RunPodSandbox` RPC往返。固定字段为`scope=HOST_RUNTIME_CALL`、`phase=CRI_RUN_SANDBOX_ROUND_TRIP`、`launch_id`及单调时钟测得的`duration_micros`；它是内部调用日志，不是新的实例资源指标或对外Ready状态。计时只包围实际RPC，不包含调用前的启动账本检查、调用后的身份捕获/登记提交，也不包含独立containerd镜像拉取、VM可用性或首次正确执行。
+
+成功返回记`OK`，其他RPC错误记`ERROR`；返回`Cancelled`、`DeadlineExceeded`以及已开始调用被超时/取消而drop时记`CANCELLED_UNKNOWN`。这些是调用结果分类；`ERROR`也不证明远端没有创建VM，未知则表示远端效果尚未确认。日志仅记录固定分类、gRPC状态码和launch身份，不记录响应正文、provider错误消息或凭据；原返回值与错误、120秒调用超时、启动归属和UNKNOWN账本处理保持原合同。未poll的调用不产生耗时记录。
+
+本轮补齐这一宿主调用的测量点，尚不能据此给出端到端快启承诺。accepted/提交/队列、镜像、placement、VM Ready、路由和首次正确执行仍需各自证据。宿主CPU/内存容量上界见[运行指标](runtime-metrics.md)，不作为Worker权限、调度余量或利用率百分比分母；本轮没有交付warm pool、模板缓存、GPU或真实Kata/云环境认证。
+
 ## 持久阶段
 
 受监督的 Worker 在同一租约内最多执行四轮：验证策略对象并提交 UID/阶段/进度事件 → 验证 PVC 并提交 → 验证 Pod 并提交 → 验证当前代际 Ready。只有前三种固定资源登记事务收到成功提交回执才立即继续；已有资源仍核验 UID 和完整 spec。PVC 的 `WaitForFirstConsumer` 不会造成调谐死锁：允许先创建 Pending PVC，再创建消费者 Pod，最终 Ready 时要求 PVC 为 Bound。

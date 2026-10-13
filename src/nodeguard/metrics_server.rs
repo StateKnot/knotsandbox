@@ -52,6 +52,10 @@ fn write_samples(
             Some(counters.cpu_usage_usec as f64 / 1_000_000.0),
         ),
         (
+            RuntimeMetric::VmCpuCapacityCores,
+            counters.cpu_capacity_cores,
+        ),
+        (
             RuntimeMetric::VmCpuThrottledPeriodsPerSecond,
             counters.cpu_throttled_periods.map(|v| v as f64),
         ),
@@ -62,6 +66,10 @@ fn write_samples(
         (
             RuntimeMetric::VmMemoryBytes,
             Some(counters.memory_bytes as f64),
+        ),
+        (
+            RuntimeMetric::VmMemoryCapacityBytes,
+            counters.memory_capacity_bytes.map(|v| v as f64),
         ),
         (
             RuntimeMetric::VmMemoryAnonBytes,
@@ -113,9 +121,11 @@ async fn scrape(State(state): State<MetricsState>) -> Response {
             let mut output=String::new();
             for (metric,kind,help) in [
                 (RuntimeMetric::VmCpuCores,"counter","CPU seconds charged to the host VM cgroup including virtualization overhead."),
+                (RuntimeMetric::VmCpuCapacityCores,"gauge","Observed nominal fair-class CPU bandwidth bound from the host VM effective cpuset and complete verified hierarchy; shared ancestor limits are not exclusive reservations, and periods/burst may exceed it in short windows."),
                 (RuntimeMetric::VmCpuThrottledPeriodsPerSecond,"counter","Periods throttled by this host VM cgroup's own CFS bandwidth limit; excludes ancestor throttling."),
                 (RuntimeMetric::VmCpuThrottledSecondsPerSecond,"counter","Accumulated seconds throttled by this host VM cgroup's own CFS bandwidth limit; its rate may exceed one, excludes ancestor throttling."),
                 (RuntimeMetric::VmMemoryBytes,"gauge","Bytes in host VM cgroup memory.current including cache."),
+                (RuntimeMetric::VmMemoryCapacityBytes,"gauge","Observed host VM cgroup hard memory upper bound across the complete verified hierarchy; shared ancestor limits are not exclusive reservations, absent unlimited/unknown is not zero."),
                 (RuntimeMetric::VmMemoryAnonBytes,"gauge","Anonymous mapping bytes charged to the host VM cgroup; not a guest RAM working set."),
                 (RuntimeMetric::VmMemoryFileBytes,"gauge","File-backed bytes charged to the host VM cgroup including tmpfs and shared memory; not all reclaimable cache."),
                 (RuntimeMetric::VmMemoryOomEventsPerSecond,"counter","Kernel memory.events oom counter for the host VM cgroup; follows the mounted kernel hierarchy semantics, not guest OOMs."),
@@ -194,6 +204,15 @@ mod tests {
         assert!(output.contains("sandbox_vm_memory_oom_events_total{instance_id=\"test\"} 2\n"));
         assert!(output.contains("sandbox_vm_memory_oom_kills_total{instance_id=\"test\"} 0\n"));
 
+        let mut bounded = counters;
+        bounded.cpu_capacity_cores = Some(0.75);
+        bounded.memory_capacity_bytes = Some(0);
+        output.clear();
+        write_samples(&mut output, "instance_id=\"test\"", &bounded)?;
+        assert_eq!(output.lines().count(), 13);
+        assert!(output.contains("sandbox_vm_cpu_capacity_cores{instance_id=\"test\"} 0.75\n"));
+        assert!(output.contains("sandbox_vm_memory_capacity_bytes{instance_id=\"test\"} 0\n"));
+
         // Missing files and malformed optional files never emit zero samples.
         let counters = super::super::metrics::parse(
             "usage_usec 1250000",
@@ -208,6 +227,8 @@ mod tests {
         assert_eq!(output.lines().count(), 5);
         assert!(output.contains("sandbox_vm_memory_bytes{instance_id=\"test\"} 4096\n"));
         for name in [
+            "sandbox_vm_cpu_capacity_cores",
+            "sandbox_vm_memory_capacity_bytes",
             "sandbox_vm_cpu_throttled_periods_total",
             "sandbox_vm_cpu_throttled_seconds_total",
             "sandbox_vm_memory_anon_bytes",

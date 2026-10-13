@@ -1,6 +1,7 @@
 // Real UI/BFF/API requests only. One committed PATCH response is deliberately
 // dropped; no response body, identity or database result is synthesized.
 import assert from 'node:assert/strict';
+import { serviceClientMutationJson } from './service-client-response-observer.mjs';
 
 export async function accountConsole(page, config, coordinate) {
   const step = (name) => process.stderr.write(`ACCOUNT_LIVE_STEP ${name}\n`);
@@ -10,6 +11,13 @@ export async function accountConsole(page, config, coordinate) {
     }
   };
   const origin = new URL(config.origin).origin;
+  page.on('requestfailed', (request) => {
+    const url = new URL(request.url());
+    if (url.origin !== origin || !/^\/v1\/service-clients(?:\/[0-9a-f-]{36})?$/.test(url.pathname)) return;
+    const signal = request.failure()?.errorText;
+    const category = /^net::ERR_[A-Z_]+$/.test(signal ?? '') ? signal : 'PRIVATE_DETAILS_OMITTED';
+    process.stderr.write(`ACCOUNT_LIVE_REQUEST_FAILURE ${request.method()} ${category}\n`);
+  });
   const match = (response, method, path) => {
     const url = new URL(response.url());
     return url.origin === origin && url.pathname === path && response.request().method() === method;
@@ -52,7 +60,7 @@ export async function accountConsole(page, config, coordinate) {
     process.stderr.write(`ACCOUNT_LIVE_HTTP_COMPLETION REGISTER ${finished === null ? 'COMPLETE' : 'FAILED'}\n`);
     assert.equal(finished, null, 'the real registration response must finish');
     step('REGISTER_BODY_READ');
-    const body = await response.json();
+    const body = await serviceClientMutationJson(page, response);
     step('REGISTER_BODY_READ_COMPLETE');
     assert.equal(body.resource.subject, client.subject);
     assert.equal(body.resource.issuer, config.accounts.issuer);
@@ -134,7 +142,7 @@ export async function accountConsole(page, config, coordinate) {
   assert.equal(retried.request().headers()['idempotency-key'], dropped.key);
   assert.equal(retried.request().headers()['if-match'], dropped.etag);
   assert.equal(retried.request().postData(), dropped.body);
-  assert.equal((await retried.json()).resource.version, 2);
+  assert.equal((await serviceClientMutationJson(page, retried)).resource.version, 2);
   await coordinate('machine_disabled', 'machine_read_denied');
   await page.getByLabel('项目 ID', { exact: true }).fill(config.project);
   await page.getByRole('button', { name: '进入项目', exact: true }).click();
@@ -178,13 +186,23 @@ export async function accountConsole(page, config, coordinate) {
   step('CLIENT_REENABLE_FRESH_READ_RESPONSE_WAIT');
   assert.equal((await fresh).headers().etag, '"2"');
   step('CLIENT_REENABLE_FRESH_READ_VERIFIED');
+  step('CLIENT_REENABLE_CHECK_START');
   await detail.getByLabel('启用此租户机器身份', { exact: true }).check();
+  step('CLIENT_REENABLE_CHECK_FINISHED');
   const enablePending = page.waitForResponse((r) => match(r, 'PATCH', clientPath));
   await detail.getByRole('button', { name: '保存机器身份', exact: true }).click();
+  step('CLIENT_REENABLE_SAVE_CLICK_FINISHED');
   const enabled = await enablePending;
+  step('CLIENT_REENABLE_PATCH_RECEIVED');
+  statusSignal('REENABLE', enabled.status());
+  const enabledFinished = await enabled.finished();
+  process.stderr.write(`ACCOUNT_LIVE_HTTP_COMPLETION REENABLE ${enabledFinished === null ? 'COMPLETE' : 'FAILED'}\n`);
+  assert.equal(enabledFinished, null);
   assert.equal(enabled.status(), 200);
   assert.equal(enabled.request().headers()['if-match'], '"2"');
-  assert.equal((await enabled.json()).resource.version, 3);
+  step('CLIENT_REENABLE_BODY_READ');
+  assert.equal((await serviceClientMutationJson(page, enabled)).resource.version, 3);
+  step('CLIENT_REENABLE_BODY_READ_COMPLETE');
   await coordinate('machine_enabled', 'machine_read_restored');
 
   step('GRANT_ENABLE_DISABLE_REVOKE');

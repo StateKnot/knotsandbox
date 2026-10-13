@@ -77,7 +77,7 @@ class ObservabilityTest(unittest.TestCase):
                 self.assertFalse(job['tls_config']['insecure_skip_verify'])
                 self.assertFalse(job['honor_timestamps'])
                 self.assertFalse(job['honor_labels'])
-                self.assertEqual(job['sample_limit'], 3072)
+                self.assertEqual(job['sample_limit'], 3584)
                 self.assertEqual(job['label_limit'], 13)
                 self.assertEqual(job['static_configs'][0]['targets'], [node['private_ip'] + ':9445'])
                 self.assertEqual(job['static_configs'][0]['labels'], {'scrape_node_uid': node['node_uid'], 'scrape_host_boot_id': node['host_boot_id']})
@@ -119,14 +119,14 @@ class ObservabilityTest(unittest.TestCase):
 
     def test_all_pressure_metrics_pass_both_filters_without_weakening_identity_or_labels(self):
         expected = (
-            'sandbox_vm_cpu_seconds_total', 'sandbox_vm_cpu_throttled_periods_total',
-            'sandbox_vm_cpu_throttled_seconds_total', 'sandbox_vm_memory_bytes',
+            'sandbox_vm_cpu_seconds_total', 'sandbox_vm_cpu_capacity_cores', 'sandbox_vm_cpu_throttled_periods_total',
+            'sandbox_vm_cpu_throttled_seconds_total', 'sandbox_vm_memory_bytes', 'sandbox_vm_memory_capacity_bytes',
             'sandbox_vm_memory_anon_bytes', 'sandbox_vm_memory_file_bytes',
             'sandbox_vm_memory_oom_events_total', 'sandbox_vm_memory_oom_kills_total',
             'sandbox_vm_io_read_bytes_total', 'sandbox_vm_io_write_bytes_total',
             'sandbox_vm_tasks', 'sandbox_vm_observation_success',
         )
-        self.assertEqual(len(RAW_METRICS), 12)
+        self.assertEqual(len(RAW_METRICS), 14)
         self.assertEqual(set(RAW_METRICS), set(expected))
         s, tf, u = fixture()
         for replica in ('a', 'b'):
@@ -181,12 +181,12 @@ class ObservabilityTest(unittest.TestCase):
 
     def test_capacity_includes_self_scrape_and_all_native_wal_reports(self):
         s, tf, u = fixture(); p = prometheus(s, 'a', u); c = capacity(s)
-        raw = len(s['nodes']) * 256 * 12
+        raw = len(s['nodes']) * 256 * 14
         native = len(p['scrape_configs']) * SCRAPE_REPORT_SAMPLES
         total = raw + SELF_SAMPLE_LIMIT + native
         self.assertEqual(c['max_raw_samples_per_scrape_per_replica'], raw)
-        self.assertEqual(c['max_raw_metrics_per_launch'], 12)
-        self.assertEqual(c['max_raw_samples_per_node_scrape'], 3072)
+        self.assertEqual(c['max_raw_metrics_per_launch'], 14)
+        self.assertEqual(c['max_raw_samples_per_node_scrape'], 3584)
         self.assertEqual(c['max_self_samples_per_scrape_per_replica'], SELF_SAMPLE_LIMIT)
         self.assertEqual(c['max_scrape_report_samples_per_scrape_per_replica'], native)
         self.assertEqual(c['max_wal_samples_per_scrape_per_replica'], total)
@@ -195,7 +195,7 @@ class ObservabilityTest(unittest.TestCase):
         self.assertEqual(c['six_hour_budget_bytes_with_checkpoint_reserve'], total * 1440 * 1024 * 2)
         self.assertGreater(c['six_hour_budget_bytes_with_checkpoint_reserve'], raw * 1440 * 1024 * 2)
         self.assertEqual(c['disk_usage_budget_fraction'], 0.7)
-        # This inventory fit the original six-series raw budget. The twelve
+        # This inventory fit the original six-series raw budget. The fourteen
         # series expansion must reject it without relaxing the disk margin.
         s['nodes'] = [{'name': 'kata-' + str(i), 'node_uid': str(uuid.UUID(int=i + 1)),
                        'host_boot_id': str(uuid.UUID(int=i + 101)), 'private_ip': '10.80.40.' + str(i + 10)} for i in range(16)]
@@ -206,10 +206,10 @@ class ObservabilityTest(unittest.TestCase):
         self.assertLessEqual(16 * 256 * 6 * 1440 * 1024 * 2, int(97 * 1024 ** 3 * 0.7))
         with self.assertRaisesRegex(ValueError, '^WAL_CAPACITY$'):
             validate(s, tf, u)
-        # Even a twelve-series raw-only budget is insufficient if native/self
+        # Even a fourteen-series raw-only budget is insufficient if native/self
         # WAL samples push it past the unchanged 70% capacity gate.
-        s['wal_gib'] = 193
-        self.assertLessEqual(16 * 256 * 12 * 1440 * 1024 * 2, int(193 * 1024 ** 3 * 0.7))
+        s['wal_gib'] = 225
+        self.assertLessEqual(16 * 256 * 14 * 1440 * 1024 * 2, int(225 * 1024 ** 3 * 0.7))
         with self.assertRaisesRegex(ValueError, '^WAL_CAPACITY$'):
             validate(s, tf, u)
 

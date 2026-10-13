@@ -20,9 +20,11 @@ APP = 'sandbox-metrics-agent'
 UUID = r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 RAW_METRICS = (
     'sandbox_vm_cpu_seconds_total',
+    'sandbox_vm_cpu_capacity_cores',
     'sandbox_vm_cpu_throttled_periods_total',
     'sandbox_vm_cpu_throttled_seconds_total',
     'sandbox_vm_memory_bytes',
+    'sandbox_vm_memory_capacity_bytes',
     'sandbox_vm_memory_anon_bytes',
     'sandbox_vm_memory_file_bytes',
     'sandbox_vm_memory_oom_events_total',
@@ -134,7 +136,7 @@ def validate(settings, terraform, remote_url):
 
 
 def capacity(settings):
-    # Twelve bounded raw metrics per launch; the 1 KiB allowance includes churn/
+    # Fourteen bounded raw metrics per launch; the 1 KiB allowance includes churn/
     # label records. It is a conservative planning model, not a storage SLA.
     samples = len(settings['nodes']) * NODE_SAMPLE_LIMIT
     # Native scrape reports enter the WAL even when remote-write filters them.

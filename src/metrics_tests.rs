@@ -186,6 +186,8 @@ fn efficiency_series_keep_real_zero_over_one_missing_and_ha_freshness() {
             "seconds_per_second",
             1.5,
         ),
+        (RuntimeMetric::VmCpuCapacityCores, "cores", 0.75),
+        (RuntimeMetric::VmMemoryCapacityBytes, "bytes", 268435456.0),
         (RuntimeMetric::VmMemoryAnonBytes, "bytes", 4096.0),
         (RuntimeMetric::VmMemoryFileBytes, "bytes", 8192.0),
         (
@@ -329,6 +331,13 @@ fn official_prometheus_preserves_identity_raw_sample_time_and_separate_ha_series
             "0+22.5x8",
             1.5,
             false,
+        ),
+        (RuntimeMetric::VmCpuCapacityCores, "0.75+0x8", 0.75, true),
+        (
+            RuntimeMetric::VmMemoryCapacityBytes,
+            "268435456+0x8",
+            268435456.0,
+            true,
         ),
         (RuntimeMetric::VmMemoryAnonBytes, "4096+0x8", 4096.0, true),
         (RuntimeMetric::VmMemoryFileBytes, "8192+0x8", 8192.0, true),
@@ -712,6 +721,8 @@ async fn check_metrics_http_contract(
         "VM_MEMORY_FILE_BYTES",
         "VM_MEMORY_OOM_EVENTS_PER_SECOND",
         "VM_MEMORY_OOM_KILLS_PER_SECOND",
+        "VM_CPU_CAPACITY_CORES",
+        "VM_MEMORY_CAPACITY_BYTES",
     ] {
         let query = parameters.replace("VM_MEMORY_ANON_BYTES", metric);
         let response = app
