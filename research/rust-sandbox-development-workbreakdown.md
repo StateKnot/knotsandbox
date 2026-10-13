@@ -251,3 +251,5 @@ G2-07下一子项须先冻结`STOP_AFTER_PLATFORM_IDLE`语义和有界可撤销�
 详细采样语义和调用合同见[运行指标](../docs/runtime-metrics.md)、[采集预算与部署](../deploy/observability/README.md)和[Worker运行合同](../docs/worker-runtime.md#宿主cri启动调用观测)。宿主容量上界不等于专属预留、余量或节点利用率，当前没有利用率百分比或自动停机/调档。快启新增测量点不包含独立镜像拉取和VM Ready；warm pool、模板缓存、GPU仍未交付，真实Kata/云环境尚未验收。原61个工作包及发布门继续有效。
 
 本轮最终源码已完成本地普通Rust、严格Linux检查、真实内核容量、Prometheus、独立TLS PostgreSQL、SDK/控制台和真实Chrome身份全流程验收。精确范围、环境专用未执行用例、CI故障与边界见[本轮交付记录](resource-capacity-faststart-delivery-20261013.md)；远端完整CI以新提交收据为准。
+
+CI补验发现真实容量入口的内核Invalid错误，已补合法`core_sched.force_idle_usec`兼容与固定阶段/字段存在布尔证据；没有跳过内核门禁或把失败转换为缺测。最新本地普通Rust288项、Linux nodeguard49项及真实容量精确用例通过，下一提交须通过Ubuntu入口及完整真实浏览器CI，具体失败事实和根因待证范围保留在交付记录中。

@@ -39,9 +39,12 @@ fn stats(value: &str) -> Result<BTreeMap<&str, u64>, GuardError> {
         let parts: Vec<_> = line.split_ascii_whitespace().collect();
         if parts.len() != 2
             || parts[0].is_empty()
-            || !parts[0]
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b == b'_')
+            // CONFIG_SCHED_CORE emits this exact dotted cpu.stat field. Keep
+            // rejecting arbitrary dotted names, duplicates and invalid u64s.
+            || !(parts[0] == "core_sched.force_idle_usec"
+                || parts[0]
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b == b'_'))
             || values.insert(parts[0], number(parts[1])?).is_some()
         {
             return Err(GuardError::Invalid);
@@ -126,6 +129,33 @@ pub(super) fn parse(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn linux_core_scheduling_cpu_stat_preserves_accounting_and_strict_numbers() -> anyhow::Result<()>
+    {
+        // Linux CONFIG_SCHED_CORE appends this exact dotted key to cpu.stat.
+        let c = parse(
+            "usage_usec 17\nuser_usec 9\nsystem_usec 8\ncore_sched.force_idle_usec 0\nnr_throttled 3\nthrottled_usec 2500\n",
+            "4096",
+            "",
+            "1",
+            None,
+            None,
+        )?;
+        assert_eq!(c.cpu_usage_usec, 17);
+        assert_eq!(c.cpu_throttled_periods, Some(3));
+        assert_eq!(c.cpu_throttled_usec, Some(2500));
+        for bad in [
+            "core_sched.force_idle_usec -1",
+            "core_sched.force_idle_usec 18446744073709551616",
+            "core_sched.force_idle_usec 0\ncore_sched.force_idle_usec 1",
+            "core_sched.force_idle_usec 0 extra",
+            "unrecognized.dotted_key 1",
+        ] {
+            assert!(parse(&format!("usage_usec 17\n{bad}"), "1", "", "1", None, None).is_err());
+        }
+        Ok(())
+    }
+
     #[test]
     fn cgroup_accounting_preserves_real_zero_and_rejects_ambiguous_or_overflowing_counters()
     -> anyhow::Result<()> {

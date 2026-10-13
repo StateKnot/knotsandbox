@@ -897,9 +897,13 @@ mod linux {
         }
 
         fn actual_kernel_cgroup_contract(capacity_required: bool) -> anyhow::Result<()> {
-            let executable = std::fs::canonicalize("/usr/bin/sleep")?;
+            use anyhow::Context;
+            use std::os::fd::AsRawFd;
+
+            let executable = std::fs::canonicalize("/usr/bin/sleep")
+                .context("KERNEL_EXECUTABLE_CANONICALIZE")?;
             let file = PinnedFile {
-                sha256: digest_file(&executable)?,
+                sha256: digest_file(&executable).context("KERNEL_EXECUTABLE_DIGEST")?,
                 path: executable.clone(),
             };
             let other = PinnedFile {
@@ -918,17 +922,44 @@ mod linux {
                 kubelet_configuration: other.clone(),
                 kubelet_environment: other,
             };
-            let mut child = std::process::Command::new(executable).arg("20").spawn()?;
+            let mut child = std::process::Command::new(executable)
+                .arg("20")
+                .spawn()
+                .context("KERNEL_PROCESS_SPAWN")?;
             let result = (|| {
-                let identity = proc_identity(child.id(), &profile)?;
-                let pinned = pin_process(&identity, &profile, false)?;
-                let group = parse_cgroup(&read_text(
+                let identity =
+                    proc_identity(child.id(), &profile).context("KERNEL_PROC_IDENTITY")?;
+                let pinned = pin_process(&identity, &profile, false).context("KERNEL_PIDFD_PIN")?;
+                let raw_group = read_text(
                     &PathBuf::from(format!("/proc/{}/cgroup", child.id())),
                     65536,
-                )?)?;
-                let relative = relative_cgroup_path(&group)?;
-                let cgroup = File::open(cgroup_filesystem_path(&relative)?)?;
-                let m = cgroup.metadata()?;
+                )
+                .context("KERNEL_CGROUP_READ")?;
+                let group = parse_cgroup(&raw_group).context("KERNEL_CGROUP_PARSE")?;
+                let relative = relative_cgroup_path(&group).context("KERNEL_CGROUP_RELATIVE")?;
+                let path = cgroup_filesystem_path(&relative).context("KERNEL_CGROUP_PATH")?;
+                let cgroup = File::open(path).context("KERNEL_CGROUP_OPEN")?;
+                let m = cgroup.metadata().context("KERNEL_CGROUP_METADATA")?;
+                if capacity_required {
+                    let root = PathBuf::from(format!("/proc/self/fd/{}", cgroup.as_raw_fd()));
+                    let cpu =
+                        read_text(&root.join("cpu.stat"), 65536).context("KERNEL_CPU_STAT_READ")?;
+                    println!(
+                        "NODEGUARD_KERNEL_CORE_SCHED_FIELD_PRESENT={}",
+                        cpu.lines().any(|line| {
+                            line.split_ascii_whitespace().next()
+                                == Some("core_sched.force_idle_usec")
+                        })
+                    );
+                    let memory = read_text(&root.join("memory.current"), 64)
+                        .context("KERNEL_MEMORY_CURRENT_READ")?;
+                    let io =
+                        read_text(&root.join("io.stat"), 65536).context("KERNEL_IO_STAT_READ")?;
+                    let pids = read_text(&root.join("pids.current"), 64)
+                        .context("KERNEL_PIDS_CURRENT_READ")?;
+                    crate::nodeguard::metrics::parse(&cpu, &memory, &io, &pids, None, None)
+                        .context("KERNEL_COUNTER_PARSE")?;
+                }
                 let obs = SandboxObservation {
                     sandbox_id: "a".repeat(64),
                     cgroup: CgroupIdentity {
@@ -944,8 +975,11 @@ mod linux {
                     node_uid: uuid::Uuid::new_v4(),
                     node_name: "linux-metrics-test".into(),
                     boot_id: uuid::Uuid::parse_str(
-                        read_text(Path::new("/proc/sys/kernel/random/boot_id"), 64)?.trim(),
-                    )?,
+                        read_text(Path::new("/proc/sys/kernel/random/boot_id"), 64)
+                            .context("KERNEL_BOOT_ID_READ")?
+                            .trim(),
+                    )
+                    .context("KERNEL_BOOT_ID_PARSE")?,
                     profile_sha256: "a".repeat(64),
                 };
                 // This is a real kernel accounting/pidfd test, not a Kata
@@ -962,24 +996,38 @@ mod linux {
                         },
                     )])),
                 };
-                let values = observer.metrics(&obs)?;
-                assert!(values.tasks >= 1 && values.memory_bytes > 0);
+                let values = observer.metrics(&obs).context("KERNEL_METRICS_SAMPLE")?;
+                assert!(
+                    values.tasks >= 1 && values.memory_bytes > 0,
+                    "KERNEL_BASE_COUNTER_ASSERT"
+                );
                 // The runner bounds this own disposable container. This tests
                 // a real full kernel hierarchy, not synthetic controller files
                 // or a production Kata registration/capacity certification.
                 if capacity_required {
-                    assert_eq!(values.cpu_capacity_cores, Some(0.75));
-                    assert_eq!(values.memory_capacity_bytes, Some(268_435_456));
+                    assert_eq!(
+                        values.cpu_capacity_cores,
+                        Some(0.75),
+                        "KERNEL_CPU_CAPACITY_ASSERT"
+                    );
+                    assert_eq!(
+                        values.memory_capacity_bytes,
+                        Some(268_435_456),
+                        "KERNEL_MEMORY_CAPACITY_ASSERT"
+                    );
                 }
                 let mut wrong = obs.clone();
                 wrong.cgroup.inode += 1;
-                assert!(matches!(
-                    observer.metrics(&wrong),
-                    Err(GuardError::IdentityMismatch)
-                ));
-                child.kill()?;
-                child.wait()?;
-                assert!(matches!(observer.metrics(&obs), Err(GuardError::Unknown)));
+                assert!(
+                    matches!(observer.metrics(&wrong), Err(GuardError::IdentityMismatch)),
+                    "KERNEL_CHANGED_INODE_REJECT_ASSERT"
+                );
+                child.kill().context("KERNEL_PROCESS_KILL")?;
+                child.wait().context("KERNEL_PROCESS_WAIT")?;
+                assert!(
+                    matches!(observer.metrics(&obs), Err(GuardError::Unknown)),
+                    "KERNEL_EXITED_PID_REJECT_ASSERT"
+                );
                 Ok::<_, anyhow::Error>(())
             })();
             let _ = child.kill();

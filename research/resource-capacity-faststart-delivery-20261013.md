@@ -28,9 +28,9 @@ CPU读取叶级有效cpuset，并取叶级和全部非根祖先有限`cpu.max`�
 
 | 验收 | 结果及边界 |
 | --- | --- |
-| Rust普通库、严格native Clippy/fmt | 287通过，120个环境专用用例未执行；lint/format通过 |
+| Rust普通库、严格native Clippy/fmt | 内核兼容补验后288通过，120个环境专用用例未执行；lint/format通过 |
 | 严格Linux全target Clippy | 锁定工具链镜像通过 |
-| Linux nodeguard普通合同 | 48通过，3个环境专用用例未执行 |
+| Linux nodeguard普通合同 | 内核兼容补验后49通过，3个环境专用用例未执行 |
 | 真实Linux内核容量精确用例 | 1通过；固定Docker运行镜像、0.75 CPU/256MiB、完整cgroup层级、inode变化和PID退出拒绝；不是Kata认证 |
 | 锁定官方Prometheus查询语义 | 精确1通过，包含两个容量gauge、缺测、时间戳及HA分离 |
 | 采集配置、实际Prometheus协议链、告警 | 17配置测试通过；实际mTLS抓取/远程写入/双副本/过滤/恢复通过；38个声明的告警故障场景通过 |
@@ -42,6 +42,12 @@ CPU读取叶级有效cpuset，并取叶级和全部非根祖先有限`cpu.max`�
 非root Linux CI入口`scripts/test-nodeguard-capacity.py`消费普通Cargo产物，检查精确忽略用例、ELF/UID/metadata/路径、固定镜像与容器限额，只挂载二进制。创建失ACK按精确随机名字/标签/镜像恢复清理所有权；主失败和清理失败分别保留，未确认不存在不能通过。macOS本地的上述内核用例不等于这个Linux入口已经通过；最终入口与整套远端结果以新提交CI收据为准。
 
 发布后复核发现Docker CLI29.6.2对不存在对象返回小写`no such object`，清理判断已改为大小写无关；实际不存在随机对象的inspect和精确名字空列表通过，权限或daemon连接错误不被当成不存在。该修正只影响验收收尾，不改变内核采集和生产运行。当前Docker Desktop的Cargo产物位于构建容器的named-volume路径且属root，不能满足该入口的普通Linux UID/宿主路径合同；未通过改属主、重写Cargo消息或构造宿主路径别名绕过，由真实Ubuntu非root CI执行入口。
+
+随后`b7b89f7`的[CI运行38402086901](https://github.com/StateKnot/knotsandbox/actions/runs/38402086901)四个独立作业通过，但verify的普通测试步骤中，新增真实容量入口返回内核用例退出101、`GuardError::Invalid`；原宿主观察用例通过，自有容量容器清理确认，真实浏览器步骤尚未执行。原日志缺少内部阶段，不能直接推断失败原因。
+
+预研确认[Linux内核rstat.c](https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux/+/b91872c56940950a6a0852e499d249c3091d4284/kernel/cgroup/rstat.c)在CONFIG_SCHED_CORE时输出`core_sched.force_idle_usec`。原基础stats解析器确实拒绝这个合法字段；固定输入回归先失败再通过。现仅增加此字面字段兼容，任意其他点号字段、重复键、非法/溢出数字继续拒绝。该字段不产生新的公开指标，也不改变已有usage或throttle值。
+
+真实内核用例增加固定读取/解析/断言阶段Context，实际CPU文件只打印上述字段存在与否的布尔标记；wrapper记录白名单错误码、阶段和布尔证据，无原始路径/控制器正文/凭据。所有容量、PID/inode、精确用例、产物和清理门禁保持。最新本地内核容量仍通过，当前Docker Desktop内核的字段存在标记为false；此环境不能替代Ubuntu的字段现场。最新远端CI仍需验收，不能把已证实的解析缺陷当作上一运行已被证明的唯一根因。
 
 本地证据在忽略的`.local/resource-faststart-20261013/`，包含源指纹、普通产物SHA、原失败日志和清理回执；不提交PKI、身份凭据、临时数据库或构建缓存。
 
