@@ -30,12 +30,14 @@ DOCKER_HOST = 'unix:///var/run/docker.sock'
 
 
 class CheckError(ValueError):
-    pass
+    def __init__(self, category, diagnostic=None):
+        super().__init__(category)
+        self.diagnostic = diagnostic
 
 
-def require(condition, category):
+def require(condition, category, diagnostic=None):
     if not condition:
-        raise CheckError(category)
+        raise CheckError(category, diagnostic)
 
 
 def immutable_image(value):
@@ -124,10 +126,57 @@ FAILURE_CATEGORIES = frozenset((
     'LOCAL_DOCKER_SOCKET_OWNER_OR_TYPE', 'LOCAL_IMAGE_METADATA_REQUIRED', 'LOCAL_IMAGE_ID_REQUIRED',
     'LOCAL_REPOSITORY_DIGEST_BINDING', 'LOCAL_CREATED_IMAGE_BINDING',
     'LOCAL_SELECTED_MANIFEST_BINDING', 'LOCAL_LINUX_AMD64_IMAGE_REQUIRED',
+    'LOCAL_CONTAINER_STATE_FORMAT_REQUIRED',
     'LINUX_TEST_EXIT_OR_RESOURCE_FAILURE', 'LOCAL_TEST_CONTAINER_CLEANUP_FAILED',
     'SELF_TEST_ACCEPTS_NO_RUNTIME_INPUT', 'STATIC_PROTOCOL_TEST_FAILED',
     'TEST_ELF_AND_FIXED_IMAGE_REQUIRED', 'CHILD_FAILURE_REQUIRES_NONZERO_EXIT',
     'CHILD_FAILURE_BYTES_REQUIRED'))
+
+
+START_DIAGNOSTIC_KEYS = frozenset((
+    'start_exit_code', 'start_stdout_sha256', 'start_stdout_bytes',
+    'start_stderr_sha256', 'start_stderr_bytes', 'container_running',
+    'container_oom_killed', 'container_exit_code'))
+
+
+def valid_start_diagnostic(value):
+    if type(value) is not dict or set(value) != START_DIAGNOSTIC_KEYS:
+        return False
+    return (type(value['start_exit_code']) is int and -255 <= value['start_exit_code'] <= 255
+        and type(value['container_exit_code']) is int and 0 <= value['container_exit_code'] <= 255
+        and all(type(value[key]) is bool for key in ('container_running', 'container_oom_killed'))
+        and all(type(value[key]) is int and 0 <= value[key] <= OUTPUT_LIMIT
+                for key in ('start_stdout_bytes', 'start_stderr_bytes'))
+        and all(type(value[key]) is str and re.fullmatch(r'[0-9a-f]{64}', value[key])
+                for key in ('start_stdout_sha256', 'start_stderr_sha256')))
+
+
+def failure_start_diagnostic(stdout, category):
+    def unique_object(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError('Duplicate failure field')
+            value[key] = item
+        return value
+    try:
+        value = json.loads(stdout, object_pairs_hook=unique_object)
+    except (ValueError, TypeError, RecursionError):
+        return None
+    if (type(value) is not dict or set(value) != {
+            'linux_projected_trust_test', 'test_execution', 'start_diagnostic'}
+            or value['linux_projected_trust_test'] != 'FAIL' or value['test_execution'] != 'UNKNOWN'
+            or not valid_start_diagnostic(value['start_diagnostic'])):
+        return None
+    diagnostic = value['start_diagnostic']
+    exit_failure = (diagnostic['container_running'] or diagnostic['container_oom_killed']
+                    or diagnostic['container_exit_code'] != 0)
+    consistent = ((category == 'LOCAL_DOCKER_START_FAILED' and diagnostic['start_exit_code'] != 0)
+        or (category == 'LINUX_TEST_EXIT_OR_RESOURCE_FAILURE' and diagnostic['start_exit_code'] == 0
+            and exit_failure)
+        or (category == 'EXACT_IGNORED_LINUX_TEST_NOT_PASSED' and diagnostic['start_exit_code'] == 0
+            and not exit_failure))
+    return diagnostic if consistent else None
 
 
 def child_failure_receipt(returncode, stdout: bytes, stderr: bytes):
@@ -135,16 +184,23 @@ def child_failure_receipt(returncode, stdout: bytes, stderr: bytes):
     require(type(returncode) is int and returncode != 0, 'CHILD_FAILURE_REQUIRES_NONZERO_EXIT')
     require(isinstance(stdout, bytes) and isinstance(stderr, bytes), 'CHILD_FAILURE_BYTES_REQUIRED')
     category = 'UNKNOWN'
+    diagnostic = None
     if len(stdout) <= OUTPUT_LIMIT and len(stderr) <= OUTPUT_LIMIT:
         match = re.fullmatch(rb'NODEGUARD_TRUST_LINUX_FAILED category=([A-Z_]+); input values omitted\n?', stderr)
         if match is not None and match[1].decode('ascii') in FAILURE_CATEGORIES:
-            category = match[1].decode('ascii')
-    return {'linux_projected_trust_test': 'FAIL', 'test': TEST, 'test_execution': 'UNKNOWN',
+            candidate = match[1].decode('ascii')
+            diagnostic = failure_start_diagnostic(stdout, candidate) if stdout else None
+            if not stdout or diagnostic is not None:
+                category = candidate
+    receipt = {'linux_projected_trust_test': 'FAIL', 'test': TEST, 'test_execution': 'UNKNOWN',
             'exit_code': returncode, 'category': category,
             'stdout_sha256': hashlib.sha256(stdout).hexdigest(), 'stdout_bytes': len(stdout),
             'stderr_sha256': hashlib.sha256(stderr).hexdigest(), 'stderr_bytes': len(stderr),
             'harness_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             'diagnostic_scope': 'DERIVED_ALLOWLIST_ONLY_NO_RAW_OUTPUT'}
+    if diagnostic is not None:
+        receipt['start_diagnostic'] = diagnostic
+    return receipt
 
 
 def elf_header(header):
@@ -293,6 +349,18 @@ def checked(arguments, timeout=30):
     return stdout
 
 
+def start_diagnostic(code, stdout, stderr, state):
+    require(type(state) is dict and type(state.get('Running')) is bool
+            and type(state.get('OOMKilled')) is bool and type(state.get('ExitCode')) is int
+            and 0 <= state['ExitCode'] <= 255, 'LOCAL_CONTAINER_STATE_FORMAT_REQUIRED')
+    value = {'start_exit_code': code, 'start_stdout_sha256': hashlib.sha256(stdout).hexdigest(),
+        'start_stdout_bytes': len(stdout), 'start_stderr_sha256': hashlib.sha256(stderr).hexdigest(),
+        'start_stderr_bytes': len(stderr), 'container_running': state['Running'],
+        'container_oom_killed': state['OOMKilled'], 'container_exit_code': state['ExitCode']}
+    require(valid_start_diagnostic(value), 'LOCAL_CONTAINER_STATE_FORMAT_REQUIRED')
+    return value
+
+
 def cleanup(name):
     # A lost create ACK can still leave a container. Observe only this exact
     # random name; normal completion needs neither stop nor force removal.
@@ -320,6 +388,7 @@ def run(binary, image, docker_host):
     name = 'sandbox-nodeguard-trust-' + uuid.uuid4().hex
     created = False
     failure = None
+    diagnostic = None
     with tempfile.TemporaryDirectory(prefix='sandbox-public-trust-') as directory:
         path = Path(directory)
         os.chmod(path, 0o755)
@@ -337,12 +406,16 @@ def run(binary, image, docker_host):
             require(isinstance(containers, list) and len(containers) == 1,
                     'LOCAL_CREATED_IMAGE_BINDING')
             binding = selected_image_binding(image_info, containers[0], image)
-            output = checked(['start', '--attach', name], 90)
+            start_code, output, start_stderr = command(['start', '--attach', name], 90)
             state = json.loads(checked(['inspect', '--format', '{{json .State}}', name]))
+            diagnostic = start_diagnostic(start_code, output, start_stderr, state)
+            require(start_code == 0, 'LOCAL_DOCKER_START_FAILED', diagnostic)
             require(not state['Running'] and not state['OOMKilled'] and state['ExitCode'] == 0,
-                    'LINUX_TEST_EXIT_OR_RESOURCE_FAILURE')
+                    'LINUX_TEST_EXIT_OR_RESOURCE_FAILURE', diagnostic)
             test_result(output)
         except BaseException as error:
+            if isinstance(error, CheckError) and error.diagnostic is None:
+                error.diagnostic = diagnostic
             failure = error
         finally:
             # Only this uniquely named local test container is removed. No
@@ -519,6 +592,105 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaises(CheckError): child_failure_receipt(0, b'', b'')
         with self.assertRaises(CheckError): child_failure_receipt(True, b'', b'')
 
+    def test_nonzero_start_inspects_state_and_preserves_only_safe_diagnostics(self):
+        image = 'rust@sha256:' + 'a' * 64
+        info = {'Id': 'sha256:' + 'b' * 64, 'Os': 'linux', 'Architecture': 'amd64',
+                'RepoDigests': [image]}
+        container = {'Image': info['Id'], 'Config': {'Image': image}, 'Platform': 'linux'}
+        state = {'Running': False, 'OOMKilled': False, 'ExitCode': 127,
+                 'Error': 'PRIVATE_STATE_ERROR_NEVER_RETURNED'}
+        socket = os.stat_result((stat.S_IFSOCK | 0o600, 0, 0, 1, os.geteuid(), 0, 0, 0, 0, 0))
+        calls, cleaned = [], []
+        original_checked = checked
+        stdout, stderr = b'PRIVATE_STDOUT_NEVER_RETURNED', b'PRIVATE_STDERR_NEVER_RETURNED'
+        def docker(arguments, timeout=30):
+            calls.append(arguments)
+            if arguments[:2] == ['image', 'inspect']: return json.dumps([info]).encode()
+            if arguments[0] == 'create': return b'PUBLIC_CONTAINER_ID\n'
+            if arguments[:3] == ['inspect', '--format', '{{json .State}}']:
+                return json.dumps(state).encode()
+            if arguments[0] == 'inspect': return json.dumps([container]).encode()
+            return original_checked(arguments, timeout)
+        def start(arguments, timeout=30):
+            calls.append(arguments)
+            self.assertEqual(arguments[:2], ['start', '--attach'])
+            return 17, stdout, stderr
+        with patch.object(Path, 'stat', return_value=socket), patch.dict(globals(), {
+                'checked': docker, 'command': start, 'snapshot': lambda *args: 'e' * 64,
+                'cleanup': lambda name: cleaned.append(name)}):
+            with self.assertRaises(CheckError) as failure:
+                run(Path('/public-elf'), image, 'unix:///local-socket')
+        self.assertTrue(any(call[:3] == ['inspect', '--format', '{{json .State}}'] for call in calls))
+        self.assertEqual(len(cleaned), 1)
+        self.assertEqual(str(failure.exception), 'LOCAL_DOCKER_START_FAILED')
+        diagnostic = getattr(failure.exception, 'diagnostic', None)
+        self.assertEqual(diagnostic, {
+            'start_exit_code': 17, 'start_stdout_sha256': hashlib.sha256(stdout).hexdigest(),
+            'start_stdout_bytes': len(stdout), 'start_stderr_sha256': hashlib.sha256(stderr).hexdigest(),
+            'start_stderr_bytes': len(stderr), 'container_running': False,
+            'container_oom_killed': False, 'container_exit_code': 127})
+        self.assertNotIn('PRIVATE_', json.dumps(diagnostic))
+        valid_state = state
+        for change in ({'Running': 0}, {'OOMKilled': 1}, {'ExitCode': True}, {'ExitCode': -1},
+                       {'ExitCode': 256}):
+            state = {**valid_state, **change}
+            with self.subTest(change=change), patch.object(Path, 'stat', return_value=socket), \
+                    patch.dict(globals(), {'checked': docker, 'command': start,
+                        'snapshot': lambda *args: 'e' * 64, 'cleanup': lambda name: cleaned.append(name)}):
+                with self.assertRaises(CheckError) as failure:
+                    run(Path('/public-elf'), image, 'unix:///local-socket')
+            self.assertEqual(str(failure.exception), 'LOCAL_CONTAINER_STATE_FORMAT_REQUIRED')
+            self.assertIsNone(failure.exception.diagnostic)
+
+    def test_real_nonzero_child_safe_start_receipt_is_strictly_adopted(self):
+        diagnostic = {'start_exit_code': 17, 'start_stdout_sha256': 'c' * 64,
+            'start_stdout_bytes': 4, 'start_stderr_sha256': 'd' * 64, 'start_stderr_bytes': 8,
+            'container_running': False, 'container_oom_killed': False, 'container_exit_code': 127}
+        payload = {'linux_projected_trust_test': 'FAIL', 'test_execution': 'UNKNOWN',
+                   'start_diagnostic': diagnostic}
+        message = 'NODEGUARD_TRUST_LINUX_FAILED category=LOCAL_DOCKER_START_FAILED; input values omitted\n'
+        child = subprocess.run([sys.executable, '-c',
+            'import sys; sys.stdout.write(' + repr(json.dumps(payload) + '\n') +
+            '); sys.stderr.write(' + repr(message) + '); sys.exit(5)'], capture_output=True, timeout=10)
+        self.assertEqual(child.returncode, 5)
+        receipt = child_failure_receipt(child.returncode, child.stdout, child.stderr)
+        self.assertEqual(receipt['category'], 'LOCAL_DOCKER_START_FAILED')
+        self.assertEqual(receipt['test_execution'], 'UNKNOWN')
+        self.assertEqual(receipt.get('start_diagnostic'), diagnostic)
+        self.assertEqual(receipt['stdout_sha256'], hashlib.sha256(child.stdout).hexdigest())
+
+    def test_start_receipt_rejects_oversize_unknown_extra_and_unsafe_types(self):
+        diagnostic = {'start_exit_code': 17, 'start_stdout_sha256': 'c' * 64,
+            'start_stdout_bytes': 4, 'start_stderr_sha256': 'd' * 64, 'start_stderr_bytes': 8,
+            'container_running': False, 'container_oom_killed': False, 'container_exit_code': 127}
+        payload = {'linux_projected_trust_test': 'FAIL', 'test_execution': 'UNKNOWN',
+                   'start_diagnostic': diagnostic}
+        message = b'NODEGUARD_TRUST_LINUX_FAILED category=LOCAL_DOCKER_START_FAILED; input values omitted\n'
+        invalid = [b'PRIVATE_UNKNOWN_BODY', b'\xff', b'[' * 4096 + b'0' + b']' * 4096,
+            json.dumps({**payload, 'secret': 'PRIVATE_BODY'}).encode(),
+            json.dumps({**payload, 'linux_projected_trust_test': 'PASS'}).encode(),
+            json.dumps({**payload, 'test_execution': 'PASS'}).encode()]
+        for change in ({'start_exit_code': True}, {'start_stdout_bytes': OUTPUT_LIMIT + 1},
+                       {'start_stdout_sha256': 'z' * 64}, {'container_running': 0},
+                       {'start_exit_code': -256}, {'container_oom_killed': 1},
+                       {'container_exit_code': -1}, {'container_exit_code': 256},
+                       {'secret': 'PRIVATE_BODY'}):
+            invalid.append(json.dumps({**payload, 'start_diagnostic': {**diagnostic, **change}}).encode())
+        duplicate = json.dumps(payload).replace('"container_exit_code": 127',
+                                                  '"container_exit_code": 127, "container_exit_code": 0')
+        invalid.append(duplicate.encode())
+        child = subprocess.run([sys.executable, '-c',
+            'import sys; sys.stdout.buffer.write(b"PRIVATE_BODY" * ' + str(OUTPUT_LIMIT) +
+            '); sys.stderr.buffer.write(' + repr(message) + '); sys.exit(5)'], capture_output=True, timeout=10)
+        self.assertGreater(len(child.stdout), OUTPUT_LIMIT)
+        invalid.append(child.stdout)
+        for stdout in invalid:
+            with self.subTest(length=len(stdout)):
+                receipt = child_failure_receipt(5, stdout, message)
+                self.assertEqual(receipt['category'], 'UNKNOWN')
+                self.assertNotIn('start_diagnostic', receipt)
+                self.assertNotIn('PRIVATE_', json.dumps(receipt))
+
     def test_one_executed_test_required(self):
         output = ('running 1 test\ntest ' + TEST + ' ... ok\n'
                   'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out;\n').encode()
@@ -549,6 +721,9 @@ def main():
 if __name__ == '__main__':
     try: main()
     except CheckError as error:
+        if valid_start_diagnostic(error.diagnostic):
+            print(json.dumps({'linux_projected_trust_test': 'FAIL', 'test_execution': 'UNKNOWN',
+                              'start_diagnostic': error.diagnostic}, sort_keys=True))
         raise SystemExit('NODEGUARD_TRUST_LINUX_FAILED category=' + str(error) + '; input values omitted') from None
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
         raise SystemExit('NODEGUARD_TRUST_LINUX_FAILED; input values omitted') from None

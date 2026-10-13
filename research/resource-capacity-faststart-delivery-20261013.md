@@ -140,6 +140,18 @@ BFF修改仅位于测试fixture：为owner/runtime配置与唯一临时库绑定
 
 CI新增强制静态协议门；子进程失败先写projected-trust.json再以固定分类失败退出，always保留失败收据。实际凭证门移至昂贵发行镜像构建之前，仍独立执行完整原测试；成功回执在宿主导出后复制入原交付目录。没有跳过、重试、放宽真实身份规则或更改生产信任代码。普通AMD64编译复用原Linux目标卷的独立架构目录，不复制target，保留9.1GiB缓存，剩余空间359GiB；自有测试容器确认清空。新精确提交仍须全部CI门通过，不能以本地通过签发云/Kata/GPU认证。
 
+## 6ee7381 完整CI：测试程序构建环境与执行环境对齐
+
+精确提交`6ee7381e96f909bd20dc84426158b3ca67beb74e`的[CI 38459541091](https://github.com/StateKnot/knotsandbox/actions/runs/38459541091)已结束，四个独立作业成功、verify在第21步失败。67项实际Chromium合同、27.448秒完整产品链、981个源码文件、18组78项独立PG、正式自动化18+5+1+1、官方Prometheus均已核验通过。新安全回执精确分类为`LOCAL_DOCKER_START_FAILED`；执行原信任测试与否仍为UNKNOWN。第22步镜像与第23步宿主导出跳过，第24步仅上传失败回执，第25步依赖停止成功，不能把always上传算作凭证或宿主验收通过。
+
+检查发现此前本地通过的真实凭据ELF是在固定Bookworm镜像内编译，而CI把Ubuntu宿主原生编译的ELF放入Bookworm运行，尚未覆盖系统库兼容边界。本地最小真实ABI对照使用正常C编译产生的`GLIBC_2.38`依赖ELF，在原固定Bookworm、原staging和wrapper中真实返回相同START_FAILED；私有内层输出确认动态加载器缺少该符号。同一C ELF在固定较新运行环境仅完成ABI对照，不能算凭据测试通过。原Bookworm普通编译的真实凭据ELF仍精确1项通过。原CI没有保留其失败ELF或内层输出，不能倒填为该符号已被远端确诊。
+
+新增独立test-builder/export target继承正式builder，在相同锁定工具链、sysroot和已验证原生SQLite环境中离线编译精确凭据测试，复用原release依赖缓存；编译消息必须唯一指向实际测试ELF，先从cache mount复制到普通导出目录，再由scratch导出。测试程序不进入八个正式发行二进制或运行镜像，不覆盖已封存的生产链接证据。CI先完成原服务/runner镜像门，再复用该builder导出测试程序，交给原固定镜像和完整权限测试执行。原Rust测试、staging、capability、UID/GID、公开fixture及错误权限拒绝条件保持。
+
+同时补齐非零start的安全诊断：有界捕获之后先回读真实容器State，派生退出码、Running/OOM、两路输出字节数和SHA；不复制State.Error、路径、原始输出或推测ABI分类。父调用仅接受固定FAIL/UNKNOWN信封与严格字段集合、类型和范围，重复字段、额外字段、敏感文本、过大或深嵌套输出均保持UNKNOWN，不能构造PASS。13项协议全部通过，原10项方法及staging、Rust测试均保持；真实容器执行仍另验。
+
+同ABI目标的本地实际构建、完整两轴审查、公开源码验收和新精确提交全部CI仍需独立通过；ABI对照不是生产信任测试或云/Kata/GPU认证。
+
 ## 下一交付与发布门
 
 按表继续有效期request/limit/overhead和归属账本、PSI/峰值画像，建立可解释的利用率/浪费原因；再做受预算与撤销/GC约束的镜像和节点预准备。GPU先完成独占设备租约、真实归属/显存/计算利用率采集、故障回收和数据残留验收，再评估MIG等共享模式。

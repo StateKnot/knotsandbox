@@ -381,24 +381,29 @@ jobs:
           subprocess.run(['docker', 'pull', lock['prometheus_image']], check=True)
           PY
           cargo test --locked --lib metrics::tests::official_prometheus -- --ignored
+      - name: Build and smoke-test non-root service and runner images
+        run: |
+          docker build --pull --target runtime --tag sandbox-platform:ci .
+          docker build --target runner --tag sandbox-runner:ci .
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges sandbox-platform:ci --version
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /usr/local/bin/sandbox-admission sandbox-platform:ci --help
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /usr/local/bin/sandbox-automation sandbox-platform:ci --help
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges sandbox-runner:ci health
+          service_image="$(docker image inspect --format '{{.Id}}' sandbox-platform:ci)"
+          python3 deploy/api/check_image.py --image "$service_image"
       - name: Verify projected Nodeguard credentials with actual Linux UID and group boundaries
         shell: bash
         run: |
-          CARGO_INCREMENTAL=0 cargo test --locked --test termination_credentials --no-run --message-format=json > .local/nodeguard-trust-build.jsonl
+          docker buildx build --platform linux/amd64 --target nodeguard-trust-test-export --output type=local,dest=.local/nodeguard-trust-test .
           python3 - <<'PY'
           import importlib.util, json, pathlib, re, subprocess
-          messages = [json.loads(line) for line in pathlib.Path('.local/nodeguard-trust-build.jsonl').read_text().splitlines()]
-          executables = {message['executable'] for message in messages
-                         if message.get('reason') == 'compiler-artifact'
-                         and message.get('target', {}).get('name') == 'termination_credentials'
-                         and message.get('profile', {}).get('test') is True
-                         and message.get('executable')}
-          assert len(executables) == 1, 'Expected exact credential test ELF'
+          binary = pathlib.Path('.local/nodeguard-trust-test/termination-credentials').resolve()
+          assert binary.is_file(), 'Expected same-sysroot credential test ELF'
           image = re.search(r'^ARG RUST_IMAGE=(\S+)$', pathlib.Path('Dockerfile').read_text(), re.M).group(1)
           assert re.fullmatch(r'rust:[A-Za-z0-9.-]+@sha256:[a-f0-9]{64}', image), 'Fixed reviewed build image required'
           subprocess.run(['docker', 'pull', '--platform', 'linux/amd64', image], check=True)
           result = subprocess.run(['python3', 'scripts/test-nodeguard-trust-linux.py',
-                                   '--test-binary', str(pathlib.Path(next(iter(executables))).resolve()),
+                                   '--test-binary', str(binary),
                                    '--image', image], capture_output=True)
           receipt = pathlib.Path('.local/nodeguard-credential-evidence/projected-trust.json')
           receipt.parent.mkdir(parents=True, exist_ok=True)
@@ -413,16 +418,6 @@ jobs:
           assert evidence['linux_projected_trust_test'] == 'PASS'
           receipt.write_bytes(result.stdout)
           PY
-      - name: Build and smoke-test non-root service and runner images
-        run: |
-          docker build --pull --target runtime --tag sandbox-platform:ci .
-          docker build --target runner --tag sandbox-runner:ci .
-          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges sandbox-platform:ci --version
-          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /usr/local/bin/sandbox-admission sandbox-platform:ci --help
-          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /usr/local/bin/sandbox-automation sandbox-platform:ci --help
-          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges sandbox-runner:ci health
-          service_image="$(docker image inspect --format '{{.Id}}' sandbox-platform:ci)"
-          python3 deploy/api/check_image.py --image "$service_image"
       - name: Export and verify the Linux amd64 nodeguard host binary
         shell: bash
         run: |

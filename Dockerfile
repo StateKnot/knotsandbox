@@ -33,6 +33,39 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     && cp target/release/sandboxd target/release/sandbox-admin target/release/sandbox-admission target/release/sandbox-runner target/release/sandbox-nodeguard target/release/sandbox-backup-worm target/release/sandbox-credentials target/release/sandbox-automation /artifacts/ \
     && python3 /build/scripts/release/sqlite_build.py --capture-link-output --destination /opt/sandbox-sqlite/evidence
 
+# Compile this test in the same sysroot that will execute it. A native Ubuntu
+# test ELF can require newer glibc symbols than the pinned Bookworm image.
+# Reuse release dependencies without copying test code into production images.
+FROM builder AS nodeguard-trust-test-builder
+RUN --network=none \
+    --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/build/target,id=sandbox-rust-1.98.1-amd64,sharing=locked <<'SH'
+set -eu
+CARGO_INCREMENTAL=0 cargo test --locked --offline --release --test termination_credentials --no-run --message-format=json > /tmp/nodeguard-trust-build.jsonl
+python3 - <<'PY'
+import json
+import pathlib
+import shutil
+
+messages = [json.loads(line) for line in pathlib.Path('/tmp/nodeguard-trust-build.jsonl').read_text().splitlines()]
+executables = {message['executable'] for message in messages
+               if message.get('reason') == 'compiler-artifact'
+               and message.get('target', {}).get('name') == 'termination_credentials'
+               and message.get('profile', {}).get('test') is True
+               and message.get('executable')}
+assert len(executables) == 1, 'Expected exact credential test ELF'
+binary = pathlib.Path(next(iter(executables)))
+assert not binary.is_symlink() and binary.resolve().parent == pathlib.Path('/build/target/release/deps')
+destination = pathlib.Path('/nodeguard-trust-test/termination-credentials')
+destination.parent.mkdir()
+shutil.copyfile(binary, destination)
+destination.chmod(0o555)
+PY
+SH
+
+FROM scratch AS nodeguard-trust-test-export
+COPY --from=nodeguard-trust-test-builder /nodeguard-trust-test/ /
+
 # Export the host service binary with buildx --target nodeguard-export --output.
 # It runs under systemd on certified Kata nodes, not inside an application Pod.
 FROM scratch AS nodeguard-export
