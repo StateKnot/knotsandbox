@@ -31,9 +31,10 @@ PostgreSQL通知队列满会使发送事务COMMIT失败；空hint不是“零提
 | NETWORK_POLICY_ENSURE | 策略对象读取/创建/验证调用 |
 | WORKSPACE_ENSURE | PVC对象读取/创建/验证调用 |
 | POD_ENSURE | Pod对象读取/创建/验证调用 |
+| RESOURCE_CHECKPOINT_COMMIT | 策略/PVC/Pod UID、持久阶段及进度事件的原子提交回执；不代表可信Ready |
 | TRUSTED_READY_COMMIT | 当前launch核验及Ready账务/审计/事件提交ACK |
 
-OK表示该调用返回Ok，ERROR表示返回固定错误码，CANCELLED_UNKNOWN表示已经开始的future被取消/丢弃，远程副作用结果未知。未被poll的future不产生假样本。已有阶段返回值与业务等待语义不改变。缺少事件不是零耗时；这些是控制面调用耗时，不是精确queue latency、PVC provisioning、VMM boot或首次正确执行时间。调用时长相互包含，不能直接相加；pending还可能经历多次调谐，统计启动SLO必须按全部尝试和真实可用证据另算。
+OK表示该调用返回Ok，ERROR表示返回固定错误码，CANCELLED_UNKNOWN表示已经开始的future被取消/丢弃，远程副作用结果未知。未被poll的future不产生假样本。已有阶段返回值与实际未Ready/错误的等待语义不改变；同租约连续调谐只消除成功提交的三个登记阶段间的固定等待，合同见[持久阶段](worker-runtime.md#持久阶段)。缺少事件不是零耗时；这些是控制面调用耗时，不是精确queue latency、PVC provisioning、VMM boot或首次正确执行时间。调用时长相互包含，不能直接相加；pending还可能经历多次调谐，统计启动SLO必须按全部尝试和真实可用证据另算。
 
 ## 验收边界
 

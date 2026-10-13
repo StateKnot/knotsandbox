@@ -36,13 +36,15 @@ runner 只接受本地 Docker；允许显式设置本机 `DOCKER_HOST=unix:///�
 | timers | 正常数据库到期扫描与停止受理 | 前100项受阻仍扫描后续到期项；副本最多受理一条 STOP；真实到期时间不变 |
 | timer_worker | 实际 `Worker.run`，持有100个 workspace 行锁 | 后续实例在原15秒期限内受理 STOP；取消后有界 join / pool close；受阻实例未被改写 |
 | worker_process | 独立 `sandboxd --role worker` 进程，运行后撤销 SQL 权限或持有表锁 | 永久故障非零退出并确认物理数据库连接缺席；锁超时退避后同进程恢复；SIGTERM 正常收尾 |
+| worker_dispatch | 正式0044迁移、TLS PG与实际 Worker.run | hint只触发权威领取；缺提示/重连/到期恢复及池预算不改变 |
+| worker_continuation | 实际 Worker.run、TLS PG与自有Kubernetes transport；6项用例 | 同租约三次UID/阶段/事件提交，可信Ready才完成；未Ready等待5秒；撤权/失租约/政策/epoch拒绝下一资源；单25秒预算/heartbeat；COMMIT前回滚及真实双端TLS已提交ACK丢失分别验收 |
 | output_identity | 真实 HTTP / 签名 JWT / 延迟对象读取 | 读取期间仅禁用身份映射，或原 JWT 到期，均不能返回输出内容 |
 | action_scope | 正常 HTTP 路由、细分 scope 与本地 grant | 当前令牌动作上限不能被写入、输出流或自动化持久委派放大；通用 profile 兼容合同另保留 |
 | capabilities | 正常 PostgreSQL / 签名 JWT / HTTP 能力查询 | 未挂载自动化时明确返回 `automation: null`；项目/租户隔离及实时撤权继续生效；能力查询不授变更权限 |
 | bootstrap_prerequisite | 既有 database 初始化与 RLS 集成，在新建 bootstrap 专用库运行 | 正常初始化集群配置；强制 RLS 隔离和事务上下文清理通过，才允许继续引导回归 |
 | bootstrap / grants / executions / file_transfers | 受本次共享授权改动影响的既有 PostgreSQL / HTTP 集成 | 正常引导、撤权/版本/幂等、执行账本与文件传输合同继续通过；不是只跑新增测试 |
 
-runner从普通Cargo JSON定位本次可执行文件，拒绝缺失、多个候选、符号链接和不一致target布局。必需测试必须实际发现；精确匹配通过数与完成标志，零项测试不算成功。历史升级组必须且只能执行一个ignored用例，同时输出 `AUTO_UPGRADE_V41_CURRENT_FACTS_OLD_MIGRATOR_REFUSAL_VERIFIED`、`AUTO_UPGRADE_NONEMPTY_HISTORY_SCHEMA42_ACK_CURRENT_REPLAY_REVOKE_VERIFIED` 和 `AUTO_UPGRADE_UNKNOWN_FAILED_DISTINCT_SOURCES_ACK_REPLAY_ISOLATION_VERIFIED`；缺失任一marker、异常用例数或失败状态均不能通过。每组测试后核对正式迁移账本版本与源码SHA384；当前要求42条1..37加39..43，0038永久保留。
+runner从普通Cargo JSON定位本次可执行文件，拒绝缺失、多个候选、符号链接和不一致target布局。必需测试必须实际发现；精确匹配通过数与完成标志，零项测试不算成功。历史升级组必须且只能执行一个ignored用例，同时输出 `AUTO_UPGRADE_V41_CURRENT_FACTS_OLD_MIGRATOR_REFUSAL_VERIFIED`、`AUTO_UPGRADE_NONEMPTY_HISTORY_SCHEMA42_ACK_CURRENT_REPLAY_REVOKE_VERIFIED` 和 `AUTO_UPGRADE_UNKNOWN_FAILED_DISTINCT_SOURCES_ACK_REPLAY_ISOLATION_VERIFIED`；缺失任一marker、异常用例数或失败状态均不能通过。每组测试后核对正式迁移账本版本与源码SHA384；当前要求43条1..37加39..44，0038永久保留。
 
 升级组的 `record.json` 记录 `schema_preparation.mode=TEST_INSTALLS_V41_THEN_CURRENT`、`pre_run_user_relation_count=0` 和三个完成marker。它验证真实schema前缀、42 owner已阅历史及当前独立LOGIN合法来源转换，未使用已签名旧发行包或运行完整controller未知结果恢复。配额状态是合法账务夹具，LEGAL保护不是备份保护；本轮不覆盖非空备份及真实worker资源释放。旧Migrator的 `VersionMissing` 拒绝不是旧API/worker二进制拒绝启动，也不是完整回退验收；当前runtime迁移检查允许自身所需checksum完整的成功较新schema。详细语义和生产升级步骤见[数据库升级](database-upgrade.md)。
 

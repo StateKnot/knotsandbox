@@ -23,11 +23,15 @@ Worker 启动立即扫描已有操作，随后在提示、任务完成和固定5
 
 ## 持久阶段
 
-每次领取推进一个阶段：验证策略对象并记录 UID → 验证 PVC 并记录 UID → 验证 Pod 并记录 UID → 验证当前代际 Ready 并完成操作。PVC 的 `WaitForFirstConsumer` 不会造成调谐死锁：允许先创建 Pending PVC，再创建消费者 Pod，最终 Ready 时要求 PVC 为 Bound。
+受监督的 Worker 在同一租约内最多执行四轮：验证策略对象并提交 UID/阶段/进度事件 → 验证 PVC 并提交 → 验证 Pod 并提交 → 验证当前代际 Ready。只有前三种固定资源登记事务收到成功提交回执才立即继续；已有资源仍核验 UID 和完整 spec。PVC 的 `WaitForFirstConsumer` 不会造成调谐死锁：允许先创建 Pending PVC，再创建消费者 Pod，最终 Ready 时要求 PVC 为 Bound。
+
+每个登记事务原子写入 `external_resources`、`operations.stage` 和 `operation.progressed` 事件；Pod 登记同时写入 `pod_uid` 并清除历史 Ready 字段。进度事件版本在已锁定操作内独立递增，payload 保留当前 `lease_token`，同一租约的多个检查点不会覆盖事件。事件写入后再次检查 RUNNING、owner、token 和真实期限；失租约时全部回滚。COMMIT 回执丢失即使数据库事实上已提交也不继续旧批次：按原错误分类退避或退出，新领取按固定名称与账本恢复，不重复 POST。资源登记及进度事件不代表可信 Ready，也不释放配额。
 
 固定 Pod、PVC、CNP 名称帮助恢复“远程创建成功、账本提交前进程崩溃”。新 worker 会读取固定名、严格核验归属和完整受控 spec 后，记录同一 UID。已记录 UID 不匹配或对象消失时不创建替代物。PVC 账本标记 DELETED 也不是为同一工作区创建空卷的授权；必须调查数据状态。
 
-每个远程阶段之前和之后都用短事务检查 workspace → instance → operation 锁、worker lease token、当前代际/launch/epoch、计算截止时间、期望状态以及当前授权。租约 30 秒，每 10 秒续约；单阶段最长 25 秒。数据库事务不跨远程请求。失租约后取消本地等待不代表撤销已发出的远程请求：部署的准入服务必须独立根据权威账本拒绝过时代际和已撤销运行意图，不能仅依靠 worker 的调用前检查。
+每轮及每个远程阶段之前和之后都用短事务检查 workspace → instance → operation 锁、worker lease token、当前代际/launch/epoch、计算截止时间、期望状态以及当前授权。租约 30 秒，每 10 秒续约；同一领取的整个批次共用最长 25 秒，继续不重置时间预算或生成新租约。数据库事务不跨远程请求。失租约后取消本地等待不代表撤销已发出的远程请求：部署的准入服务必须独立根据权威账本拒绝过时代际和已撤销运行意图，不能仅依靠 worker 的调用前检查。
+
+实际未 Ready 仍写入 `WAITING_READY` 并等待 5 秒；错误继续使用原指数退避。公开 `Worker::reconcile` 的恢复工具接口保留一次调用只推进一个持久阶段、成功登记后释放租约并重试 1 秒的合同；只有受监督的 `Worker::run` 执行上述有界批次。诊断、停止、删除、重启的停止部分与执行路由没有连续创建语义。
 
 成功 Ready 要求当前 launch 的唯一容器 Ready 且 Running、Pod Ready、PVC Bound，以及仍与账本一致的 CNP/PVC/Pod UID 与 spec。随后同一事务写入 5 个 `ready_*` 字段、实例 RUNNING、操作 SUCCEEDED、配额 PENDING→ALLOCATED、审计及事件。后续命令发出前仍需要新鲜 Kubernetes 核验；历史 Ready 字段不保证节点持续健康。
 

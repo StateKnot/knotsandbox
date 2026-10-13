@@ -19,6 +19,7 @@ pub(crate) enum ObservedPhase {
     NetworkPolicyEnsure,
     WorkspaceEnsure,
     PodEnsure,
+    ResourceCheckpointCommit,
     TrustedReadyCommit,
 }
 
@@ -32,6 +33,7 @@ impl ObservedPhase {
             Self::NetworkPolicyEnsure => "NETWORK_POLICY_ENSURE",
             Self::WorkspaceEnsure => "WORKSPACE_ENSURE",
             Self::PodEnsure => "POD_ENSURE",
+            Self::ResourceCheckpointCommit => "RESOURCE_CHECKPOINT_COMMIT",
             Self::TrustedReadyCommit => "TRUSTED_READY_COMMIT",
         }
     }

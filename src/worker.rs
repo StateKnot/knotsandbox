@@ -27,6 +27,44 @@ use crate::{
 #[path = "worker_dispatch.rs"]
 mod dispatch;
 
+#[derive(Clone, Copy)]
+enum ResourceCheckpoint {
+    Policy,
+    Volume,
+    Pod,
+}
+
+impl ResourceCheckpoint {
+    fn kind(self) -> &'static str {
+        match self {
+            Self::Policy => "CILIUM_POLICY",
+            Self::Volume => "PVC",
+            Self::Pod => "POD",
+        }
+    }
+
+    fn stage(self) -> &'static str {
+        match self {
+            Self::Policy => "POLICY_RECORDED",
+            Self::Volume => "VOLUME_RECORDED",
+            Self::Pod => "POD_RECORDED",
+        }
+    }
+
+    fn reason(self) -> &'static str {
+        match self {
+            Self::Policy => "POLICY_OBJECT_CREATED",
+            Self::Volume => "PVC_OBJECT_CREATED",
+            Self::Pod => "POD_OBJECT_CREATED",
+        }
+    }
+}
+
+enum ReconcileOutcome {
+    CheckpointCommitted(ResourceCheckpoint),
+    DeferredOrComplete,
+}
+
 #[derive(Clone)]
 pub struct Worker {
     pub engine: OperationEngine,
@@ -357,7 +395,7 @@ impl Worker {
                 }
             };
             tokio::select! {
-                result = self.reconcile(&claim) => result,
+                result = self.reconcile_batch(&claim) => result,
                 _ = tokio::time::sleep(Duration::from_secs(25)) => Err(blocked("RUNTIME_REQUEST_TIMEOUT")),
                 result = keep_alive => result,
             }
@@ -369,6 +407,19 @@ impl Worker {
             self.defer_error(&claim, error).await?;
         }
         Ok(())
+    }
+
+    async fn reconcile_batch(&self, claim: &Claim) -> Result<(), ApiError> {
+        // Three distinct resource checkpoints plus a final observation. The
+        // caller's single timeout/heartbeat covers the entire batch; continuing
+        // never grants a fresh lease or a fresh wall-clock budget.
+        for _ in 0..4 {
+            match self.reconcile_step(claim).await? {
+                ReconcileOutcome::CheckpointCommitted(_) => {}
+                ReconcileOutcome::DeferredOrComplete => return Ok(()),
+            }
+        }
+        Err(blocked("RECONCILE_CHECKPOINT_BUDGET_EXHAUSTED"))
     }
 
     async fn defer_error(&self, claim: &Claim, error: ApiError) -> Result<(), ApiError> {
@@ -397,6 +448,19 @@ impl Worker {
     /// One durable stage, exposed to integration tests and recovery tooling.
     /// Callers must hold the lease; this function checks it before and after I/O.
     pub async fn reconcile(&self, claim: &Claim) -> Result<(), ApiError> {
+        match self.reconcile_step(claim).await? {
+            ReconcileOutcome::CheckpointCommitted(checkpoint) => {
+                // Preserve the public recovery/tooling interface's one-stage
+                // release and retry. Only the supervised worker runs a batch.
+                self.engine
+                    .wait(claim, checkpoint.stage(), checkpoint.reason(), 1)
+                    .await
+            }
+            ReconcileOutcome::DeferredOrComplete => Ok(()),
+        }
+    }
+
+    async fn reconcile_step(&self, claim: &Claim) -> Result<ReconcileOutcome, ApiError> {
         observe(
             Some(claim),
             ObservedPhase::ReconcileAttempt,
@@ -405,7 +469,7 @@ impl Worker {
         .await
     }
 
-    async fn reconcile_stage(&self, claim: &Claim) -> Result<(), ApiError> {
+    async fn reconcile_stage(&self, claim: &Claim) -> Result<ReconcileOutcome, ApiError> {
         // Execution dispatch has its own durable at-most-one-attempt gate. The
         // generic worker must never send or replay a guest command.
         let mut tx = self.engine.database.begin(claim.tenant_id).await?;
@@ -422,7 +486,8 @@ impl Worker {
                 .engine
                 .database
                 .reconcile_diagnosis(&self.engine, claim)
-                .await;
+                .await
+                .map(|_| ReconcileOutcome::DeferredOrComplete);
         }
         if kind == "EXECUTE" {
             return self
@@ -433,14 +498,18 @@ impl Worker {
                     "EXECUTION_DISPATCHER_REQUIRED",
                     30,
                 )
-                .await;
+                .await
+                .map(|_| ReconcileOutcome::DeferredOrComplete);
         }
         let (tx, snapshot) = self.lock_snapshot(claim).await?;
         tx.commit().await?;
         let manifests = build_manifests(&snapshot.context(), &self.manifests)
             .map_err(|e| runtime_error(e.into()))?;
         if !snapshot.compute() {
-            return self.stop_stage(claim, &snapshot, &manifests.pod).await;
+            return self
+                .stop_stage(claim, &snapshot, &manifests.pod)
+                .await
+                .map(|_| ReconcileOutcome::DeferredOrComplete);
         }
         observe(Some(claim), ObservedPhase::RuntimeClassVerify, async {
             self.runtime
@@ -466,12 +535,20 @@ impl Worker {
         })
         .await?;
         if known_policy.is_none() {
-            self.record_resource(claim, &snapshot, "CILIUM_POLICY", uid(&policy.metadata)?)
-                .await?;
-            return self
-                .engine
-                .wait(claim, "POLICY_RECORDED", "POLICY_OBJECT_CREATED", 1)
-                .await;
+            observe(
+                Some(claim),
+                ObservedPhase::ResourceCheckpointCommit,
+                self.record_resource(
+                    claim,
+                    &snapshot,
+                    uid(&policy.metadata)?,
+                    Some(ResourceCheckpoint::Policy),
+                ),
+            )
+            .await?;
+            return Ok(ReconcileOutcome::CheckpointCommitted(
+                ResourceCheckpoint::Policy,
+            ));
         }
         self.check_current(claim, &snapshot).await?;
         let known_pvc = resources.get("PVC").map(String::as_str);
@@ -483,12 +560,20 @@ impl Worker {
         })
         .await?;
         if known_pvc.is_none() {
-            self.record_resource(claim, &snapshot, "PVC", uid(&pvc.metadata)?)
-                .await?;
-            return self
-                .engine
-                .wait(claim, "VOLUME_RECORDED", "PVC_OBJECT_CREATED", 1)
-                .await;
+            observe(
+                Some(claim),
+                ObservedPhase::ResourceCheckpointCommit,
+                self.record_resource(
+                    claim,
+                    &snapshot,
+                    uid(&pvc.metadata)?,
+                    Some(ResourceCheckpoint::Volume),
+                ),
+            )
+            .await?;
+            return Ok(ReconcileOutcome::CheckpointCommitted(
+                ResourceCheckpoint::Volume,
+            ));
         }
         self.check_current(claim, &snapshot).await?;
         let known_pod = resources.get("POD").map(String::as_str);
@@ -503,19 +588,28 @@ impl Worker {
         })
         .await?;
         if known_pod.is_none() {
-            self.record_resource(claim, &snapshot, "POD", uid(&pod.metadata)?)
-                .await?;
-            return self
-                .engine
-                .wait(claim, "POD_RECORDED", "POD_OBJECT_CREATED", 1)
-                .await;
+            observe(
+                Some(claim),
+                ObservedPhase::ResourceCheckpointCommit,
+                self.record_resource(
+                    claim,
+                    &snapshot,
+                    uid(&pod.metadata)?,
+                    Some(ResourceCheckpoint::Pod),
+                ),
+            )
+            .await?;
+            return Ok(ReconcileOutcome::CheckpointCommitted(
+                ResourceCheckpoint::Pod,
+            ));
         }
         self.check_current(claim, &snapshot).await?;
         if !ready(&pod, &pvc, snapshot.launch_id) {
             return self
                 .engine
                 .wait(claim, "WAITING_READY", "CURRENT_LAUNCH_NOT_READY", 5)
-                .await;
+                .await
+                .map(|_| ReconcileOutcome::DeferredOrComplete);
         }
         observe(
             Some(claim),
@@ -523,6 +617,7 @@ impl Worker {
             self.mark_ready(claim, &snapshot, uid(&pod.metadata)?),
         )
         .await
+        .map(|_| ReconcileOutcome::DeferredOrComplete)
     }
 
     async fn lock_snapshot<'a>(
@@ -653,11 +748,17 @@ impl Worker {
         &self,
         claim: &Claim,
         previous: &Snapshot,
-        kind: &str,
         uid: &str,
+        checkpoint: Option<ResourceCheckpoint>,
     ) -> Result<(), ApiError> {
         let (mut tx, s) = self.lock_snapshot(claim).await?;
         same_launch(previous, &s)?;
+        // None is reserved for adopting an already accepted cleanup's Pod.
+        // Compute progress has only these three fixed resource identities.
+        if checkpoint.is_some() != s.compute() {
+            return Err(blocked("RESOURCE_CHECKPOINT_SCOPE_MISMATCH"));
+        }
+        let kind = checkpoint.map_or("POD", ResourceCheckpoint::kind);
         let generation = if kind == "POD" { s.generation } else { 1 };
         let owner = if kind == "PVC" {
             s.workspace_id
@@ -672,6 +773,22 @@ impl Worker {
             let pod_uid = Uuid::parse_str(uid).map_err(|_| blocked("INVALID_POD_UID"))?;
             sqlx::query("UPDATE instances SET pod_uid=$3,observed_state='STARTING',observed_at=clock_timestamp(),ready_generation=NULL,ready_launch_id=NULL,ready_pod_uid=NULL,ready_cluster_epoch=NULL,ready_observed_at=NULL WHERE tenant_id=$1 AND id=$2")
                 .bind(s.tenant_id).bind(s.instance_id).bind(pod_uid).execute(&mut *tx).await?;
+        }
+        if let Some(checkpoint) = checkpoint {
+            // The operation row is already locked. Versions order checkpoints
+            // independently of the lease token: several stages share one lease.
+            let version: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(aggregate_version),0)+1 FROM domain_events WHERE tenant_id=$1 AND aggregate_id=$2 AND event_type='operation.progressed'")
+                .bind(s.tenant_id).bind(claim.operation_id).fetch_one(&mut *tx).await?;
+            sqlx::query("INSERT INTO domain_events(tenant_id,project_id,aggregate_id,aggregate_version,event_type,operation_id,request_id,payload) VALUES($1,$2,$3,$4,'operation.progressed',$3,$5,$6)")
+                .bind(s.tenant_id).bind(s.project_id).bind(claim.operation_id).bind(version).bind(s.request_id)
+                .bind(json!({"stage":checkpoint.stage(),"resource_kind":kind,"provider_id":uid,"generation":generation,"lease_token":claim.lease_token,"launch_id":s.launch_id,"cluster_epoch":s.cluster_epoch})).execute(&mut *tx).await?;
+            // Event publication can wait on another writer. Recheck the lease
+            // after that wait and roll back UID/event/stage together if stale.
+            let updated = sqlx::query("UPDATE operations SET stage=$3,wait_reason=NULL,updated_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2 AND status='RUNNING' AND lease_owner=$4 AND lease_token=$5 AND lease_until>clock_timestamp()")
+                .bind(s.tenant_id).bind(claim.operation_id).bind(checkpoint.stage()).bind(self.engine.worker_id()).bind(claim.lease_token).execute(&mut *tx).await?;
+            if updated.rows_affected() != 1 {
+                return Err(blocked("WORKER_LEASE_LOST"));
+            }
         }
         tx.commit().await?;
         Ok(())
@@ -746,7 +863,7 @@ impl Worker {
             {
                 Some(found) => {
                     let uid = uid(&found.metadata)?.to_owned();
-                    self.record_resource(claim, s, "POD", &uid).await?;
+                    self.record_resource(claim, s, &uid, None).await?;
                     Some(uid)
                 }
                 None => None,

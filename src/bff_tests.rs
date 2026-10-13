@@ -357,6 +357,14 @@ impl Fixture {
     }
     async fn close(self) -> anyhow::Result<()> {
         let owner_role = self.owner.connect_options().get_username().to_owned();
+        let runtime_role = self
+            .runtime
+            .app
+            .database
+            .pool
+            .connect_options()
+            .get_username()
+            .to_owned();
         for t in self.tasks {
             t.abort();
             let _ = t.await;
@@ -365,17 +373,55 @@ impl Fixture {
         self.owner.close().await;
         drop(self.runtime);
         drop(self.keys);
-        let peers:Vec<(String,String,String)>=sqlx::query_as("SELECT usename,COALESCE(state,''),COALESCE(wait_event,'') FROM pg_stat_activity WHERE datname=$1").bind(&self.database_name).fetch_all(&self.admin).await?;
+        let peers:Vec<(String,String,String,bool)>=sqlx::query_as("SELECT usename,COALESCE(state,''),COALESCE(wait_event,''),xact_start IS NOT NULL FROM pg_stat_activity WHERE datname=$1").bind(&self.database_name).fetch_all(&self.admin).await?;
         let actual_owner: String =
             sqlx::query_scalar("SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname=$1")
                 .bind(&self.database_name)
                 .fetch_one(&self.admin)
                 .await?;
+        let cleanup_safe = actual_owner == owner_role
+            && peers.iter().all(|(role, state, wait, _)| {
+                role == &owner_role && state == "idle" && wait == "ClientRead"
+            });
+        if !cleanup_safe {
+            // Fixed metadata only: never emit database names, logins, queries,
+            // URLs or credentials while diagnosing a refused fixture cleanup.
+            eprintln!(
+                "BFF_FIXTURE_CLEANUP_REFUSED owner_matches={} peers={}",
+                actual_owner == owner_role,
+                peers.len()
+            );
+            for (role, state, wait, xact_open) in &peers {
+                let class = if role == &owner_role {
+                    "OWNER"
+                } else if role == &runtime_role {
+                    "RUNTIME"
+                } else {
+                    "FOREIGN"
+                };
+                let state = match state.as_str() {
+                    "active"
+                    | "idle"
+                    | "idle in transaction"
+                    | "idle in transaction (aborted)"
+                    | "fastpath function call"
+                    | "disabled" => state.as_str(),
+                    _ => "OTHER",
+                };
+                let wait = if wait.len() <= 64
+                    && wait.bytes().all(|v| v.is_ascii_alphanumeric() || v == b'_')
+                {
+                    wait.as_str()
+                } else {
+                    "OTHER"
+                };
+                eprintln!(
+                    "BFF_FIXTURE_CLEANUP_PEER role={class} state={state} wait={wait} xact_open={xact_open}"
+                );
+            }
+        }
         anyhow::ensure!(
-            actual_owner == owner_role
-                && peers.iter().all(|(role, state, wait)| role == &owner_role
-                    && state == "idle"
-                    && wait == "ClientRead"),
+            cleanup_safe,
             "fixture cleanup refuses unexpected owner, active or foreign connections"
         );
         // Use only an ordinary DROP. An idle migration-owner socket can survive

@@ -197,3 +197,11 @@ Capture 独立首建专项在 695 文件源 `dffed1b4ebaf31e90c73280b43d1a5118d8
 0044的空提示/重订阅扫描、并发槽续填、单连接回退及八种控制面调用观测已开发。当前原生strict all-target Clippy/fmt、四项异步观测、三项端口合同、新队列3项/原worker4项/实际进程1项/非空历史升级1项均通过，正常账本43条（1..37+39..44）。两轮当前源码真实Chrome/Keycloak/BFF/API/TLS PG各1/1通过，来源、产物、业务事实及清理核验完整；保留一次登记response body不可用失败，原因未定位，固定诊断不视为根因修复。
 
 开发范围、独立证据和剩余认证见[本批交付记录](../research/startup-dispatch-delivery-20261013.md)及[开发表第12节](../research/rust-sandbox-development-workbreakdown.md)。
+
+### 已提交阶段连续调谐交付（2026-10-13）
+
+受监督Worker同租约最多四轮，策略/PVC/Pod的UID、阶段与进度事件同事务收到提交回执后立即继续；未Ready/错误保留原退避，共用25秒总预算及heartbeat。公开单阶段恢复接口兼容；登记不产生Ready或提前释放配额。新增登记提交观测后，当前共九种控制面调用观测，无新迁移或权限扩大。
+
+本批新增6项真实TLS PG、原恢复4项、调度3项、实际进程1项、历史升级1项共15项全部通过，正常43条迁移逐项核SHA384；源码/制品/SDK稳定及自有容器/进程清理确认。四项异步观测、原生严格全仓Clippy/fmt通过。真实已提交ACK丢失下旧批次停止、token2恢复相同UID、唯一POST、可信Ready及连接退役均有实际断言；测试代理的TLS flush与收尾顺序问题已保留失败记录并修复重验。
+
+上一公共提交的CI在BFF清理安全检查失败，本机原始与诊断源码20项PG检查未复现；当前只补失败路径固定诊断，不宣称修复根因，仍需核对新CI。G2-04/G2-05、资源效率及GPU等完整工作包仍开发中。见[交付记录](../research/worker-continuation-delivery-20261013.md)与[开发表12.2](../research/rust-sandbox-development-workbreakdown.md#122-已提交阶段连续调谐交付2026-10-13)。
