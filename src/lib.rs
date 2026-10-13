@@ -35,6 +35,7 @@ pub mod runtime_manifest;
 pub mod timers;
 
 pub mod worker;
+mod worker_observation;
 
 pub mod gateway_protocol;
 

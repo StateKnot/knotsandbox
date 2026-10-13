@@ -3,8 +3,9 @@
 The normal API and independent `sandbox-automation` worker use formal migration
 0039, the 0040 SERVICE identity binding contract, 0041 private scan metadata,
 0042 anomaly notifications, and 0043 scoped deferred file-activity validation with
-the embedded checksum ledger. The complete formal ledger is 1..37 + 39..43
-(42 migrations). Migration 0038 was never published and
+the embedded checksum ledger. Migration 0044 adds lifecycle-worker dispatch hints
+without changing automation authority. The complete formal ledger is 1..37 + 39..44
+(43 migrations). Migration 0038 was never published and
 is permanently reserved; it must not be backfilled later. Future restore
 promotion requires a new higher version. Automation has no restore dependency;
 restore routes and partial-schema refusal remain closed independently.

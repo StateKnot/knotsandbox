@@ -135,7 +135,7 @@ Linux v6不可变668文件源码点 `7be7c22a0af3765adbd4033f32bfcd18f7658497f8a
 | G1-10 | 底座闭环验收 | 未开始 | — |
 | G1-11 | GPU节点与运行时 | 未开始 | P0并行硬件验证；锁版本/真实SKU、GPU设备组Kata直通、许可与IOMMU/ACS、driver/guest、reset/残留/隔离/fencing；未经认证不开GPU |
 | G1-12 | 资源感知节点弹性 | 未开始 | P1；预算/库存/min-max/HA/暖池与云adapter、可信drain及IaC对账；现有固定受保护节点仍不自动删 |
-| G2-01 | 领域库与配额 | 开发中 | 正式迁移当前0001..0037加0039..0043，共42条；38永久未发布，未来restore须新版本。执行器继续逐项核SHA384、无伪账本；0040绑定SERVICE/client与委派generation，0041增加私有公平扫描元数据，0042同事务派生异常通知，0043修复受限组件提交时延迟文件活动检查的作用域。既有41条账本与并发/RLS/幂等/不可变资源/租约证据保留；新增迁移的本轮验收结果另记，不继承旧检查点的通过状态 |
+| G2-01 | 领域库与配额 | 开发中 | 正式迁移当前0001..0037加0039..0044，共43条；38永久未发布，未来restore须新版本。执行器继续逐项核SHA384、无伪账本；0040绑定SERVICE/client与委派generation，0041增加私有公平扫描元数据，0042同事务派生异常通知，0043修复受限组件提交时延迟文件活动检查的作用域，0044添加不携租户数据的worker唤醒提示。既有41条账本与并发/RLS/幂等/不可变资源/租约证据保留；新增迁移的本轮验收结果另记，不继承旧检查点的通过状态 |
 | G2-02 | 产品身份授权 | 开发中 | src/auth.rs、产品grant与主体停用检查；监控查询后重查issuer/subject映射、本地授权和token到期；正式0037下BFF 10项PG/OIDC/HTTP及真实跨站Keycloak/Chrome登录→操作→撤权验收通过，显式Subject mapper修复生产客户端缺sub；密文服务端会话、单次refresh与长流撤销已接入；账户管理待完成 |
 | G2-03 | 通用API契约 | 开发中 | src/api.rs、src/request.rs、openapi；当前为已实现子集 |
 | G2-04 | 操作引擎 | 开发中 | 真实stage调谐、UID持久化、恢复、heartbeat/退避、TTL扫描；专用终止队列与启动登记公平扫描，可信终止账本专项12项PG回归通过；0019通过真实历史升级回归修复RLS导致的队列回填遗漏 |
@@ -154,7 +154,7 @@ Linux v6不可变668文件源码点 `7be7c22a0af3765adbd4033f32bfcd18f7658497f8a
 | G3-04 | 事件与通知 | 开发中 | 已有受租户项目隔离的SSE事件流与控制台断点重连/撤权清空证据；0042异常收件箱及正常分页/详情/幂等确认API已接SDK和UI。真实BFF异常ACK丢回执、UNKNOWN重载、读写撤权、原键/旧ETag重放和业务事实不变已通过；外发Webhook、归档保留、事件/通知容量及目标云入口慢消费者仍待验收 |
 | G3-05 | 安全防护 | 开发中 | 正式1..37上的只读/security API、OpenAPI/SDK/控制台已接入；实际PG/JWT/JWKS/真实Node SDK安全专项8项及capabilities 1项通过，最后DB时钟判定权限期限；压缩文档展开上限、数值精度、历史证据、optional脱敏与撤权已测，5组OpenAPI合同和2项Chrome HTTP合同通过。期望/历史/独立证据分离，独立认证仍UNKNOWN；持久隔离/解除隔离、拒绝历史和镜像认证待开发 |
 | G3-06 | 健康诊断 | 开发中 | 持久只读报告/120秒截止/30天保留与当前权限脱敏已接worker/API/OpenAPI/SDK/控制台；独立能力、结构化证据、原期限有界GET与请求记录重开已实现，8项PG/HTTP/JWT、capabilities1项及真实Chrome/OIDC/正常worker全链通过；guest探测与自动修复未实现 |
-| G3-07 | 定时与事件自动化 | 开发中 | 独立0039及0040 SERVICE绑定/0041公平扫描/0042通知、八条管理API、专用worker与固定最小权限已实现；版本1能力合同贯通API/SDK/控制台。原业务18、新通知PG5/签名HTTP1、独立进程1及真实BFF异常确认整链1/1证据保留。当前完整安装要求42条正式迁移1..37+39..43，无38；0043验收须绑定新源码，原41条通过记录不变。实云副作用、HA/执行容量和统一Linux八ELF安全签名发布待验收 |
+| G3-07 | 定时与事件自动化 | 开发中 | 独立0039及0040 SERVICE绑定/0041公平扫描/0042通知、八条管理API、专用worker与固定最小权限已实现；版本1能力合同贯通API/SDK/控制台。原业务18、新通知PG5/签名HTTP1、独立进程1及真实BFF异常确认整链1/1证据保留。当前完整安装要求43条正式迁移1..37+39..44，无38；0043验收须绑定新源码，原41条通过记录不变。实云副作用、HA/执行容量和统一Linux八ELF安全签名发布待验收 |
 | G3-08 | 备份与恢复产品化 | 开发中 | 冷备份账本、独立库存/签名/可信关闭、owner注册/激活和部署标签验证已有PG/TLS证据；恢复私有受理、Job/Pod/调度与历史控制、STOPPED交付/首次START、never-started DELETE和独立临时GC有新库PG/HTTP/mTLS阶段证据。存储用途映射及初始raw PVC准入/实际Pending父UID与早期PV意图已补齐，无父Bound拒绝已测；生成PV/selected-node/CSI状态、单AZ云身份与START拓扑约束、完整失败收口、正式listener/API及实云验收未完成 |
 | G3-09 | 租户账户与客户端 | 开发中 | 机器身份及项目grant管理已有真实全链；新增独立租户账户审计API/SDK/UI，无需项目选择，脱敏和当前授权5项实际PG/签名HTTP/Node专项通过。人类账户生命周期、MFA/邮件与生产HA待完成 |
 | G3-10 | 产品安装与控制台 | 开发中 | 新增租户账户审计和备份能力UI约束，控制台66单测及新增9项Chrome HTTP合同/生产构建通过；已有OIDC/BFF管理链证据保留，新审计尚未计作BFF全链。必跑CI新增tenant_audit真实数据库suite与SDK制品漂移检查，远端未执行。全产品安装组合、统一Linux八ELF/四OCI签名发布、实云/PKI/HA/容量待完成 |
@@ -190,3 +190,10 @@ owner节点拓扑私有片进一步补齐sealed collector与append-only owner SQ
 随后补齐真实提交故障：693文件源 `d0349441c2e3a0f797a56bb85e719c1f615260a2231de49a16681ad366394ce8` 下拓扑故障/raw_parent/admission三新库各1/1通过（44.57/16.84/39.71秒）。首/末source COMMIT ACK跨两秒认证期限拒绝；同sealed proof的实际锁等待先耗原预算且无row；publication真实COMMIT后ACK延期/真实socket丢ACK均不刷新原proof期限，期限内同proof重放原row，过期Rust拒且SQL历史事实不变。每个测试代理join/实际backend PID缺席，源/hold/配额不变；不认证全部未测失败drain路径或公共reconcile API。receipt `.local/raw-selected-node-candidate-20261008/actual-v2.json`。最新全量334通过、217明确ignored、48程序、0失败，严格Clippy/fmt通过；checkpoint `.local/evidence/checkpoints/read-gc-1791474088459908000/record.json` 的693文件SHA/mode前后不变，随后仅更新两份说明。实云/CSI/Kata、owner安装、生成PV/selected-node/CSI状态、普通START拓扑与完整失败收口仍待开发；正式0038/恢复生产listener/API关闭。
 
 Capture 独立首建专项在 695 文件源 `dffed1b4ebaf31e90c73280b43d1a5118d865779bea13404f84a95a9e9dea143`、全新库 `sandbox_backup_create_acceptance_179147887126977259_test` 下 1/1 通过（0.95 秒），receipt `.local/job-create-backup-candidate-20261009/root-actual-v1.json`。正常 1..37 迁移和确切组件登录，真实共享 AdmissionService/HTTP 创建→GET→正常 record/refetch；记录前无未来绑定/permit/proof，源实例/工作区完整行、hold/配额不变，冲突/篡改和记录后 coherent UID 替换拒绝。该测试为独立 cfg(test) 子例，生产修复未再修改；随后严格 all-target Clippy/fmt 通过，checkpoint `.local/evidence/checkpoints/job-create-http-compile-1791478922361049000/record.json` 前后 695 文件不变。此后尚未重跑普通全量，前述 340/217 属共享修复检查点。CSI 前置观察及 UserInfo 为明确夹具；Seal 仍待正常关闭/handoff后的首次创建，没有实际 Kubernetes/云/CSI/Kata 验收。
+
+
+### 生命周期队列调度与控制面调用观测交付（2026-10-13）
+
+0044的空提示/重订阅扫描、并发槽续填、单连接回退及八种控制面调用观测已开发。当前原生strict all-target Clippy/fmt、四项异步观测、三项端口合同、新队列3项/原worker4项/实际进程1项/非空历史升级1项均通过，正常账本43条（1..37+39..44）。两轮当前源码真实Chrome/Keycloak/BFF/API/TLS PG各1/1通过，来源、产物、业务事实及清理核验完整；保留一次登记response body不可用失败，原因未定位，固定诊断不视为根因修复。
+
+开发范围、独立证据和剩余认证见[本批交付记录](../research/startup-dispatch-delivery-20261013.md)及[开发表第12节](../research/rust-sandbox-development-workbreakdown.md)。

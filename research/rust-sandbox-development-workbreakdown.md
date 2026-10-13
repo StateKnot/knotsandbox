@@ -194,3 +194,35 @@ G2的纯业务代码和契约测试可以提前开展；依赖Kata、网络、�
 G2-07下一子项须先冻结`STOP_AFTER_PLATFORM_IDLE`语义和有界可撤销授权：平台活动槽为空不证明guest无后台工作，启用须满足整VM停止及`instances:hard_stop`授权；后台服务可禁用/保护。配置CAS/幂等、启用计时重置、当前权限及保护复核、启动/重启不被idle取消、未知执行/文件传输保护，与TTL安全停机分开验收。当前后台扫描不能直接作为公开策略上线。
 
 观测首批CI补验检查点（2026-10-12）：已修复Linux本地验收目录权限、Linux测试lint和四平台Terraform锁文件；严格LinuxClippy、真实锁回归、实际Prometheus/WAL/协议链和native Terraform mock通过。远端整套CI按新提交核对，G0-08/G3-12仍开发中，未把GPU或完整资源优化标为完成。见[补验记录](resource-observability-ci-delivery-20261012.md)。
+
+
+## 12 2026-10-13 竞品逆向输入与快启开发顺序
+
+以下是REA方法下固定源码逆向得到的待开发增量，仍复用原61个工作包，不标记为已实现。完整技术、证据与验收见[总报告](sandbox-fast-start-resource-gpu-reverse-engineering-20261013.md)，分项见[CubeSandbox](cubesandbox-reverse-engineering-20261013.md)、[OpenSandbox](opensandbox-reverse-engineering-20261013.md)、[GPU](sandbox-gpu-reverse-engineering-20261013.md)。当前Kata模板与VM缓存仍被认证基线禁止；GPU仍未开通。
+
+| 顺序 | 原编号 | 需要补充的完整开发 | 退出条件 |
+| --- | --- | --- | --- |
+| 1，P0 | G0-07/G0-08/G3-03/G3-12 | accepted/commit/queue/PVC与placement/artifact/VM/策略身份/route/first correct exec分段；有效期容量、warm预算、attempt成功率、cache与pool命中及缺测 | 当前fresh-Kata真实基线；冷暖、失败/UNKNOWN、回收时间与成本全记录，不能用API accepted替代可用 |
+| 2，P0 | G2-04/G2-05 | 持久PG claim加可靠唤醒hint/重连扫描、有界填充并发槽；已提交安全阶段有界继续，保留实际未知/未ready的退避 | 丢/重复通知、进程退出、饥饿、多replica、撤权/旧lease及ACK丢失回归；原等待语义/权限/审计不能被低延迟绕过 |
+| 3，P0 | G1-04/G1-09/G1-12 | 批准镜像/kernel/driver与节点预准备，digest/安全review及cache引用；memory/disk/FD/clean网络槽/min-max的预算与GC | 过期/撤销artifact拒绝，活动引用不清理；cold/miss/补容成本和节点控制故障可见 |
+| 4，P1 | G1-04/G0-06/G2-10 | build/boot/probe/quiesce/snapshot/兼容与secret检查/签名/publish/cache/revoke/GC的独立模板产品链 | 模板不含租户秘密；host/guest/VMM/CPU与网络/存储格式完整组合认证；不直接放开既有factory开关 |
+| 5，P1 | G1-04/G1-05/G1-06/G2-05 | 新认证fast runtime adapter、黄金基线CoW、fresh launch身份/entropy/time/网络、nodeguard许可与真实ready；独立持久workspace | 真KVM恢复/并发/高写入、host每VM及父cgroup预算、跨租户隔离/旧写者/兼容错误/清理后安全cold回退完整通过 |
+| 6，P1 | G2-07/G3-13/G1-12 | 活动/保护与后台/GPU任务区分，owner/trust domain和warm reservation入账，有预算的idle/超分/节点弹性 | UNKNOWN/缺测不误停；同SLO单位成功任务成本有收益；内存不默认超分，受保护固定节点不自动删除 |
+| 7，GPU P0 | G1-11/G2-13/G3-12 | 独占全设备组的profile/原子lease/epoch、guest CUDA、driver与IOMMU、reset/清理/quarantine/fencing和可信归属 | 非法/unsupported请求明确拒绝，GPU-ready为首次正确GPU结果；真实目标SKU/设备残留与双分配故障认证，未过保持禁用 |
+| 8，GPU独立路线 | G3-13/G4-09；MIG另需G1-11/G2-13/G3-12 | 可信GPU服务的OIDC/tenant/project/approved model、fair bounded queue、deadline/cancel/幂等及模型批处理；MIG另profile/代际/支持矩阵 | 推理API与任意CUDA能力分列，time-slicing/MPS不当成默认跨非可信VM隔离；MIG的runtime/profile/lease/计量独立实现认证，不能沿用独占组结果；可信GPU服务可并行验证 |
+| 9，发布门 | G4-01/G4-02/G4-05/G4-09 | 同SKU/同SLO/同成功任务的raw benchmark、至少72h持续到达、冷暖/池耗尽/高写入/设备与节点故障、隔离及账单 | 尝试数与失败率完整，pool与缓存开销、physical GPU分母和账单不省略；安全/正确性失败不能被密度/省费覆盖 |
+
+“64ms”“1000实例”“<5MB”等公开数字仅作为带版本/条件的调查对象，不能预填为本产品承诺。GPU设备可见性、物理独占、MIG、共享访问名额和可信GPU服务各有独立capability及账本；CPU快照不承诺CUDA/显存状态恢复。当前500ms领取以及网络策略/PVC/Pod/ready阶段的1/5秒等待须先分段测量并按完整租约/权限合同优化，再评估新VMM。
+
+
+### 12.1 首批开发落点（2026-10-13）
+
+| 原编号 | 本批交付 | 当前验收 | 仍需开发/认证 |
+| --- | --- | --- | --- |
+| G2-04/G2-05 | 0044事务空hint、提交后LISTEN扫描、固定500ms恢复、并发槽有界续填、50ms空扫描限制与2秒错误退避；监听计入原池预算，单连接poll-only | 新队列PG3项、原恢复4项、实际进程1项、历史升级1项均通过；见[调度合同](../docs/worker-dispatch.md) | 已提交安全阶段的有界连续调谐；任意锁积压的公平领取；真集群/HA容量与72h实测 |
+| G0-07/G0-08/G3-03 | 领取往返及调谐/RuntimeClass/namespace/策略/PVC/Pod/可信Ready提交的八种内部调用观测，成功/错误/取消未知分列 | 原返回值、脱敏、已poll取消及未poll四项契约通过 | exact accepted/COMMIT/queue、placement/artifact/VM/route/首次正确执行仍缺真实证据来源，未填零或等同调用耗时 |
+| G4-01/G4-02 | 固定本地Keycloak实际端口合同，恢复真实Chrome登录/操作/撤权CI链 | 端口契约3项通过；本批统一源码两轮真实Chrome/TLS PG各1/1通过，保留早期body不可用失败及诊断，不宣称已修其根因 | 新公共提交的完整CI及正式发布安全门 |
+
+本批没有启用模板缓存、GPU或自动删除节点；这些工作包保持独立的生产认证条件。
+
+本批交付证据与后续边界见[调度与观测交付记录](startup-dispatch-delivery-20261013.md)。

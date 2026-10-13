@@ -45,6 +45,17 @@ SCREENSHOTS = [
 ]
 
 
+def local_keycloak_issuer(docker, docker_env, fixture):
+    # Existing local installations and fresh CI can publish different ports.
+    # Resolve only the same fixed development container that owns the credential.
+    binding = fixture.invoke([*docker, "port", "sandbox-platform-dev-keycloak-1", "8080/tcp"],
+                             env=docker_env, timeout=15)
+    matched = re.fullmatch(r"127\.0\.0\.1:([0-9]{1,5})", binding)
+    if matched is None or not 1 <= int(matched[1]) <= 65535:
+        raise RuntimeError("one literal-loopback Keycloak port is required")
+    return "http://127.0.0.1:" + matched[1] + "/realms/sandbox-dev"
+
+
 def ordinary_artifacts(root, args, fixture, env):
     # Always ask Cargo to validate the captured working source. A supplied JSON
     # file can cross-check artifacts, but cannot certify stale executables as a
@@ -370,7 +381,6 @@ def main() -> int:
     env.update({
         "CARGO_INCREMENTAL": "0", "CARGO_TARGET_DIR": os.environ.get("CARGO_TARGET_DIR", str(root / "target")),
         "CARGO_PROFILE_DEV_DEBUG": "0", "CARGO_PROFILE_TEST_DEBUG": "0",
-        "SANDBOX_OIDC_ISSUER": "http://127.0.0.1:58073/realms/sandbox-dev",
         "SANDBOX_TEST_NODE": str(args.node),
         "SANDBOX_TEST_SOURCE_ROOT": str(root), "IDENTITY_PYTHON": str(args.identity_python),
         "SANDBOX_BROWSER_EVIDENCE_DIR": str(evidence),
@@ -397,6 +407,8 @@ def main() -> int:
                                for name, path in artifacts.items()}
         record["current_source_validated_by_cargo"] = True
         stage = "identity_credential"
+        env["SANDBOX_OIDC_ISSUER"] = local_keycloak_issuer(docker, docker_env, fixture)
+        record["local_identity_issuer"] = env["SANDBOX_OIDC_ISSUER"]
         # Read only the fixed local development administrator credential. The
         # Rust test creates and removes its own realm; the original is retained.
         secret = fixture.invoke([*docker, "exec", "sandbox-platform-dev-keycloak-1",
@@ -531,7 +543,7 @@ def main() -> int:
         expected = [{"version": int(path.name.split("_", 1)[0]), "success": True,
                      "checksum": hashlib.sha384(path.read_bytes()).hexdigest()}
                     for path in sorted((root / "migrations").glob("*.sql"))]
-        helper.require([row["version"] for row in expected] == list(range(1, 38)) + [39, 40, 41, 42, 43]
+        helper.require([row["version"] for row in expected] == list(range(1, 38)) + [39, 40, 41, 42, 43, 44]
                        and ledger == expected, "Normal ledger checksums must match without unused 0038")
         record["migration_ledger"] = ledger
         stage = "source_binding"

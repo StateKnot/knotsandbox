@@ -330,9 +330,9 @@ async fn snapshot(owner: &PgPool, scopes: &[Scope]) -> anyhow::Result<Snapshot> 
     facts.insert("platform_configuration".to_owned(), config);
     let rls: Value = sqlx::query_scalar("SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.relname),'[]'::jsonb) FROM (SELECT c.relname,c.relrowsecurity,c.relforcerowsecurity,(SELECT jsonb_agg(to_jsonb(p) ORDER BY p.polname) FROM pg_policy p WHERE p.polrelid=c.oid) AS policies FROM pg_class c WHERE c.relnamespace='public'::regnamespace AND c.relkind IN('r','p') AND c.relname<>'automation_notifications') r").fetch_one(owner).await?;
     facts.insert("existing_rls_policies".to_owned(), rls);
-    let triggers: Value = sqlx::query_scalar("SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.relation,r.tgname),'[]'::jsonb) FROM (SELECT tgrelid::regclass::text AS relation,tgname,tgenabled,tgtype,tgdeferrable,tginitdeferred,tgfoid::regprocedure::text AS function FROM pg_trigger WHERE NOT tgisinternal AND tgrelid IN(SELECT oid FROM pg_class WHERE relnamespace='public'::regnamespace) AND tgname NOT IN('immutable_automation_notification','automation_notification_no_delete','domain_event_stream_automation_notification_capture')) r").fetch_one(owner).await?;
+    let triggers: Value = sqlx::query_scalar("SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.relation,r.tgname),'[]'::jsonb) FROM (SELECT tgrelid::regclass::text AS relation,tgname,tgenabled,tgtype,tgdeferrable,tginitdeferred,tgfoid::regprocedure::text AS function FROM pg_trigger WHERE NOT tgisinternal AND tgrelid IN(SELECT oid FROM pg_class WHERE relnamespace='public'::regnamespace) AND tgname NOT IN('immutable_automation_notification','automation_notification_no_delete','domain_event_stream_automation_notification_capture','worker_dispatch_hint')) r").fetch_one(owner).await?;
     facts.insert("existing_trigger_contracts".to_owned(), triggers);
-    let functions: Value = sqlx::query_scalar("SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.function),'[]'::jsonb) FROM (SELECT oid::regprocedure::text AS function,prosecdef,proconfig FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname NOT IN('sandbox_file_activity_match','sandbox_guard_automation_notification','sandbox_capture_automation_notification','sandbox_lock_automation_notification_head')) r").fetch_one(owner).await?;
+    let functions: Value = sqlx::query_scalar("SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.function),'[]'::jsonb) FROM (SELECT oid::regprocedure::text AS function,prosecdef,proconfig FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname NOT IN('sandbox_file_activity_match','sandbox_guard_automation_notification','sandbox_capture_automation_notification','sandbox_lock_automation_notification_head','sandbox_notify_worker_dispatch')) r").fetch_one(owner).await?;
     facts.insert("existing_function_security".to_owned(), functions);
     Ok(facts)
 }
@@ -539,16 +539,37 @@ async fn upgrade_from_v41_preserves_historical_automation_and_rejects_invalid_so
         deferred_security,
         "Current deferred activity validation must use its fixed-path restricted definer"
     );
+    // New 0044 metadata is checked separately from byte-for-byte preservation
+    // of existing schema 42 facts and function/trigger security contracts.
+    let dispatch_hint_security: bool = sqlx::query_scalar(r#"
+        SELECT f.prosecdef AND f.proconfig=ARRAY['search_path=pg_catalog']::text[]
+          AND f.proowner=current_user::regrole
+          AND NOT EXISTS(SELECT 1 FROM aclexplode(COALESCE(f.proacl,acldefault('f',f.proowner))) a
+              WHERE a.grantee=0 AND a.privilege_type='EXECUTE')
+          AND EXISTS(SELECT 1 FROM pg_trigger t WHERE t.tgrelid='public.operation_dispatch'::regclass
+              AND t.tgname='worker_dispatch_hint' AND t.tgfoid=f.oid AND t.tgenabled='O'
+              AND t.tgtype=21 AND NOT t.tgdeferrable AND NOT t.tginitdeferred
+              AND t.tgnargs=0 AND t.tgqual IS NULL)
+          AND NOT EXISTS(SELECT 1 FROM pg_roles r WHERE r.rolname IN
+              ('sandbox_app','sandbox_worker','sandbox_gateway','sandbox_admission','sandbox_termination',
+               'sandbox_fencing','sandbox_volume_deleter','sandbox_backup','sandbox_automation','sandbox_browser')
+              AND has_function_privilege(r.oid,f.oid,'EXECUTE'))
+        FROM pg_proc f WHERE f.oid='public.sandbox_notify_worker_dispatch()'::regprocedure
+    "#).fetch_one(&owner).await?;
+    ensure!(
+        dispatch_hint_security,
+        "Migration 44 dispatch hint must have an exact owner-only fixed-path trigger contract"
+    );
     ensure!(
         snapshot(&owner, &scopes).await? == before_current_roles
             && notification_snapshot(&owner, &scopes).await? == notices_at42,
-        "Migration 43 changed historical quota, holds, receipts, ACK, source events or authority"
+        "Current migrations changed historical quota, holds, receipts, ACK, source events or authority"
     );
     history::assert_nonempty_history(&owner, &scopes).await?;
     let upgraded_ledger = ledger(&owner).await?;
     ensure!(
         upgraded_ledger[..ledger_at42.len()] == ledger_at42,
-        "Migration 43 rewrote the complete schema 42 migration ledger"
+        "Current migrations rewrote the complete schema 42 migration ledger"
     );
     ensure!(
         upgraded_ledger.iter().map(|(v, _)| *v).collect::<Vec<_>>()

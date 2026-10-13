@@ -44,6 +44,7 @@ SUITES = [
     ("timers", "timers", "", "blocked_first_hundred_cannot_starve_later_expiry_and_replicas_accept_one_stop"),
     ("timer_worker", "worker", "", "supervised_timer_skips_hundred_locked_workspaces_and_accepts_later_expiry"),
     ("worker_process", "worker_process", "", ""),
+    ("worker_dispatch", "worker_dispatch", "", "worker_fills_capacity_and_recovers_missing_hints_future_work_and_listener_loss"),
     ("output_identity", "sandbox_platform", "output_page_rechecks_identity_and_expiry_after_storage_io", ""),
     ("action_scope", "sandbox_platform", "action_scope_ceiling_blocks_mutations_streams_and_delegation", ""),
     ("bootstrap_prerequisite", "database", "forced_rls_isolates_rows_and_transaction_context_does_not_leak", ""),
@@ -55,7 +56,7 @@ SUITES = [
 ]
 # A broader local acceptance caller may supply exact expected counts. The
 # standalone review matrix retains its established selection and resources.
-EXPECTED_COUNTS = {"automation_upgrade": 1}
+EXPECTED_COUNTS = {"automation_upgrade": 1, "worker_dispatch": 3}
 
 
 def public_fingerprints():
@@ -174,8 +175,8 @@ def run(args):
             sql.append("CREATE ROLE " + role + " LOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD '" + password + "';")
         fixture.invoke(psql, env=psql_env, text="\n".join(sql))
         expected = [{"version": int(path.name.split("_", 1)[0]), "success": True, "checksum": hashlib.sha384(path.read_bytes()).hexdigest()} for path in sorted((ROOT / "migrations").glob("*.sql"))]
-        if [row["version"] for row in expected] != list(range(1, 38)) + [39, 40, 41, 42, 43]:
-            raise RuntimeError("review requires real formal migrations 1..37+39..43, never 38")
+        if [row["version"] for row in expected] != list(range(1, 38)) + [39, 40, 41, 42, 43, 44]:
+            raise RuntimeError("review requires real formal migrations 1..37+39..44, never 38")
         for index, (name, target, filter_name, required) in enumerate(SUITES, 1):
             if not re.fullmatch(r"[a-z][a-z0-9_]{0,39}", name):
                 raise RuntimeError("interface suite name invalid")

@@ -6,7 +6,11 @@ use serde_json::json;
 use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
-use crate::{db::Database, error::ApiError};
+use crate::{
+    db::Database,
+    error::ApiError,
+    worker_observation::{ObservedPhase, observe},
+};
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Claim {
@@ -39,16 +43,19 @@ impl OperationEngine {
     }
 
     pub async fn claim(&self) -> Result<Option<Claim>, ApiError> {
-        // The definer function can only return a claim, never arbitrary tenant data.
-        let mut tx = self.database.pool.begin().await?;
-        let claim = sqlx::query_as(
-            "SELECT tenant_id,operation_id,lease_token FROM sandbox_claim_operation($1)",
-        )
-        .bind(&self.worker_id)
-        .fetch_optional(&mut *tx)
-        .await?;
-        tx.commit().await?;
-        Ok(claim)
+        observe(None, ObservedPhase::ClaimRoundTrip, async {
+            // The definer function can only return a claim, never arbitrary tenant data.
+            let mut tx = self.database.pool.begin().await?;
+            let claim = sqlx::query_as(
+                "SELECT tenant_id,operation_id,lease_token FROM sandbox_claim_operation($1)",
+            )
+            .bind(&self.worker_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            Ok(claim)
+        })
+        .await
     }
 
     /// Dedicated queue: only EXECUTE operations can be claimed by a gateway.

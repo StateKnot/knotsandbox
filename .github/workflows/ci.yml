@@ -208,6 +208,7 @@ jobs:
           python3 -m py_compile scripts/dev-database-roles.py
           python3 -m unittest discover -s scripts/release/tests -v
           python3 -m unittest discover -s scripts/tests -p 'test_nodeguard_host_observation.py' -v
+          python3 -m unittest discover -s scripts/tests -p 'test_console_browser.py' -v
           python3 -m json.tool deploy/keycloak/realm.template.json > /dev/null
       - name: Unit and authentication tests
         run: |

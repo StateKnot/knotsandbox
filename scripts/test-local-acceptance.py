@@ -64,6 +64,7 @@ BASE_FEATURES = {
     "timers": "TTL 到期停止、并发去重与公平扫描",
     "timer_worker": "实际定时器 Worker 监督与有界公平扫描",
     "worker_process": "独立 Worker 进程、启动检查、定时器与退出排空",
+    "worker_dispatch": "持久队列提示、并发填充、断线重订阅与缺提示/到期租约恢复",
     "output_identity": "输出读取后重查身份与有效期",
     "action_scope": "OAuth 动作范围对变更、流与委托的限制",
     "bootstrap_prerequisite": "真实数据库 RLS 与事务租户上下文初始化前置",

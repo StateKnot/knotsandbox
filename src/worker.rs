@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use k8s_openapi::api::core::v1::{PersistentVolumeClaim, Pod};
 use serde_json::{Value, json};
 use sqlx::{Postgres, Transaction};
-use tokio::task::JoinSet;
+use tokio::{sync::watch, task::JoinSet, time::Instant};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -21,7 +21,11 @@ use crate::{
         RuntimeManifestConfig, RuntimeManifestContext, build_manifests, container_name,
     },
     service_lifecycle::fatal_database_failure,
+    worker_observation::{ObservedPhase, observe},
 };
+
+#[path = "worker_dispatch.rs"]
+mod dispatch;
 
 #[derive(Clone)]
 pub struct Worker {
@@ -149,6 +153,15 @@ impl Worker {
         let timer_shutdown = shutdown.clone();
         let mut timer_task = tokio::spawn(async move { timers.run_timers(timer_shutdown).await });
         let mut timer_joined = false;
+        let (wake, mut wakeups) = watch::channel(());
+        let hint_pool = self.engine.database.pool.clone();
+        let hint_shutdown = shutdown.clone();
+        let mut hint_task = tokio::spawn(dispatch::listen(hint_pool, wake, hint_shutdown));
+        let mut hint_joined = false;
+        let mut recovery = tokio::time::interval(Duration::from_millis(500));
+        recovery.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut scan_requested = true; // Recover work committed before LISTEN.
+        let mut claim_not_before = Instant::now();
         let mut jobs = JoinSet::new();
         let mut result = loop {
             tokio::select! {
@@ -161,7 +174,12 @@ impl Worker {
                         _ => anyhow::anyhow!("worker timer task terminated unexpectedly"),
                     });
                 },
+                _ = &mut hint_task => {
+                    hint_joined = true;
+                    break Err(anyhow::anyhow!("worker dispatch hint task terminated unexpectedly"));
+                },
                 Some(result) = jobs.join_next(), if !jobs.is_empty() => {
+                    scan_requested = true; // Fill a released slot without resetting the poll clock.
                     match result {
                         Ok(Err(error)) if fatal_database_failure(&self.engine.database.pool, &error) => {
                             break Err(anyhow::anyhow!("worker stage stopped after fatal error ({})", error.code));
@@ -171,24 +189,66 @@ impl Worker {
                         Err(_) => break Err(anyhow::anyhow!("worker stage task terminated unexpectedly")),
                     }
                 },
-                _ = tokio::time::sleep(Duration::from_millis(500)), if jobs.len() < self.concurrency => {
+                _ = tokio::time::sleep_until(claim_not_before), if scan_requested && jobs.len() < self.concurrency => {
                     let claimed = tokio::select! {
                         biased;
                         _=shutdown.cancelled()=>break Ok(()),
                         result=self.engine.claim()=>result,
                     };
                     match claimed {
-                        Ok(Some(claim)) => { let worker = self.clone(); jobs.spawn(async move { worker.run_claim(claim).await }); },
-                        Ok(None) => {},
+                        Ok(Some(claim)) => {
+                            // One claim per select turn: fill up to concurrency
+                            // while supervision and cancellation retain priority.
+                            let worker = self.clone();
+                            jobs.spawn(async move { worker.run_claim(claim).await });
+                        },
+                        Ok(None) => {
+                            scan_requested = false;
+                            // Hints are untrusted: bound repeated empty scans.
+                            // New hints never postpone this fixed deadline.
+                            claim_not_before = Instant::now() + Duration::from_millis(50);
+                        },
                         Err(error) if fatal_database_failure(&self.engine.database.pool, &error) => {
                             break Err(anyhow::anyhow!("worker claim stopped after fatal error ({})", error.code));
                         },
-                        Err(error) => { tracing::warn!(code=error.code, "operation claim unavailable; durable intent retained"); tokio::select! { _=shutdown.cancelled()=>break Ok(()), _=tokio::time::sleep(Duration::from_secs(2))=>{} } },
+                        Err(error) => {
+                            tracing::warn!(code=error.code, "operation claim unavailable; durable intent retained");
+                            scan_requested = false;
+                            // Hints, capacity and poll ticks cannot bypass retry
+                            // backoff, nor does backoff suspend job supervision.
+                            claim_not_before = Instant::now() + Duration::from_secs(2);
+                        },
                     }
-                }
+                },
+                _ = recovery.tick() => scan_requested = true,
+                changed = wakeups.changed() => {
+                    if changed.is_err() {
+                        break Err(anyhow::anyhow!("worker dispatch hint channel closed unexpectedly"));
+                    }
+                    scan_requested = true;
+                },
             }
         };
         shutdown.cancel();
+        // The hint task owns no work. Release listener ownership before draining
+        // stages; only the outer awaited pool close proves physical DB shutdown.
+        if !hint_joined {
+            match tokio::time::timeout(Duration::from_secs(5), &mut hint_task).await {
+                Ok(Err(_)) if result.is_ok() => {
+                    result = Err(anyhow::anyhow!("worker dispatch hint task failed"));
+                }
+                Err(_) => {
+                    hint_task.abort();
+                    let _ = hint_task.await;
+                    if result.is_ok() {
+                        result = Err(anyhow::anyhow!(
+                            "worker dispatch hint shutdown exceeded grace period"
+                        ));
+                    }
+                }
+                _ => {}
+            }
+        }
         // Each stage already has a hard wall-clock bound; shutdown never waits
         // for VM termination, a stuck API stream or the entire TTL scan batch.
         if tokio::time::timeout(Duration::from_secs(30), async {
@@ -337,6 +397,15 @@ impl Worker {
     /// One durable stage, exposed to integration tests and recovery tooling.
     /// Callers must hold the lease; this function checks it before and after I/O.
     pub async fn reconcile(&self, claim: &Claim) -> Result<(), ApiError> {
+        observe(
+            Some(claim),
+            ObservedPhase::ReconcileAttempt,
+            self.reconcile_stage(claim),
+        )
+        .await
+    }
+
+    async fn reconcile_stage(&self, claim: &Claim) -> Result<(), ApiError> {
         // Execution dispatch has its own durable at-most-one-attempt gate. The
         // generic worker must never send or replay a guest command.
         let mut tx = self.engine.database.begin(claim.tenant_id).await?;
@@ -373,21 +442,29 @@ impl Worker {
         if !snapshot.compute() {
             return self.stop_stage(claim, &snapshot, &manifests.pod).await;
         }
-        self.runtime
-            .verify_runtime_class()
-            .await
-            .map_err(runtime_error)?;
-        self.runtime
-            .verify_namespace(&snapshot.context(), &self.certification_id)
-            .await
-            .map_err(runtime_error)?;
+        observe(Some(claim), ObservedPhase::RuntimeClassVerify, async {
+            self.runtime
+                .verify_runtime_class()
+                .await
+                .map_err(runtime_error)
+        })
+        .await?;
+        observe(Some(claim), ObservedPhase::NamespaceVerify, async {
+            self.runtime
+                .verify_namespace(&snapshot.context(), &self.certification_id)
+                .await
+                .map_err(runtime_error)
+        })
+        .await?;
         let resources = self.resources(claim, &snapshot).await?;
         let known_policy = resources.get("CILIUM_POLICY").map(String::as_str);
-        let policy = self
-            .runtime
-            .ensure_network_policy(&manifests.network_policy, known_policy)
-            .await
-            .map_err(runtime_error)?;
+        let policy = observe(Some(claim), ObservedPhase::NetworkPolicyEnsure, async {
+            self.runtime
+                .ensure_network_policy(&manifests.network_policy, known_policy)
+                .await
+                .map_err(runtime_error)
+        })
+        .await?;
         if known_policy.is_none() {
             self.record_resource(claim, &snapshot, "CILIUM_POLICY", uid(&policy.metadata)?)
                 .await?;
@@ -398,11 +475,13 @@ impl Worker {
         }
         self.check_current(claim, &snapshot).await?;
         let known_pvc = resources.get("PVC").map(String::as_str);
-        let pvc = self
-            .runtime
-            .ensure_workspace(&manifests.pvc, known_pvc)
-            .await
-            .map_err(runtime_error)?;
+        let pvc = observe(Some(claim), ObservedPhase::WorkspaceEnsure, async {
+            self.runtime
+                .ensure_workspace(&manifests.pvc, known_pvc)
+                .await
+                .map_err(runtime_error)
+        })
+        .await?;
         if known_pvc.is_none() {
             self.record_resource(claim, &snapshot, "PVC", uid(&pvc.metadata)?)
                 .await?;
@@ -416,11 +495,13 @@ impl Worker {
         if snapshot.pod_uid.map(|v| v.to_string()).as_deref() != known_pod {
             return Err(blocked("POD_LEDGER_MISMATCH"));
         }
-        let pod = self
-            .runtime
-            .ensure_pod(&manifests, known_pod)
-            .await
-            .map_err(runtime_error)?;
+        let pod = observe(Some(claim), ObservedPhase::PodEnsure, async {
+            self.runtime
+                .ensure_pod(&manifests, known_pod)
+                .await
+                .map_err(runtime_error)
+        })
+        .await?;
         if known_pod.is_none() {
             self.record_resource(claim, &snapshot, "POD", uid(&pod.metadata)?)
                 .await?;
@@ -436,7 +517,12 @@ impl Worker {
                 .wait(claim, "WAITING_READY", "CURRENT_LAUNCH_NOT_READY", 5)
                 .await;
         }
-        self.mark_ready(claim, &snapshot, uid(&pod.metadata)?).await
+        observe(
+            Some(claim),
+            ObservedPhase::TrustedReadyCommit,
+            self.mark_ready(claim, &snapshot, uid(&pod.metadata)?),
+        )
+        .await
     }
 
     async fn lock_snapshot<'a>(

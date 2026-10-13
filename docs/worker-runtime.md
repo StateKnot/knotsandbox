@@ -17,6 +17,10 @@ RuntimeClass 固定 `kata-qemu`、handler 固定 `kata-qemu`，并选择 `sandbo
 
 `SANDBOX_DNS_NAMESPACE` 默认 `kube-system`，`SANDBOX_DNS_LABEL` 默认 `k8s-app=kube-dns`；它们必须指向实际 CoreDNS endpoints，并与 admission 配置一致。CiliumNetworkPolicy 仅允许上述 DNS 的 TCP/UDP 53，其余 ingress/egress 默认拒绝。原生 NetworkPolicy 对所有实例生效，Cilium always-enforce 与首包防护由经过认证的部署负责。Worker 不会临时修改这些部署前提。
 
+## 队列与分段观测
+
+Worker 启动立即扫描已有操作，随后在提示、任务完成和固定500ms恢复扫描时填充可用并发槽。0044的空通知只提示重新查询；领取仍由原路由/期限/租约SQL决定。连接池上限包含一个监听连接，max=1使用轮询。详见[队列调度与调用观测](worker-dispatch.md)，包括部署、数据库预算、缺提示恢复和观测范围。
+
 ## 持久阶段
 
 每次领取推进一个阶段：验证策略对象并记录 UID → 验证 PVC 并记录 UID → 验证 Pod 并记录 UID → 验证当前代际 Ready 并完成操作。PVC 的 `WaitForFirstConsumer` 不会造成调谐死锁：允许先创建 Pending PVC，再创建消费者 Pod，最终 Ready 时要求 PVC 为 Bound。

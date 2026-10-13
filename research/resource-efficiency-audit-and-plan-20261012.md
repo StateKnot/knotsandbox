@@ -100,3 +100,10 @@ MIG另立认证模式；time-slicing/MPS不作为当前非可信跨租户的隔�
 GPU每种SKU/设备模式有独立认证清单：串卡/越权/DMA、显存残留、IOMMU组、进程/VM退出、reset不支持/失败、host reboot/partition、云fencing、旧租约、driver升级/回退、CUDA上下文丢失、Pod/lease错绑及归属标签伪造。冷备份仅持久工作区，不承诺GPU上下文或显存checkpoint。记录未通过项并保持禁用，不能以MIG/time-slicing标签替代证据。
 
 本文预研阶段只更新计划与边界。后续观测开发仍未开启GPU、改变requests=limits或调整生产资源；各批验收数字分别记录，不重新累计以前的CPU/数据库验收数字。
+
+
+## 7. 2026-10-13 源码逆向补充
+
+已按REA证据分层方法固定CubeSandbox/OpenSandbox及其Fast Sandbox构建依赖，追踪启动、CoW/缓存/预热成本与GPU设备路径。结论与完整落地增量见[总报告](sandbox-fast-start-resource-gpu-reverse-engineering-20261013.md)，已登记[开发表第12节](rust-sandbox-development-workbreakdown.md#12-2026-10-13-竞品逆向输入与快启开发顺序)。本次仅研究和计划追加，不改变本文旧审查快照或当前运行时/资源/GPU状态。
+
+优先补自身控制面分段计时、持久队列唤醒及已提交阶段有界继续，再做受预算约束的artifact预热；当前模板/VM复用禁止基线保持，新快启profile需要完整认证。公开空闲实例密度不作为实际CPU/GPU效率，成功样本延迟必须与失败率同报。GPU分普通设备申请、独占全设备组、另认证MIG和可信GPU服务；最新版MPS的地址/资源管理能力按具体栈核对，继续不默认用于非可信跨租户VM隔离。GPU-ready和安全复用各有独立实机门，不能直接承接CPU快照的性能数字。
