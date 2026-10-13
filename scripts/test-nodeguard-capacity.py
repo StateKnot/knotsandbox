@@ -96,8 +96,8 @@ def run(args):
                     # when create succeeded but the client lost its receipt.
                     fixture.invoke([*docker, "rm", "--force", actual_id], env=environment)
                     gone = subprocess.run([*docker, "inspect", actual_id], env=environment, capture_output=True, timeout=30)
-                    cleanup = gone.returncode != 0 and b"No such" in gone.stderr
-                elif identity is not None and b"No such" in inspected.stderr:
+                    cleanup = gone.returncode != 0 and b"no such" in gone.stderr.lower()
+                elif identity is not None and b"no such" in inspected.stderr.lower():
                     cleanup = True
                 else:
                     # A timed-out creation with no ID is not proof that a late

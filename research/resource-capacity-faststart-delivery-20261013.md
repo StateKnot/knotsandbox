@@ -41,6 +41,8 @@ CPU读取叶级有效cpuset，并取叶级和全部非根祖先有限`cpu.max`�
 
 非root Linux CI入口`scripts/test-nodeguard-capacity.py`消费普通Cargo产物，检查精确忽略用例、ELF/UID/metadata/路径、固定镜像与容器限额，只挂载二进制。创建失ACK按精确随机名字/标签/镜像恢复清理所有权；主失败和清理失败分别保留，未确认不存在不能通过。macOS本地的上述内核用例不等于这个Linux入口已经通过；最终入口与整套远端结果以新提交CI收据为准。
 
+发布后复核发现Docker CLI29.6.2对不存在对象返回小写`no such object`，清理判断已改为大小写无关；实际不存在随机对象的inspect和精确名字空列表通过，权限或daemon连接错误不被当成不存在。该修正只影响验收收尾，不改变内核采集和生产运行。当前Docker Desktop的Cargo产物位于构建容器的named-volume路径且属root，不能满足该入口的普通Linux UID/宿主路径合同；未通过改属主、重写Cargo消息或构造宿主路径别名绕过，由真实Ubuntu非root CI执行入口。
+
 本地证据在忽略的`.local/resource-faststart-20261013/`，包含源指纹、普通产物SHA、原失败日志和清理回执；不提交PKI、身份凭据、临时数据库或构建缓存。
 
 ## 下一交付与发布门
