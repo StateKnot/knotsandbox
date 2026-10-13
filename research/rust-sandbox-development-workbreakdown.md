@@ -250,7 +250,7 @@ G2-07下一子项须先冻结`STOP_AFTER_PLATFORM_IDLE`语义和有界可撤销�
 
 详细采样语义和调用合同见[运行指标](../docs/runtime-metrics.md)、[采集预算与部署](../deploy/observability/README.md)和[Worker运行合同](../docs/worker-runtime.md#宿主cri启动调用观测)。宿主容量上界不等于专属预留、余量或节点利用率，当前没有利用率百分比或自动停机/调档。快启新增测量点不包含独立镜像拉取和VM Ready；warm pool、模板缓存、GPU仍未交付，真实Kata/云环境尚未验收。原61个工作包及发布门继续有效。
 
-本轮最终源码已完成本地普通Rust、严格Linux检查、真实内核容量、Prometheus、独立TLS PostgreSQL、SDK/控制台和真实Chrome身份全流程验收。精确范围、环境专用未执行用例、CI故障与边界见[本轮交付记录](resource-capacity-faststart-delivery-20261013.md)；远端完整CI以新提交收据为准。
+截至9c42b2dc发布的子项源码已完成本地普通Rust、严格Linux检查、真实内核容量、Prometheus、独立TLS PostgreSQL、SDK/控制台和真实Chrome身份全流程验收。精确范围、环境专用未执行用例、CI故障与边界见[本轮交付记录](resource-capacity-faststart-delivery-20261013.md)；后续补验源码与远端完整CI以各自新提交收据为准。
 
 CI补验发现真实容量入口的内核Invalid错误，已补合法`core_sched.force_idle_usec`兼容与固定阶段/字段存在布尔证据；没有跳过内核门禁或把失败转换为缺测。最新本地普通Rust288项、Linux nodeguard49项及真实容量精确用例通过，下一提交须通过Ubuntu入口及完整真实浏览器CI，具体失败事实和根因待证范围保留在交付记录中。
 
@@ -259,3 +259,7 @@ Ubuntu容量入口已在967f705通过（实际core字段存在、容量断言与
 后续d59ea163完整CI再次确认真实容量、17组77项独立PG、PG全套与Keycloak/API通过，但浏览器仍有两处失败：自动化撤权中间渲染的strict2警报断言，以及诊断原键重放202正文的外部观察。前者已保持原严格断言修正检查顺序，本地降速20/20与正常28/28通过；后者按真实响应观测合同补验，完整CI仍以新提交收据为准。下一资源子项优先持久化每次launch的实际request/limit/运行时overhead及可信释放有效期，再推进预准备预算与冷暖启动实测；旧launch缺证据保持UNKNOWN，不能按当前规格回填历史。
 
 诊断补验已交付同原生POST 202的有界clone观察合同及12项真实Chromium检查，保持原native身份/请求数及原键/正文/202/journal断言；真实CDP观察状态清除的RED与GREEN分别保留。完整本地身份链路再次通过并确认自有清理。账户观察合同仍10项，未扩展诊断GET或自动重试；完整远端流水线和上述生产门禁继续分别核验。
+
+9c42b2dc远端已通过四个独立作业、真实容量、全部PG及实际诊断/事件；后续自动化原键创建回执仍遇外部正文失留存。已将已知mutation观察统一到单原生fetch包装和单全局16×256KiB预算，闭合profile覆盖实际服务身份/诊断/自动化/授权/通知ACK/STOP；通知200/404按原键顺序消费，原业务/版本/身份/请求次数及239项断言保持。原10/12加新15共37项真实Chromium合同全部通过，GET/auth仍未扩。最终产品全链与完整CI继续单独核验；资源利用率分母、warm及GPU开发状态不因测试基础设施收尾提前完成。
+
+2026-10-14真实浏览器补验另行捕获数据库锁等待503。真实TLS-PG回归确认SQLx 0.8.6的BEGIN取消会把未结束事务归池；按上游已合并修复做原包有限回移后，同一物理连接的空闲、下一写入自动提交及事务锁释放检查通过。原应用期限和业务请求保持，临时探针全部移除，默认独立PG矩阵新增精确一项必需检查。普通Rust290项与固定源码/篡改边界通过；产品全链及最新完整CI仍分别核验。详细来源/失败事实见[交付记录](resource-capacity-faststart-delivery-20261013.md)；下一项按[逐次启动资源账本方案](launch-resource-accounting-plan-20261014.md)开发，再进入预准备预算、冷暖实测和GPU认证。

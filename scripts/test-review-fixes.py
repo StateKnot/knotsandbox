@@ -38,6 +38,7 @@ HISTORICAL_UPGRADE_MARKER = "AUTO_UPGRADE_V41_CURRENT_FACTS_OLD_MIGRATOR_REFUSAL
 HISTORICAL_STATE_MARKER = "AUTO_UPGRADE_NONEMPTY_HISTORY_SCHEMA42_ACK_CURRENT_REPLAY_REVOKE_VERIFIED"
 HISTORICAL_PROGRESSION_MARKER = "AUTO_UPGRADE_UNKNOWN_FAILED_DISTINCT_SOURCES_ACK_REPLAY_ISOLATION_VERIFIED"
 SUITES = [
+    ("db_cancellation", "sandbox_platform", "db::cancellation_tests::", "cancelled_begin_returns_runtime_tls_connection_idle_and_autocommit_safe"),
     ("bff_pg", "sandbox_platform", "bff::tests::", "browser_fixture_tagged_pools_drain_before_ordinary_database_drop"),
     ("service_clients", "service_clients", "", "service_client_binding_rejects_other_client_and_owner_rotation_revokes_delegation"),
     ("tenant_audit", "tenant_audit", "", "signed_http_and_actual_node_sdk_tenant_audit_contract_is_redacted_and_revocable"),
@@ -58,7 +59,7 @@ SUITES = [
 ]
 # A broader local acceptance caller may supply exact expected counts. The
 # standalone review matrix retains its established selection and resources.
-EXPECTED_COUNTS = {"bff_pg": 4, "automation_upgrade": 1, "worker_dispatch": 3, "worker_continuation": 6}
+EXPECTED_COUNTS = {"db_cancellation": 1, "bff_pg": 4, "automation_upgrade": 1, "worker_dispatch": 3, "worker_continuation": 6}
 
 
 def public_fingerprints():
@@ -256,6 +257,8 @@ def run(args):
                 raise RuntimeError("worker process matrix completion marker missing")
             if name == "timer_worker" and "WORKER_TIMER_HUNDRED_LOCKS_LATER_STOP_WITHOUT_DEADLINE_CHANGE_VERIFIED" not in output:
                 raise RuntimeError("worker fairness completion marker missing")
+            if name == "db_cancellation" and "DB_BEGIN_CANCEL_RUNTIME_TLS_POOL_CLEAN_VERIFIED" not in output:
+                raise RuntimeError("database cancellation completion marker missing")
             if historical_upgrade:
                 if HISTORICAL_UPGRADE_MARKER not in output:
                     raise RuntimeError("historical upgrade completion marker missing")

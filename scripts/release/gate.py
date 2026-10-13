@@ -155,7 +155,25 @@ def validate_sboms(directory, current=None, *, legacy=False, historical=False, b
     """Image defaults exclude declared Cargo.lock: require every locked crate."""
     with (directory / 'Cargo.lock').open('rb') as source:
         packages = tomllib.load(source)['package']
-    expected = {(p['name'], p['version']) for p in packages if p.get('source', '').startswith('registry+')}
+    expected = set()
+    path_packages = []
+    for package in packages:
+        identity = (package['name'], package['version'])
+        if 'source' in package:
+            source = package['source']
+            require(isinstance(source, str) and source.startswith(('registry+', 'git+')),
+                    'CARGO_UNREVIEWED_DEPENDENCY_SOURCE')
+            expected.add(identity)
+        elif package['name'] != 'sandbox-platform':
+            # The fixed source backport is still an external dependency. Its
+            # absent registry source/checksum must never remove SBOM coverage.
+            require(identity == ('sqlx-postgres', '0.8.6') and 'checksum' not in package,
+                    'CARGO_UNREVIEWED_PATH_DEPENDENCY')
+            path_packages.append(package)
+            expected.add(identity)
+    require(len(path_packages) <= 1 and (not path_packages or
+            sum(package['name'] == 'sqlx-postgres' for package in packages) == 1),
+            'CARGO_PATH_DEPENDENCY_AMBIGUOUS')
     require(expected, 'CARGO_DEPENDENCY_INVENTORY_EMPTY')
     for name in ('service', 'runner', 'rust-binaries'):
         sbom = load(directory / (name + '.syft.json'))

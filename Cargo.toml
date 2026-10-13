@@ -8,6 +8,10 @@ license = "MIT"
 description = "KnotSandbox: a Rust control plane for multi-tenant sandboxes"
 repository = "https://github.com/StateKnot/knotsandbox"
 
+[patch.crates-io]
+# Upstream cancellation fix; exact sources and provenance are checked in CI.
+sqlx-postgres = { path = "vendor/sqlx-postgres" }
+
 [lib]
 name = "sandbox_platform"
 path = "src/lib.rs"

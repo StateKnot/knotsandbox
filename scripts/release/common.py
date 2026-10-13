@@ -16,12 +16,18 @@ COMPONENTS = ('service', 'runner', 'identity-proxy', 'console')
 LEGACY_SCAN_NAMES = (*COMPONENTS, 'rust-binaries', 'builder', 'console-builder', 'proxy-source')
 SCAN_NAMES = (*LEGACY_SCAN_NAMES, 'native-components')
 BOM_CDX = {'proxy-source', 'native-components'}
+SQLX_POSTGRES_NOTICES = 'sqlx-postgres-notices.json'
 
-def release_file_names(*, legacy=False, binary_names=None, historical=False):
+def release_file_names(*, legacy=False, binary_names=None, historical=False, version=None):
+    version = (1 if legacy else 3) if version is None else version
+    require(type(version) is int and version in (1, 2, 3) and legacy == (version == 1),
+            'RELEASE_VERSION')
     binaries = release_binaries(BINARIES if binary_names is None else binary_names, historical=historical)
     result = {'console-npm-locks.json','Cargo.lock','tools.lock.json','debian-security.lock.json','console-security.lock.json','risk-exceptions.json','scan-gate.json','database.json',*binaries}
     if not legacy:
         result.update({'native-security.lock.json','native-inputs.tar','native-provenance.json'})
+    if version == 3:
+        result.add(SQLX_POSTGRES_NOTICES)
     for name in LEGACY_SCAN_NAMES if legacy else SCAN_NAMES:
         result.add(name+'.grype.json')
         result.add(name+('.cdx.json' if name in BOM_CDX else '.syft.json'))

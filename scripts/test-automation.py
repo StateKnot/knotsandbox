@@ -106,7 +106,15 @@ def fingerprints(binary, process_binary, migration_binary):
         "tests/automation_process/acceptance_faults.rs",
         "tests/fixtures/automation/sdk-http.mjs",
         "tests/fixtures/automation/notifications-http.mjs", "scripts/test-automation.py",
+        "scripts/verify-sqlx-postgres-patch.py",
     )]
+    vendor = ROOT / "vendor/sqlx-postgres"
+    if not vendor.is_dir() or vendor.is_symlink():
+        raise RuntimeError("reviewed SQLx PostgreSQL patch source is required")
+    vendor_files = sorted(vendor.rglob("*"))
+    if any(path.is_symlink() for path in vendor_files):
+        raise RuntimeError("reviewed SQLx PostgreSQL patch source must not contain links")
+    paths += [path for path in vendor_files if path.is_file()]
     paths += sorted((ROOT / "scripts/sql").glob("*-role.sql"))
     paths += sorted((ROOT / "sdk/typescript/dist").glob("*.js"))
     records = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()

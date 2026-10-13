@@ -675,6 +675,10 @@ impl Idempotency {
 }
 
 #[cfg(test)]
+#[path = "db_cancellation_tests.rs"]
+mod cancellation_tests;
+
+#[cfg(test)]
 mod migration_guard_tests {
     use super::verify_migration_ledger;
 

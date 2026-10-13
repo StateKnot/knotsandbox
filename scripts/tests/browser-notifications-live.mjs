@@ -4,6 +4,7 @@
 // No business response, identity, source event or notification is mocked.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { mutationResponseJson } from './mutation-response-observer.mjs';
 
 export async function notificationsConsole(page, config, coordinate) {
   const step = (name) => process.stderr.write(`NOTIFICATIONS_LIVE_STEP ${name}\n`);
@@ -23,10 +24,15 @@ export async function notificationsConsole(page, config, coordinate) {
     const url = new URL(reply.url());
     return url.origin === origin && url.pathname === path && reply.request().method() === method;
   };
-  const read = async (path) => page.evaluate(async ({ path, tenant }) => {
-    const reply = await fetch(path, { headers: { 'X-Tenant-ID': tenant }, cache: 'no-store' });
-    return { status: reply.status, etag: reply.headers.get('etag'), body: await reply.json() };
-  }, { path, tenant: config.tenant });
+  const read = async (path) => {
+    step('NATIVE_GET_BODY_READ');
+    const result = await page.evaluate(async ({ path, tenant }) => {
+      const reply = await fetch(path, { headers: { 'X-Tenant-ID': tenant }, cache: 'no-store' });
+      return { status: reply.status, etag: reply.headers.get('etag'), body: await reply.json() };
+    }, { path, tenant: config.tenant });
+    step('NATIVE_GET_BODY_READ_COMPLETE');
+    return result;
+  };
   const sourceFields = ['id', 'tenant_id', 'project_id', 'instance_id', 'automation_id',
     'run_id', 'source_event_id', 'source_run_version', 'source_status', 'created_at'];
   const checkSource = (resource, reference) => {
@@ -71,7 +77,9 @@ export async function notificationsConsole(page, config, coordinate) {
     await panel().getByRole('button', { name: `查看通知 ${source.notice_id}`, exact: true }).click();
     const reply = await reading;
     assert.equal(reply.status(), 200);
+    step('DETAIL_GET_BODY_READ');
     const resource = await reply.json();
+    step('DETAIL_GET_BODY_READ_COMPLETE');
     checkSource(resource);
     assert.equal(reply.headers().etag, `"${resource.version}"`);
     await page.waitForFunction(({ id, version }) => {
@@ -149,7 +157,9 @@ export async function notificationsConsole(page, config, coordinate) {
       data: '{}', maxRedirects: 0,
     });
     assert.equal(originDenied.status(), 403);
+    step('ORIGIN_DENIED_API_BODY_READ');
     assert.equal((await originDenied.json()).code, 'PERMISSION_DENIED');
+    step('ORIGIN_DENIED_API_BODY_READ_COMPLETE');
     const unchanged = await read(detailPath);
     assert.equal(unchanged.status, 200);
     assert.deepEqual(unchanged.body, before);
@@ -168,7 +178,9 @@ export async function notificationsConsole(page, config, coordinate) {
       const reply = await route.fetch({ maxRedirects: 0 });
       assert.equal(reply.status(), 200, 'normal ACK commits before its only reply fault');
       assert.equal(reply.headers().etag, '"2"');
+      step('ACK_FAULT_COMMITTED_API_BODY_READ');
       committed = await reply.json();
+      step('ACK_FAULT_COMMITTED_API_BODY_READ_COMPLETE');
       assert.deepEqual(Object.keys(committed).sort(), ['idempotency_expires_at', 'resource']);
       checkSource(committed.resource, before);
       assert.equal(committed.resource.version, 2);
@@ -225,7 +237,9 @@ export async function notificationsConsole(page, config, coordinate) {
     await retry();
     const writeReply = await deniedWrite;
     assert.equal(writeReply.status(), 404);
-    assert.equal((await writeReply.json()).code, 'RESOURCE_NOT_FOUND');
+    step('DENIED_WRITE_BODY_READ');
+    assert.equal((await mutationResponseJson(page, writeReply, 'NOTIFICATION')).code, 'RESOURCE_NOT_FOUND');
+    step('DENIED_WRITE_BODY_READ_COMPLETE');
     assert.equal(writeReply.request().headers()['idempotency-key'], original.key);
     assert.equal(writeReply.request().headers()['if-match'], original.etag);
     assert.equal(writeReply.request().postData(), original.body);
@@ -244,7 +258,9 @@ export async function notificationsConsole(page, config, coordinate) {
     await panel().getByRole('button', { name: '刷新通知', exact: true }).click();
     const refreshDenial = await deniedRefresh;
     assert.equal(refreshDenial.status(), 404);
+    step('REFRESH_DENIED_GET_BODY_READ');
     assert.equal((await refreshDenial.json()).code, 'RESOURCE_NOT_FOUND');
+    step('REFRESH_DENIED_GET_BODY_READ_COMPLETE');
     await panel().getByRole('alert').filter({ hasText: 'RESOURCE_NOT_FOUND' }).first().waitFor();
     await page.waitForFunction(() => !document.querySelector('[data-testid="automation-notification-detail"]')
       && !document.querySelector('table[aria-label="自动化异常通知列表"]'));
@@ -258,7 +274,9 @@ export async function notificationsConsole(page, config, coordinate) {
     await retry();
     const readReply = await deniedRead;
     assert.equal(readReply.status(), 404);
+    step('JOURNAL_DENIED_GET_BODY_READ');
     assert.equal((await readReply.json()).code, 'RESOURCE_NOT_FOUND');
+    step('JOURNAL_DENIED_GET_BODY_READ_COMPLETE');
     await page.getByRole('alert').filter({ hasText: 'RESOURCE_NOT_FOUND' }).first().waitFor();
     await assertUnknown();
     assert.equal(attempts.filter((value) => value.key === original.key).length, 2,
@@ -275,7 +293,9 @@ export async function notificationsConsole(page, config, coordinate) {
     assert.equal(replay.request().headers()['if-match'], original.etag);
     assert.equal(replay.request().postData(), original.body);
     assert(replay.request().headers()['x-csrf-token']);
-    assert.deepEqual(await replay.json(), committed);
+    step('ACK_REPLAY_RECEIPT_BODY_READ');
+    assert.deepEqual(await mutationResponseJson(page, replay, 'NOTIFICATION'), committed);
+    step('ACK_REPLAY_RECEIPT_BODY_READ_COMPLETE');
     const row = page.getByRole('row').filter({ hasText: original.key });
     await row.getByText('ACCEPTED', { exact: true }).waitFor();
     const saved = await journal();

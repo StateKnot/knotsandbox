@@ -4,6 +4,7 @@
 // The future ONCE trigger is never dispatched and no response body is mocked.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { mutationResponseJson } from './mutation-response-observer.mjs';
 
 export async function automationsConsole(page, config, coordinate) {
   const step = (name) => process.stderr.write(`AUTOMATIONS_LIVE_STEP ${name}\n`);
@@ -13,10 +14,15 @@ export async function automationsConsole(page, config, coordinate) {
     const url = new URL(reply.url());
     return url.origin === origin && url.pathname === path && reply.request().method() === method;
   };
-  const read = async (path) => page.evaluate(async ({ path, tenant }) => {
-    const reply = await fetch(path, { headers: { 'X-Tenant-ID': tenant }, cache: 'no-store' });
-    return { status: reply.status, etag: reply.headers.get('etag'), body: await reply.json() };
-  }, { path, tenant: config.tenant });
+  const read = async (path) => {
+    step('NATIVE_GET_BODY_READ');
+    const result = await page.evaluate(async ({ path, tenant }) => {
+      const reply = await fetch(path, { headers: { 'X-Tenant-ID': tenant }, cache: 'no-store' });
+      return { status: reply.status, etag: reply.headers.get('etag'), body: await reply.json() };
+    }, { path, tenant: config.tenant });
+    step('NATIVE_GET_BODY_READ_COMPLETE');
+    return result;
+  };
   let creates = 0;
   let changes = 0;
   let operationReads = 0;
@@ -115,7 +121,9 @@ export async function automationsConsole(page, config, coordinate) {
       });
       const reply = await route.fetch({ maxRedirects: 0 });
       assert.equal(reply.status(), 201, 'the formal API actually commits before the only reply fault');
+      step('CREATION_FAULT_COMMITTED_API_BODY_READ');
       actual = await reply.json();
+      step('CREATION_FAULT_COMMITTED_API_BODY_READ_COMPLETE');
       assert.equal(reply.headers().etag, '"1"');
       assert.equal(actual.resource.status, 'ACTIVE');
       assert.equal(actual.resource.version, 1);
@@ -163,7 +171,9 @@ export async function automationsConsole(page, config, coordinate) {
     assert.equal(replay.request().headers()['if-match'], original.etag);
     assert.equal(replay.request().postData(), original.body);
     assert(replay.request().headers()['x-csrf-token']);
-    const accepted = await replay.json();
+    step('CREATION_REPLAY_RECEIPT_BODY_READ');
+    const accepted = await mutationResponseJson(page, replay, 'AUTOMATION');
+    step('CREATION_REPLAY_RECEIPT_BODY_READ_COMPLETE');
     assert.deepEqual(accepted, actual);
     await row.getByRole('button', { name: '打开自动化策略', exact: true }).waitFor();
     const stored = await journal();
@@ -182,14 +192,18 @@ export async function automationsConsole(page, config, coordinate) {
     const opened = await opening;
     assert.equal(opened.status(), 200);
     assert.equal(opened.headers().etag, '"1"');
+    step('POLICY_GET_BODY_READ');
     assert.deepEqual(await opened.json(), actual.resource);
+    step('POLICY_GET_BODY_READ_COMPLETE');
     await state(actual.resource.id, 'ACTIVE', 1);
     const runs = page.waitForResponse((reply) => match(reply, 'GET', runsPath));
     await panel.getByRole('button', { name: '刷新运行历史', exact: true }).click();
     const history = await runs;
     assert.equal(history.status(), 200);
     assert.equal(new URL(history.url()).searchParams.get('project_id'), config.project);
+    step('RUN_HISTORY_GET_BODY_READ');
     const historyBody = await history.json();
+    step('RUN_HISTORY_GET_BODY_READ_COMPLETE');
     assert.deepEqual(historyBody.items, []);
     assert.equal(historyBody.next_cursor, null);
     assert.equal(await panel.getByRole('table', { name: '自动化运行历史', exact: true }).locator('tbody tr').count(), 0);
@@ -204,7 +218,9 @@ export async function automationsConsole(page, config, coordinate) {
       assert.equal(result.request().headers()['if-match'], `"${version - 1}"`);
       assert(result.request().headers()['x-csrf-token']);
       assert.deepEqual(JSON.parse(result.request().postData()), {});
-      const body = await result.json();
+      step('ACTION_RECEIPT_BODY_READ');
+      const body = await mutationResponseJson(page, result, 'AUTOMATION');
+      step('ACTION_RECEIPT_BODY_READ_COMPLETE');
       assert.equal(body.resource.id, actual.resource.id);
       assert.equal(body.resource.status, expectedStatus);
       assert.equal(body.resource.version, version);
@@ -229,7 +245,9 @@ export async function automationsConsole(page, config, coordinate) {
     assert.deepEqual(negative.stale, { status: 412, code: 'VERSION_MISMATCH' });
     await state(actual.resource.id, 'PAUSED', 2);
     step('RESUME_AND_PERMANENT_REVOKE');
+    step('RESUME_FRESH_ETAG');
     await action('恢复策略', 'resume', 'ACTIVE', 3);
+    step('PERMANENT_REVOKE_FRESH_ETAG');
     await action('永久撤销策略', 'revoke', 'REVOKED', 4);
     assert.equal(creates, 2);
     assert.equal(changes, 5, 'only three accepted UI transitions and two explicit rejection probes');
@@ -241,7 +259,9 @@ export async function automationsConsole(page, config, coordinate) {
     await panel.getByRole('button', { name: '重新读取策略', exact: true }).click();
     const denied = await denial;
     assert.equal(denied.status(), 404);
+    step('POLICY_DENIED_GET_BODY_READ');
     assert.equal((await denied.json()).code, 'RESOURCE_NOT_FOUND');
+    step('POLICY_DENIED_GET_BODY_READ_COMPLETE');
     await panel.getByRole('alert').filter({ hasText: 'RESOURCE_NOT_FOUND' }).first().waitFor();
     assert.equal(await detail().count(), 0);
     assert.equal(await panel.getByRole('table', { name: '自动化运行历史', exact: true }).count(), 0);
@@ -256,7 +276,9 @@ export async function automationsConsole(page, config, coordinate) {
     const restored = await rereading;
     assert.equal(restored.status(), 200);
     assert.equal(restored.headers().etag, '"4"');
+    step('POLICY_RESTORED_GET_BODY_READ');
     const restoredPolicy = await restored.json();
+    step('POLICY_RESTORED_GET_BODY_READ_COMPLETE');
     assert.equal(restoredPolicy.id, actual.resource.id);
     assert.equal(restoredPolicy.status, 'REVOKED');
     assert.equal(restoredPolicy.emitted_runs, 0);

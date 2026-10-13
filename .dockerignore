@@ -4,11 +4,16 @@
 !Cargo.lock
 !rust-toolchain.toml
 !build.rs
+!.dockerignore
+!vendor/
+!vendor/sqlx-postgres/
+!vendor/sqlx-postgres/**
 !src/
 !src/**
 !migrations/
 !migrations/**
 !scripts/
+!scripts/verify-sqlx-postgres-patch.py
 !scripts/sql/
 !scripts/sql/*.sql
 !.sqlx/

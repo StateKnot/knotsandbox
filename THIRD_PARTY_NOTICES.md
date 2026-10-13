@@ -36,6 +36,15 @@ Upstream: [Cilium v1.20.2](https://github.com/cilium/cilium/tree/v1.20.2),
 
 ## Build and runtime dependencies
 
+`vendor/sqlx-postgres/` contains the published SQLx Postgres 0.8.6 crate with a
+narrow backport of the upstream cancelled-BEGIN rollback fix. The original
+[MIT](vendor/sqlx-postgres/LICENSE-MIT) and
+[Apache-2.0](vendor/sqlx-postgres/LICENSE-APACHE) notices are retained.
+[Patch provenance](vendor/sqlx-postgres/KNOTSANDBOX-PATCH.md) and the complete
+[source digest inventory](vendor/sqlx-postgres/upstream.lock.json) identify the
+original package and the single modified source file. The crate keeps its
+original version and license; project MIT does not replace them.
+
 Rust, JavaScript and deployment dependencies retain their own licenses and
 copyrights, including applicable MIT, Apache, BSD, MPL and Unicode licenses.
 The lockfiles identify dependency versions. This source repository does not

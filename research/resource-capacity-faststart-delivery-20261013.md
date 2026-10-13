@@ -37,7 +37,7 @@ CPU读取叶级有效cpuset，并取叶级和全部非根祖先有限`cpu.max`�
 | 独立TLS PostgreSQL/签名身份/指标HTTP | 精确1通过；两容量选择项、租户隔离、IO期间撤权/epoch、正式迁移账本核对；源码/产物不变及自有资源清理确认 |
 | 独立TLS PostgreSQL/BFF收尾 | 4通过；真实连接角色/唯一标签核对、原登录/撤权/流关闭、会话锁及保留清理；新增用例要求实际普通DROP，不能延期冒充成功 |
 | SDK、控制台、真实浏览器HTTP合同 | 71、66、完整28通过；后者包含4项资源指标合同，使用明确HTTP fixture，保留原值、空缺和撤权清理 |
-| 原生响应观测合同 | 账户10项、诊断12项通过、零跳过，使用锁定Chromium；两种业务范围各自有界 |
+| 原生响应观测合同 | 原账户10项、原诊断12项及共享模块15项通过、零跳过，使用锁定Chromium；旧合同未修改，共享总预算 |
 | 完整真实Chrome/Keycloak/BFF/API/TLS-PG | 精确1通过；真实账号/授权、诊断/事件、未来策略、通知失ACK及重放、停止受理、撤权；9张截图、业务事实不变、临时realm/进程/PG容器清理确认 |
 
 非root Linux CI入口`scripts/test-nodeguard-capacity.py`消费普通Cargo产物，检查精确忽略用例、ELF/UID/metadata/路径、固定镜像与容器限额，只挂载二进制。创建失ACK按精确随机名字/标签/镜像恢复清理所有权；主失败和清理失败分别保留，未确认不存在不能通过。macOS本地的上述内核用例不等于这个Linux入口已经通过；最终入口与整套远端结果以新提交CI收据为准。
@@ -68,7 +68,27 @@ BFF修改仅位于测试fixture：为owner/runtime配置与唯一临时库绑定
 
 此补验后的完整Chrome/Keycloak/BFF/API/TLS-PG本地流程再次通过：精确1项、两种业务marker、9张截图、通知业务事实一致、源码/产物不变及全部自有资源清理确认。最新完整GitHub CI仍待后续补验提交的独立结果，真实Kata、GPU、云发行安全门禁仍未认证。
 
+`9c42b2dc`的[CI运行38419701643](https://github.com/StateKnot/knotsandbox/actions/runs/38419701643)四个独立作业全部通过；verify的真实容量、17组77项独立PG、PG全套及Keycloak/API也通过，真实浏览器已到诊断/事件VERIFIED，随后自动化创建失ACK后的原键重放再次遇到外部正文不可用。临时资源清理全部成功。该结果说明问题不只限于前两种提交回执，不能把本地通过等同于完整CI已通过。
+
+本次收敛为共享`mutation-response-observer.mjs`：一个原生fetch包装、一个全局16条/每条256KiB原始JSON预算，仅显式注册的闭合业务profile可捕获。服务身份、诊断、自动化、项目授权、通知ACK和本流程STOP分别固定method/UUID路径/status；仅通知ACK明确接受真实200及404，其余没有开放任意4xx。方法/路径已匹配但status属于同profile另一路由时立即MISMATCH，未知scope/status为SCOPE；仍以原origin、幂等键、实际status及ETag配对，跨profile消费不能取走其他回执。原两个模块只保留兼容导出/slot/error分类；多次初始化和reload合并注册，不能重复包装fetch。
+
+已知浏览器mutation正文统一从同原生响应读取，包括通知拒绝写入后保持UNKNOWN、恢复权限后同键200重放。原44/94/101项业务断言及全部请求调用保持；route.fetch/APIRequestContext的真实提交证据、GET及auth仍走原渠道，不重发、不替代GET或自动重试。原账户10/诊断12合同未经修改仍通过，新15项覆盖全部闭合路由、实际CDP观察状态失效、全局预算、隔离/初始化/同键404后200、原生身份及安全负例。共有37项、零失败/零跳过；完整产品链路与远端CI须继续按最终提交分别核验。
+
 本地证据在忽略的`.local/resource-faststart-20261013/`，包含源指纹、普通产物SHA、原失败日志和清理回执；不提交PKI、身份凭据、临时数据库或构建缓存。
+
+### 2026-10-14：真实数据库取消缺陷补验
+
+共享观察器后的真实业务链另行复现数据库503。固定页面码为`DEPENDENCY_UNAVAILABLE`；后续真实Chrome锁快照记录到`SESSION_READ`被另一个`IDLE_IN_TRANSACTION`/`ClientRead`会话阻塞，并返回SQLSTATE `55P03`。独立检查没有发现fixture跨浏览器协调阶段持事务；不把它归为UI渲染等待或外部CDP正文失留存。
+
+锁定SQLx Postgres 0.8.6在BEGIN往返期间被取消时，客户端深度尚未增加，drop不能排入ROLLBACK。真实TLS PostgreSQL最小回归先确认服务端进入BEGIN，再取消原future；未修复的同一物理连接仍在事务内，后续普通写入不可见、事务advisory锁未释放，2.27秒精确失败。采用[上游已合并修复](https://github.com/transact-rs/sqlx/commit/f1e94ec34dd5f11ad6488a3a8ac7988439a3f757)后，同一测试2.31秒通过，三项独立事实均正常。该回归进入默认独立TLS-PG矩阵，要求精确一项和完成marker；没有改变业务重试、锁、应用期限或成功响应。
+
+使用原0.8.6发布包的有限回移：原archive SHA256为`db58fcd5a53cf07c184b154801ff91347e4c30d17a3562a635ff028ad5deda46`，116个原文件只改变`transaction.rs`中的三处深度操作，保留双许可证和原版本。Cargo.lock如实显示path dependency。固定校验器验证全部原文件、唯一补丁、Cargo覆盖与Docker上下文，十项实际篡改负例通过；不修改其他依赖版本或把本地补丁伪装为registry checksum。所有临时SQL/DOM探针已按原字节恢复。
+
+普通Rust290项通过，122项环境专用用例保持独立门禁；严格本机all-targets clippy与格式检查通过。默认文件沙箱下的82项本地socket拒绝日志保留，改用已授权loopback验证权限后，同一测试集合全部通过，未改测试内容。新增十项SBOM path依赖合同通过；锁定Syft 1.54.0在无网络只读Linux容器中实际从新Cargo.lock识别出`sqlx-postgres 0.8.6`/`rust-crate`。该条目没有PURL，不能据此宣称完整镜像扫描或正式发行已认证。完整产品链和远端全部CI继续以最终源码绑定收据核对。
+
+该修复是资源与快启子项的验收依赖；不会把预留分母、预准备预算或GPU状态提前标为完成。下一资源交付的身份、事务及查询合同见[逐次启动资源账本方案](launch-resource-accounting-plan-20261014.md)。
+
+版权与出处贯穿实际交付链：当前manifest v3强制签名`sqlx-postgres-notices.json`，包含原双许可证全文和补丁来源；v1/v2只保留历史读取。OCI/宿主导出和离线安装均保留通知，只有原八ELF执行集合；发布合同87项通过，包含真正本地文件复制、改字节拒绝、旧版下载名单和许可证截短负例。该结果没有签发本项目正式发布，签名、镜像扫描和云验收仍是各自独立的发布门。
 
 ## 下一交付与发布门
 

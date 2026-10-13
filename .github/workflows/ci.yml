@@ -202,6 +202,8 @@ jobs:
           key: ${{ runner.os }}-rust-1.98.1-${{ hashFiles('Cargo.lock') }}
       - name: Formatting and lint
         run: |
+          python3 scripts/verify-sqlx-postgres-patch.py
+          python3 -m unittest discover -s scripts/tests -p 'test_sqlx_postgres_patch.py'
           cargo fmt --all -- --check
           cargo clippy --locked --all-targets -- -D warnings
           bash -n scripts/dev-dependencies.sh deploy/keycloak/postgres-init.sh
@@ -318,6 +320,15 @@ jobs:
           assert all(re.search(r'^' + line + r'$', output, re.M) for line in
                      (r'1\.\.12', r'# tests 12', r'# pass 12', r'# fail 0', r'# skipped 0'))
           PY
+          node --test-reporter=tap scripts/tests/mutation-response-observer.contract.mjs \
+            --chrome "$sandbox_live_chrome" \
+            > .local/console-observer-ci/mutation-response-observer-contract.log 2>&1
+          python3 - <<'PY'
+          import pathlib, re
+          output = pathlib.Path('.local/console-observer-ci/mutation-response-observer-contract.log').read_text()
+          assert all(re.search(r'^' + line + r'$', output, re.M) for line in
+                     (r'1\.\.15', r'# tests 15', r'# pass 15', r'# fail 0', r'# skipped 0'))
+          PY
           python3 scripts/test-console-browser.py \
             --node "$(command -v node)" --chrome "$sandbox_live_chrome" \
             --identity-python "$PWD/.local/cluster-venv/bin/python" \
@@ -333,6 +344,7 @@ jobs:
             .local/console-notifications-ci/browser.log
             .local/console-observer-ci/response-observer-contract.log
             .local/console-observer-ci/diagnosis-response-observer-contract.log
+            .local/console-observer-ci/mutation-response-observer-contract.log
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14

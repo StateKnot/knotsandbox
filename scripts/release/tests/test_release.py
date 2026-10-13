@@ -24,6 +24,7 @@ from common import release_file_names, timevalue
 from download_previous import download
 from test_native import native_fixture, retain_historical_binaries
 from test_sqlite_build import native_trust_fixture
+from sqlx_notices import create as create_sqlx_notices
 
 def fixture_reference_time(debian_lock, console_lock):
     locks = (debian_lock, console_lock)
@@ -122,6 +123,7 @@ def fixture(directory, *, historical=False):
         if name != 'proxy-source': dump(directory/(name+'.spdx.json'), {'fixture':True})
     dump(directory/'database.json', database_status())
     dump(directory/'scan-gate.json', {'version':1,'evaluated_at':FIXTURE_TIME.isoformat(),'blocked':[], 'reports':{name:sha(directory/(name+'.grype.json')) for name in NAMES}, 'policy_sha256':sha(directory/'risk-exceptions.json')})
+    dump(directory/'sqlx-postgres-notices.json', create_sqlx_notices(ROOT.parent.parent))
     with patch('build.now',return_value=FIXTURE_TIME), patch('build.BINARIES',binaries): create_manifest(directory,REPO,TAG,COMMIT,'42',{'first_release':True,'previous':None})
 
 

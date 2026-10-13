@@ -12,7 +12,8 @@ ENV CARGO_BUILD_JOBS=1
 WORKDIR /build
 COPY . .
 RUN test "${TARGETARCH}" = amd64 \
-    && printf '%s  %s\n' 714d457d580922dbf1d0be8bd35ba236a842b50b0072ae791582a19adef772a5 /etc/ssl/certs/ca-certificates.crt | sha256sum -c -
+    && printf '%s  %s\n' 714d457d580922dbf1d0be8bd35ba236a842b50b0072ae791582a19adef772a5 /etc/ssl/certs/ca-certificates.crt | sha256sum -c - \
+    && python3 /build/scripts/verify-sqlx-postgres-patch.py
 # SQLite is linked from independently verified official source. Never probe an
 # ambient system library or fall back to the older source in libsqlite3-sys.
 ADD --checksum=sha256:0e9483900e92cd5de8fd48d16bf9200145a61f7fd5be542a5ac81d8a9516eb9c https://www.sqlite.org/2026/sqlite-autoconf-3530400.tar.gz /tmp/sqlite-source.tar.gz
@@ -36,10 +37,12 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 # It runs under systemd on certified Kata nodes, not inside an application Pod.
 FROM scratch AS nodeguard-export
 COPY --from=builder /artifacts/sandbox-nodeguard /sandbox-nodeguard
+COPY vendor/sqlx-postgres/LICENSE-MIT vendor/sqlx-postgres/LICENSE-APACHE vendor/sqlx-postgres/upstream.lock.json vendor/sqlx-postgres/KNOTSANDBOX-PATCH.md /licenses/sqlx-postgres/
 
 FROM scratch AS binaries-export
 COPY --from=builder /artifacts/ /
 COPY Cargo.lock /Cargo.lock
+COPY vendor/sqlx-postgres/LICENSE-MIT vendor/sqlx-postgres/LICENSE-APACHE vendor/sqlx-postgres/upstream.lock.json vendor/sqlx-postgres/KNOTSANDBOX-PATCH.md /licenses/sqlx-postgres/
 
 FROM ${RUNTIME_IMAGE} AS runner
 # Reviewed security fixes are content-addressed; dpkg uses no package resolver/network.
@@ -59,6 +62,7 @@ RUN test "$(dpkg-query -W -f='${Version}' libgcc-s1)" = '14.2.0-19' \
     && chown 1000:1000 /workspace
 COPY --from=builder --chown=root:root /artifacts/sandbox-runner /usr/local/bin/sandbox-runner
 COPY Cargo.lock /usr/share/sandbox-platform/Cargo.lock
+COPY vendor/sqlx-postgres/LICENSE-MIT vendor/sqlx-postgres/LICENSE-APACHE vendor/sqlx-postgres/upstream.lock.json vendor/sqlx-postgres/KNOTSANDBOX-PATCH.md /usr/share/sandbox-platform/licenses/sqlx-postgres/
 RUN chmod 0555 /usr/local/bin/sandbox-runner
 USER 1000:1000
 WORKDIR /workspace
@@ -76,6 +80,7 @@ COPY --from=builder --chown=root:root /artifacts/sandbox-backup-worm /usr/local/
 COPY --from=builder --chown=root:root /artifacts/sandbox-credentials /usr/local/bin/sandbox-credentials
 COPY --from=builder --chown=root:root /artifacts/sandbox-automation /usr/local/bin/sandbox-automation
 COPY Cargo.lock /usr/share/sandbox-platform/Cargo.lock
+COPY vendor/sqlx-postgres/LICENSE-MIT vendor/sqlx-postgres/LICENSE-APACHE vendor/sqlx-postgres/upstream.lock.json vendor/sqlx-postgres/KNOTSANDBOX-PATCH.md /usr/share/sandbox-platform/licenses/sqlx-postgres/
 USER 10001:10001
 WORKDIR /tmp
 STOPSIGNAL SIGTERM

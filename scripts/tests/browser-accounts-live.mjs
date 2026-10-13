@@ -2,6 +2,7 @@
 // dropped; no response body, identity or database result is synthesized.
 import assert from 'node:assert/strict';
 import { serviceClientMutationJson } from './service-client-response-observer.mjs';
+import { mutationResponseJson } from './mutation-response-observer.mjs';
 
 export async function accountConsole(page, config, coordinate) {
   const step = (name) => process.stderr.write(`ACCOUNT_LIVE_STEP ${name}\n`);
@@ -103,7 +104,9 @@ export async function accountConsole(page, config, coordinate) {
   await grant.getByRole('button', { name: '创建项目授权', exact: true }).click();
   const grantResponse = await grantPending;
   assert.equal(grantResponse.status(), 201);
-  const permission = (await grantResponse.json()).resource;
+  step('GRANT_CREATE_RECEIPT_BODY_READ');
+  const permission = (await mutationResponseJson(page, grantResponse, 'GRANT')).resource;
+  step('GRANT_CREATE_RECEIPT_BODY_READ_COMPLETE');
   assert.equal(permission.principal_id, created[0].principal_id);
   assert.equal(permission.action, 'instances:read');
   await coordinate('machine_granted', 'machine_read_allowed');
@@ -219,7 +222,9 @@ export async function accountConsole(page, config, coordinate) {
     const changed = await pending;
     assert.equal(changed.status(), 200);
     assert.equal(changed.request().headers()['if-match'], `"${version}"`);
-    assert.equal((await changed.json()).resource.version, version + 1);
+    step('GRANT_TRANSITION_RECEIPT_BODY_READ');
+    assert.equal((await mutationResponseJson(page, changed, 'GRANT')).resource.version, version + 1);
+    step('GRANT_TRANSITION_RECEIPT_BODY_READ_COMPLETE');
     await coordinate(sent, expected);
   }
   await permissionDetail.getByRole('button', { name: '撤销项目授权', exact: true }).click();
@@ -230,7 +235,9 @@ export async function accountConsole(page, config, coordinate) {
   assert.equal(revoked.request().postData(), null);
   assert.equal(revoked.request().headers()['content-type'], undefined);
   assert.equal(revoked.request().headers()['if-match'], '"3"');
-  assert.equal((await revoked.json()).resource.enabled, false);
+  step('GRANT_REVOKE_RECEIPT_BODY_READ');
+  assert.equal((await mutationResponseJson(page, revoked, 'GRANT')).resource.enabled, false);
+  step('GRANT_REVOKE_RECEIPT_BODY_READ_COMPLETE');
   await coordinate('machine_grant_revoked', 'machine_grant_denied');
   const journal = await page.evaluate(() => JSON.parse(localStorage.getItem('sandbox.console.intents.v1') ?? '[]'));
   assert(journal.length >= 6);

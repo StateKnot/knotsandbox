@@ -13,10 +13,11 @@ import tarfile
 import tempfile
 from security_packages import validate_lock
 from console_security import validate_lock as validate_console_lock
-from common import BINARIES, COMPONENTS, SCAN_NAMES, LEGACY_SCAN_NAMES, release_file_names, release_binaries, ROOT, DIGEST, dump, image_digest, load, now, require, run, safe_child, sha, subject, timevalue, tool, unique
+from common import BINARIES, COMPONENTS, SCAN_NAMES, LEGACY_SCAN_NAMES, release_file_names, release_binaries, ROOT, SQLX_POSTGRES_NOTICES, DIGEST, dump, image_digest, load, now, require, run, safe_child, sha, subject, timevalue, tool, unique
 from gate import evaluate, validate_database, validate_sboms
 from console_assets import image_files, inventory, asset_manifest, validate_chain
 from native import validate as validate_native, validate_runtime
+from sqlx_notices import validate as validate_sqlx_notices, MAX_BYTES as NOTICES_MAX_BYTES
 
 
 def extract_oci(archive_path, directory, component=None):
@@ -45,7 +46,7 @@ def verify_candidate(directory, repository, tag, commit, current=None, *, histor
     current = current or now()
     manifest = load(safe_child(directory, 'release-manifest.json'), 1024 * 1024)
     expected = subject(repository, tag, commit)
-    require(manifest.get('version') in ((1,2) if historical else (2,)) and manifest.get('repository') == repository and manifest.get('tag') == tag and manifest.get('commit') == commit, 'RELEASE_IDENTITY')
+    require(type(manifest.get('version')) is int and manifest['version'] in ((1,2,3) if historical else (3,)) and manifest.get('repository') == repository and manifest.get('tag') == tag and manifest.get('commit') == commit, 'RELEASE_IDENTITY')
     legacy = manifest['version'] == 1
     require(manifest.get('platform') == 'linux/amd64' and manifest.get('workflow') == '.github/workflows/release.yml' and manifest.get('workflow_identity') == expected, 'RELEASE_WORKFLOW')
     require(re.fullmatch(r'[1-9][0-9]{0,30}', manifest.get('run_id', '')), 'RUN_ID')
@@ -56,13 +57,16 @@ def verify_candidate(directory, repository, tag, commit, current=None, *, histor
     validate_chain(manifest.get('console_assets', {}), repository, tag, commit)
     if manifest['console_assets']['previous']:
         require(timevalue(manifest['console_assets']['previous']['created_at']) <= created, 'PREVIOUS_RELEASE_FROM_FUTURE')
-    required = release_file_names(legacy=legacy, binary_names=binaries, historical=historical)
+    required = release_file_names(legacy=legacy, binary_names=binaries, historical=historical,
+                                  version=manifest['version'])
     scan_names = LEGACY_SCAN_NAMES if legacy else SCAN_NAMES
     require(set(manifest['files']) == required, 'RELEASE_FILE_COVERAGE')
     for name, metadata in manifest['files'].items():
         path = safe_child(directory, name)
         require(set(metadata) == {'sha256', 'size'} and type(metadata['size']) is int and 0 < metadata['size'] <= 8 * 1024**3, 'RELEASE_FILE_METADATA')
         require(path.stat().st_size == metadata['size'] and sha(path) == metadata['sha256'], 'RELEASE_FILE_HASH')
+    if manifest['version'] == 3:
+        validate_sqlx_notices(load(safe_child(directory, SQLX_POSTGRES_NOTICES), NOTICES_MAX_BYTES))
     # Historical checks are only used by verify_previous after current pinned
     # Cosign authenticates the exact external identity. They never emit an
     # installation lock or claim current vulnerability safety. This is not a

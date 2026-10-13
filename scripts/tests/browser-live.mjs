@@ -16,6 +16,7 @@ import { automationsConsole } from './browser-automations-live.mjs';
 import { notificationsConsole } from './browser-notifications-live.mjs';
 import { installServiceClientResponseObserver } from './service-client-response-observer.mjs';
 import { installDiagnosisResponseObserver } from './diagnosis-response-observer.mjs';
+import { installMutationResponseObserver } from './mutation-response-observer.mjs';
 
 
 const screenshotPlan = [
@@ -129,6 +130,8 @@ try {
   // BrowserApi captures fetch at construction; observe before console bootstrap.
   await installServiceClientResponseObserver(page, config.origin);
   await installDiagnosisResponseObserver(page, config.origin);
+  await installMutationResponseObserver(page, config.origin,
+    ['AUTOMATION', 'GRANT', 'NOTIFICATION', 'LIFECYCLE']);
   page.on('requestfailed', (request) => {
     const code = request.failure()?.errorText;
     if (typeof code === 'string' && /^net::ERR_[A-Z_]+$/.test(code)) transportFailure = code;
