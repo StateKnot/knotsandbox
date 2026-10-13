@@ -1,6 +1,6 @@
 # 身份与生命周期必跑回归
 
-对应开发表 G4-01（权限与攻击面）、G4-02（状态与生命周期故障）及 G4-06 的历史自动化 schema 升级子项。必跑矩阵现为 14 组；覆盖审查修复的实际调用链和一个历史 schema 前缀升级用例，不能替代实云运行时、灾备、容量或完整发布认证。
+对应开发表 G4-01（权限与攻击面）、G4-02（状态与生命周期故障）及 G4-06 的历史自动化 schema 升级子项。必跑矩阵现为17组；覆盖审查修复的实际调用链、BFF连接收尾和一个历史schema前缀升级用例，不能替代实云运行时、灾备、容量或完整发布认证。
 
 ## 本地运行
 
@@ -24,12 +24,15 @@ python3 scripts/test-review-fixes.py \
 
 runner 只接受本地 Docker；允许显式设置本机 `DOCKER_HOST=unix:///绝对路径/docker.sock`，不接受远端 daemon。它新建带随机名称与所有权标签的容器，数据仅存内存盘，数据库端口只绑定 `127.0.0.1`。正常组使用独立当前迁移库及十个独立最小权限登录角色；bootstrap 先在自己的新库运行既有 database 初始化/RLS 测试，再在同库验证引导的重复性。
 
+`bff_pg`精确执行4项BFF用例；仅此组获得同一临时TLS-PG容器的admin URI，用于创建各自随机子测试库。BFF业务始终使用普通runtime登录，其他接口组不接收admin权限。owner/runtime pool的唯一application_name在真实PG核对；关闭后最多2秒等待匹配角色/标签的空闲无事务尾连接，只有零连接才普通DROP。活动、外来、隐藏状态拒绝；不会terminate或FORCE。新用例用关闭后独立admin连接验证数据库实际消失，不能把延期清理记录当成删除成功。
+
 唯一例外是精确元组 `automation_upgrade / automation_upgrade / upgrade_from_v41_preserves_historical_automation_and_rejects_invalid_source_events`：runner 先确认本次新库用户关系数为零，不运行当前 `sandboxd` 预迁移，由被测用例安装真实迁移源码中版本 ≤41 的历史前缀，再升级到当前版本。相同名称、不同 target/filter/required 会失败；没有通用跳过迁移或选择已有库的选项。测试连接启用 `verify-full` 并验证专用测试 CA。它不会读取或修改已有数据库，也不会通过超级用户连接运行被测 API/worker；历史 schema 由无 `CREATEDB` 权限的 owner 登录安装。
 
 ## 覆盖与通过条件
 
 | 验收组 | 真实 Interface / 条件 | 关键断言 |
 | --- | --- | --- |
+| bff_pg | 独立TLS PG、实际owner/runtime标签及既有BFF HTTP/会话 | 4项精确用例；登录/CSRF/刷新/撤权/流关闭、真实锁到期、保留清理及普通删除；安全反例保留active/xact/foreign拒绝 |
 | service_clients | 正常 PostgreSQL 服务身份管理与授权 | 相同 issuer/sub 的错误 client 被拒；owner CAS 轮换后旧持久委派不能复活 |
 | tenant_audit | 独立租户审计、签名JWT/JWKS及真实Node SDK | NULL-project脱敏投影、项目和租户隔离、双向动作游标隔离；真实锁等待期间撤权／身份禁用／token和grant到期拒绝返回 |
 | automation_upgrade | 本次自有空库，真实 ≤41 schema 前缀、冻结历史 ACL，按41→42→43正常迁移；当前JWT/JWKS与身份映射 | 非空账务/回执/LEGAL及42已阅保留；同run UNKNOWN→FAILED独立来源和已阅状态、同文本key跨目标原回执恢复；终态重复源23505整事务回滚、分页/游标/撤权/租户隔离；旧writer及旧Migrator合同保留 |

@@ -53,6 +53,180 @@ struct Fixture {
     tasks: Vec<tokio::task::JoinHandle<()>>,
     keys: tempfile::TempDir,
 }
+
+#[derive(Clone, sqlx::FromRow)]
+struct FixturePeer {
+    role: String,
+    pool: String,
+    state: String,
+    wait: String,
+    xact_open: bool,
+}
+
+// A tag identifies a tail we may wait for; it never authorizes DROP or termination.
+fn idle_owned_tail(
+    peer: &FixturePeer,
+    owner: &str,
+    owner_pool: &str,
+    runtime: &str,
+    runtime_pool: &str,
+) -> bool {
+    ((peer.role == owner && peer.pool == owner_pool)
+        || (peer.role == runtime && peer.pool == runtime_pool))
+        && peer.state == "idle"
+        && !peer.xact_open
+        && matches!(peer.wait.as_str(), "" | "ClientRead")
+}
+
+fn fixture_pool_url(url: &mut url::Url, name: &str) {
+    let retained: Vec<_> = url
+        .query_pairs()
+        .filter(|(key, _)| key != "application_name")
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+    url.query_pairs_mut()
+        .clear()
+        .extend_pairs(retained)
+        .append_pair("application_name", name);
+}
+
+async fn fixture_peers(admin: &PgPool, database: &str) -> anyhow::Result<Vec<FixturePeer>> {
+    // Each call is an independent autocommit snapshot, never a cached long TX.
+    Ok(sqlx::query_as("SELECT usename AS role,COALESCE(application_name,'') AS pool,COALESCE(state,'') AS state,COALESCE(wait_event,'') AS wait,xact_start IS NOT NULL AS xact_open FROM pg_stat_activity WHERE datname=$1")
+        .bind(database).fetch_all(admin).await?)
+}
+
+#[test]
+fn fixture_backend_drain_rejects_active_transaction_and_foreign_tails() {
+    let owner = FixturePeer {
+        role: "owner".into(),
+        pool: "owned_owner".into(),
+        state: "idle".into(),
+        wait: String::new(),
+        xact_open: false,
+    };
+    let runtime = FixturePeer {
+        role: "runtime".into(),
+        pool: "owned_runtime".into(),
+        wait: "ClientRead".into(),
+        ..owner.clone()
+    };
+    let allowed =
+        |p: &FixturePeer| idle_owned_tail(p, "owner", "owned_owner", "runtime", "owned_runtime");
+    assert!(allowed(&owner) && allowed(&runtime));
+    for forbidden in [
+        FixturePeer {
+            state: "active".into(),
+            ..owner.clone()
+        },
+        FixturePeer {
+            state: "idle in transaction".into(),
+            ..owner.clone()
+        },
+        FixturePeer {
+            xact_open: true,
+            ..owner.clone()
+        },
+        FixturePeer {
+            role: "foreign".into(),
+            ..owner.clone()
+        },
+        FixturePeer {
+            pool: "another_fixture_owner".into(),
+            ..owner.clone()
+        },
+        FixturePeer {
+            state: String::new(),
+            ..owner.clone()
+        },
+        FixturePeer {
+            wait: "ClientWrite".into(),
+            ..runtime
+        },
+    ] {
+        assert!(!allowed(&forbidden));
+    }
+}
+
+#[test]
+fn fixture_pool_tag_preserves_tls_query_and_replaces_duplicate_names() -> anyhow::Result<()> {
+    let mut url = url::Url::parse(
+        "postgresql://owner:placeholder@127.0.0.1:5432/test_test?sslmode=verify-full&application_name=old&sslrootcert=%2Ftmp%2Fca.crt&application_name=older",
+    )?;
+    fixture_pool_url(&mut url, "owned_owner");
+    let pairs: Vec<_> = url.query_pairs().collect();
+    assert_eq!(
+        pairs
+            .iter()
+            .filter(|(k, _)| k == "application_name")
+            .count(),
+        1
+    );
+    assert!(
+        pairs
+            .iter()
+            .any(|(k, v)| k == "application_name" && v == "owned_owner")
+    );
+    assert!(
+        pairs
+            .iter()
+            .any(|(k, v)| k == "sslmode" && v == "verify-full")
+    );
+    assert!(
+        pairs
+            .iter()
+            .any(|(k, v)| k == "sslrootcert" && v == "/tmp/ca.crt")
+    );
+    assert_eq!(url.username(), "owner");
+    assert_eq!(url.password(), Some("placeholder"));
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires disposable local PostgreSQL with ordinary owner/runtime roles"]
+async fn browser_fixture_tagged_pools_drain_before_ordinary_database_drop() -> anyhow::Result<()> {
+    let f = Fixture::start().await?;
+    let admin_options = f.admin.connect_options();
+    let name = f.database_name.clone();
+    for pool in [&f.owner, &f.runtime.app.database.pool] {
+        let expected_role = pool.connect_options().get_username().to_owned();
+        let expected_pool = pool
+            .connect_options()
+            .get_application_name()
+            .ok_or_else(|| anyhow::anyhow!("fixture pool tag required"))?
+            .to_owned();
+        let (session, current, tag): (String, String, String) = sqlx::query_as(
+            "SELECT session_user::text,current_user::text,current_setting('application_name')",
+        )
+        .fetch_one(pool)
+        .await?;
+        anyhow::ensure!(
+            session == expected_role
+                && current == expected_role
+                && tag == expected_pool
+                && tag.is_ascii()
+                && tag.len() < 64,
+            "actual fixture pool identity mismatch"
+        );
+    }
+    f.close().await?;
+    let admin = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with((*admin_options).clone())
+        .await?;
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname=$1)")
+            .bind(name)
+            .fetch_one(&admin)
+            .await?;
+    anyhow::ensure!(
+        !exists,
+        "fixture requires actual ordinary DROP, no deferral"
+    );
+    admin.close().await;
+    println!("BFF_FIXTURE_TAGGED_BACKENDS_DRAINED_ORDINARY_DROP_VERIFIED");
+    Ok(())
+}
 fn jwt(value: Value, id: bool) -> String {
     let mut header = Header::new(Algorithm::RS256);
     header.kid = Some("key-a".into());
@@ -79,7 +253,15 @@ impl Fixture {
         let database_name = format!("sandbox_bff_{}_test", Uuid::new_v4().simple());
         let mut admin_url = owner_url.clone();
         admin_url.set_path("/postgres");
-        if let Ok(password) = std::env::var("SANDBOX_POSTGRES_ADMIN_PASSWORD") {
+        if let Ok(url) = std::env::var("TEST_POSTGRES_ADMIN_DATABASE_URL") {
+            admin_url = url::Url::parse(&url)?;
+            anyhow::ensure!(
+                admin_url.host_str() == owner_url.host_str()
+                    && admin_url.port() == owner_url.port()
+                    && admin_url.path() == "/postgres",
+                "fixture administrator must be on the same literal-loopback server"
+            );
+        } else if let Ok(password) = std::env::var("SANDBOX_POSTGRES_ADMIN_PASSWORD") {
             admin_url
                 .set_username("sandbox_dev_admin")
                 .map_err(|_| anyhow::anyhow!("invalid local administrator identity"))?;
@@ -108,6 +290,8 @@ impl Fixture {
         owner_target.set_path(&database_name);
         let mut runtime_target = runtime_url;
         runtime_target.set_path(&database_name);
+        fixture_pool_url(&mut owner_target, &format!("{database_name}_owner"));
+        fixture_pool_url(&mut runtime_target, &format!("{database_name}_runtime"));
         let owner = PgPoolOptions::new()
             .max_connections(8)
             .connect(owner_target.as_str())
@@ -365,6 +549,30 @@ impl Fixture {
             .connect_options()
             .get_username()
             .to_owned();
+        let owner_pool = self
+            .owner
+            .connect_options()
+            .get_application_name()
+            .ok_or_else(|| anyhow::anyhow!("fixture owner pool tag missing"))?
+            .to_owned();
+        let runtime_pool = self
+            .runtime
+            .app
+            .database
+            .pool
+            .connect_options()
+            .get_application_name()
+            .ok_or_else(|| anyhow::anyhow!("fixture runtime pool tag missing"))?
+            .to_owned();
+        anyhow::ensure!(
+            owner_pool == format!("{}_owner", self.database_name)
+                && runtime_pool == format!("{}_runtime", self.database_name)
+                && owner_pool.len() < 64
+                && runtime_pool.len() < 64
+                && owner_pool.is_ascii()
+                && runtime_pool.is_ascii(),
+            "fixture pool tags mismatch"
+        );
         for t in self.tasks {
             t.abort();
             let _ = t.await;
@@ -373,57 +581,87 @@ impl Fixture {
         self.owner.close().await;
         drop(self.runtime);
         drop(self.keys);
-        let peers:Vec<(String,String,String,bool)>=sqlx::query_as("SELECT usename,COALESCE(state,''),COALESCE(wait_event,''),xact_start IS NOT NULL FROM pg_stat_activity WHERE datname=$1").bind(&self.database_name).fetch_all(&self.admin).await?;
-        let actual_owner: String =
-            sqlx::query_scalar("SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname=$1")
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            let (peers, actual_owner) = tokio::time::timeout_at(deadline, async {
+                let peers = fixture_peers(&self.admin, &self.database_name).await?;
+                let actual_owner: String = sqlx::query_scalar(
+                    "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname=$1",
+                )
                 .bind(&self.database_name)
                 .fetch_one(&self.admin)
                 .await?;
-        let cleanup_safe = actual_owner == owner_role
-            && peers.iter().all(|(role, state, wait, _)| {
-                role == &owner_role && state == "idle" && wait == "ClientRead"
-            });
-        if !cleanup_safe {
-            // Fixed metadata only: never emit database names, logins, queries,
-            // URLs or credentials while diagnosing a refused fixture cleanup.
-            eprintln!(
-                "BFF_FIXTURE_CLEANUP_REFUSED owner_matches={} peers={}",
-                actual_owner == owner_role,
-                peers.len()
+                Ok::<_, anyhow::Error>((peers, actual_owner))
+            })
+            .await
+            .context("fixture backend drain deadline exceeded")??;
+            anyhow::ensure!(
+                tokio::time::Instant::now() < deadline,
+                "fixture backend drain deadline exceeded"
             );
-            for (role, state, wait, xact_open) in &peers {
-                let class = if role == &owner_role {
-                    "OWNER"
-                } else if role == &runtime_role {
-                    "RUNTIME"
-                } else {
-                    "FOREIGN"
-                };
-                let state = match state.as_str() {
-                    "active"
-                    | "idle"
-                    | "idle in transaction"
-                    | "idle in transaction (aborted)"
-                    | "fastpath function call"
-                    | "disabled" => state.as_str(),
-                    _ => "OTHER",
-                };
-                let wait = if wait.len() <= 64
-                    && wait.bytes().all(|v| v.is_ascii_alphanumeric() || v == b'_')
-                {
-                    wait.as_str()
-                } else {
-                    "OTHER"
-                };
+            let cleanup_safe = actual_owner == owner_role
+                && peers.iter().all(|peer| {
+                    idle_owned_tail(peer, &owner_role, &owner_pool, &runtime_role, &runtime_pool)
+                });
+            if !cleanup_safe {
                 eprintln!(
-                    "BFF_FIXTURE_CLEANUP_PEER role={class} state={state} wait={wait} xact_open={xact_open}"
+                    "BFF_FIXTURE_CLEANUP_REFUSED owner_matches={} peers={}",
+                    actual_owner == owner_role,
+                    peers.len()
                 );
+                for peer in &peers {
+                    let class = if peer.role == owner_role {
+                        "OWNER"
+                    } else if peer.role == runtime_role {
+                        "RUNTIME"
+                    } else {
+                        "FOREIGN"
+                    };
+                    let state = match peer.state.as_str() {
+                        "active"
+                        | "idle"
+                        | "idle in transaction"
+                        | "idle in transaction (aborted)"
+                        | "fastpath function call"
+                        | "disabled" => peer.state.as_str(),
+                        _ => "OTHER",
+                    };
+                    let wait = if peer.wait.len() <= 64
+                        && peer
+                            .wait
+                            .bytes()
+                            .all(|v| v.is_ascii_alphanumeric() || v == b'_')
+                    {
+                        peer.wait.as_str()
+                    } else {
+                        "OTHER"
+                    };
+                    eprintln!(
+                        "BFF_FIXTURE_CLEANUP_PEER role={class} state={state} wait={wait} xact_open={} pool_matches={}",
+                        peer.xact_open,
+                        idle_owned_tail(
+                            peer,
+                            &owner_role,
+                            &owner_pool,
+                            &runtime_role,
+                            &runtime_pool
+                        )
+                    );
+                }
             }
+            anyhow::ensure!(
+                cleanup_safe,
+                "fixture cleanup refuses unexpected owner, active or foreign connections"
+            );
+            if peers.is_empty() {
+                break;
+            }
+            anyhow::ensure!(
+                tokio::time::Instant::now() < deadline,
+                "fixture closed pools still have server backends after bounded drain"
+            );
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        anyhow::ensure!(
-            cleanup_safe,
-            "fixture cleanup refuses unexpected owner, active or foreign connections"
-        );
         // Use only an ordinary DROP. An idle migration-owner socket can survive
         // until process exit; retain that fixture and record separate cleanup.
         match sqlx::query(&format!("DROP DATABASE {}", self.database_name))
@@ -432,6 +670,29 @@ impl Fixture {
         {
             Ok(_) => {}
             Err(sqlx::Error::Database(ref e)) if e.code().as_deref() == Some("55006") => {
+                // Recheck the race after the zero-peer snapshot. Runtime or
+                // foreign connections can never become an owner-only deferral.
+                let peers = fixture_peers(&self.admin, &self.database_name).await?;
+                let actual_owner: String = sqlx::query_scalar(
+                    "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname=$1",
+                )
+                .bind(&self.database_name)
+                .fetch_one(&self.admin)
+                .await?;
+                anyhow::ensure!(
+                    actual_owner == owner_role
+                        && !peers.is_empty()
+                        && peers.iter().all(|peer| peer.role == owner_role
+                            && peer.pool == owner_pool
+                            && idle_owned_tail(
+                                peer,
+                                &owner_role,
+                                &owner_pool,
+                                &runtime_role,
+                                &runtime_pool
+                            )),
+                    "ordinary DROP refuses non-owner or unknown connection race"
+                );
                 std::fs::create_dir_all(".local")?;
                 use std::io::Write;
                 let mut file = std::fs::OpenOptions::new()

@@ -253,3 +253,5 @@ G2-07下一子项须先冻结`STOP_AFTER_PLATFORM_IDLE`语义和有界可撤销�
 本轮最终源码已完成本地普通Rust、严格Linux检查、真实内核容量、Prometheus、独立TLS PostgreSQL、SDK/控制台和真实Chrome身份全流程验收。精确范围、环境专用未执行用例、CI故障与边界见[本轮交付记录](resource-capacity-faststart-delivery-20261013.md)；远端完整CI以新提交收据为准。
 
 CI补验发现真实容量入口的内核Invalid错误，已补合法`core_sched.force_idle_usec`兼容与固定阶段/字段存在布尔证据；没有跳过内核门禁或把失败转换为缺测。最新本地普通Rust288项、Linux nodeguard49项及真实容量精确用例通过，下一提交须通过Ubuntu入口及完整真实浏览器CI，具体失败事实和根因待证范围保留在交付记录中。
+
+Ubuntu容量入口已在967f705通过（实际core字段存在、容量断言与清理成功）。后续BFF测试fixture的异步socket收尾检查也已修正：准确角色/唯一标签的空闲无事务尾连接只允许有界等待，零连接才普通DROP，foreign/active拒绝；新增独立TLS-PG4项必需套件通过，普通库290项通过。完整CI和真实浏览器按最新补验提交继续核对；资源/GPU/快速启动整体工作包仍进行中。

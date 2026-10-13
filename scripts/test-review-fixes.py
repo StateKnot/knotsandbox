@@ -38,6 +38,7 @@ HISTORICAL_UPGRADE_MARKER = "AUTO_UPGRADE_V41_CURRENT_FACTS_OLD_MIGRATOR_REFUSAL
 HISTORICAL_STATE_MARKER = "AUTO_UPGRADE_NONEMPTY_HISTORY_SCHEMA42_ACK_CURRENT_REPLAY_REVOKE_VERIFIED"
 HISTORICAL_PROGRESSION_MARKER = "AUTO_UPGRADE_UNKNOWN_FAILED_DISTINCT_SOURCES_ACK_REPLAY_ISOLATION_VERIFIED"
 SUITES = [
+    ("bff_pg", "sandbox_platform", "bff::tests::", "browser_fixture_tagged_pools_drain_before_ordinary_database_drop"),
     ("service_clients", "service_clients", "", "service_client_binding_rejects_other_client_and_owner_rotation_revokes_delegation"),
     ("tenant_audit", "tenant_audit", "", "signed_http_and_actual_node_sdk_tenant_audit_contract_is_redacted_and_revocable"),
     HISTORICAL_UPGRADE_SUITE,
@@ -57,7 +58,7 @@ SUITES = [
 ]
 # A broader local acceptance caller may supply exact expected counts. The
 # standalone review matrix retains its established selection and resources.
-EXPECTED_COUNTS = {"automation_upgrade": 1, "worker_dispatch": 3, "worker_continuation": 6}
+EXPECTED_COUNTS = {"bff_pg": 4, "automation_upgrade": 1, "worker_dispatch": 3, "worker_continuation": 6}
 
 
 def public_fingerprints():
@@ -199,6 +200,10 @@ def run(args):
                 test_env[key] = "postgresql://" + role + ":" + passwords[role] + "@127.0.0.1:" + str(port) + "/" + database + "?" + tls_query
             test_env["TEST_OWNER_DATABASE_URL"] = test_env["TEST_MIGRATION_DATABASE_URL"]
             test_env["TEST_AUTOMATION_TLS_ROOTCERT"] = str(rootcert)
+            if name == "bff_pg":
+                # Only this fixture creates its own additional random test
+                # databases. Do not expose admin authority to interface suites.
+                test_env["TEST_POSTGRES_ADMIN_DATABASE_URL"] = "postgresql://" + admin + ":" + environment["POSTGRES_PASSWORD"] + "@127.0.0.1:" + str(port) + "/postgres?" + tls_query
             if historical_upgrade:
                 # This one case exercises the real historical installation and
                 # upgrade. A current sandboxd migration here would silently

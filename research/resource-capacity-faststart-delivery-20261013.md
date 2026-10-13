@@ -28,13 +28,14 @@ CPU读取叶级有效cpuset，并取叶级和全部非根祖先有限`cpu.max`�
 
 | 验收 | 结果及边界 |
 | --- | --- |
-| Rust普通库、严格native Clippy/fmt | 内核兼容补验后288通过，120个环境专用用例未执行；lint/format通过 |
+| Rust普通库、严格native Clippy/fmt | BFF收尾补验后290通过，121个环境专用用例未执行；lint/format通过 |
 | 严格Linux全target Clippy | 锁定工具链镜像通过 |
 | Linux nodeguard普通合同 | 内核兼容补验后49通过，3个环境专用用例未执行 |
 | 真实Linux内核容量精确用例 | 1通过；固定Docker运行镜像、0.75 CPU/256MiB、完整cgroup层级、inode变化和PID退出拒绝；不是Kata认证 |
 | 锁定官方Prometheus查询语义 | 精确1通过，包含两个容量gauge、缺测、时间戳及HA分离 |
 | 采集配置、实际Prometheus协议链、告警 | 17配置测试通过；实际mTLS抓取/远程写入/双副本/过滤/恢复通过；38个声明的告警故障场景通过 |
 | 独立TLS PostgreSQL/签名身份/指标HTTP | 精确1通过；两容量选择项、租户隔离、IO期间撤权/epoch、正式迁移账本核对；源码/产物不变及自有资源清理确认 |
+| 独立TLS PostgreSQL/BFF收尾 | 4通过；真实连接角色/唯一标签核对、原登录/撤权/流关闭、会话锁及保留清理；新增用例要求实际普通DROP，不能延期冒充成功 |
 | SDK、控制台、真实浏览器指标合同 | 71、66、4通过；后者使用明确HTTP合同fixture，保留原值、空缺和撤权清理 |
 | 原生响应观测合同 | 10通过、零跳过，使用锁定Chromium |
 | 完整真实Chrome/Keycloak/BFF/API/TLS-PG | 精确1通过；真实账号/授权、诊断/事件、未来策略、通知失ACK及重放、停止受理、撤权；9张截图、业务事实不变、临时realm/进程/PG容器清理确认 |
@@ -48,6 +49,12 @@ CPU读取叶级有效cpuset，并取叶级和全部非根祖先有限`cpu.max`�
 预研确认[Linux内核rstat.c](https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux/+/b91872c56940950a6a0852e499d249c3091d4284/kernel/cgroup/rstat.c)在CONFIG_SCHED_CORE时输出`core_sched.force_idle_usec`。原基础stats解析器确实拒绝这个合法字段；固定输入回归先失败再通过。现仅增加此字面字段兼容，任意其他点号字段、重复键、非法/溢出数字继续拒绝。该字段不产生新的公开指标，也不改变已有usage或throttle值。
 
 真实内核用例增加固定读取/解析/断言阶段Context，实际CPU文件只打印上述字段存在与否的布尔标记；wrapper记录白名单错误码、阶段和布尔证据，无原始路径/控制器正文/凭据。所有容量、PID/inode、精确用例、产物和清理门禁保持。最新本地内核容量仍通过，当前Docker Desktop内核的字段存在标记为false；此环境不能替代Ubuntu的字段现场。最新远端CI仍需验收，不能把已证实的解析缺陷当作上一运行已被证明的唯一根因。
+
+`967f705`的[Ubuntu CI运行38406154806](https://github.com/StateKnot/knotsandbox/actions/runs/38406154806)已通过真实容量入口：实际core字段存在为true、退出0、所有容量/身份断言及自有清理通过。随后PG集成在BFF业务完成后的fixture收尾拒绝：两个已关闭runtime pool的服务端socket仍短时idle，另一个owner的wait为空；原逻辑只允许owner/ClientRead，错误地把这些关闭尾连接视为异常。
+
+BFF修改仅位于测试fixture：为owner/runtime配置与唯一临时库绑定的application_name，保留TLS和其他URI参数；每轮admin独立autocommit查询，只有准确角色/标签、idle、无事务、wait空或ClientRead的尾连接可在2秒总预算内等待。**只有真实零连接才普通DROP**；active、foreign或隐藏状态拒绝。55006竞态复核要求非空且全部为本fixture的空闲OWNER才允许原owner-only延期，runtime不能转为owner记录。application_name用于来源匹配，不是数据库授权；没有terminate、FORCE或生产身份权限变更。[PG17明确state与wait_event相互独立，并说明事务内统计快照缓存](https://www.postgresql.org/docs/17/monitoring-stats.html)。
+
+新增独立TLS-PG的4项BFF验收在既有review入口成为必需套件；只有此套件获得本容器临时admin URI以创建自有随机数据库，其他接口测试仍只获得各自普通登录。新用例从真实PG验证owner/runtime身份与标签，并在close后用新独立admin连接确认数据库消失。最新完整远端CI仍以之后提交为准，不能把容量PASS等同于整个流水线通过。
 
 本地证据在忽略的`.local/resource-faststart-20261013/`，包含源指纹、普通产物SHA、原失败日志和清理回执；不提交PKI、身份凭据、临时数据库或构建缓存。
 
