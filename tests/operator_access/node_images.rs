@@ -152,13 +152,13 @@ async fn backend_response(
     }
 }
 
-struct TlsServer {
-    endpoint: String,
+pub(super) struct TlsServer {
+    pub(super) endpoint: String,
     handle: axum_server::Handle<std::net::SocketAddr>,
     task: tokio::task::JoinHandle<std::io::Result<()>>,
 }
 impl TlsServer {
-    async fn start(router: Router) -> anyhow::Result<Self> {
+    pub(super) async fn start(router: Router) -> anyhow::Result<Self> {
         let tls = axum_server::tls_rustls::RustlsConfig::from_pem(
             include_bytes!("../fixtures/admission/server.pem").to_vec(),
             include_bytes!("../fixtures/admission/server.key").to_vec(),
@@ -176,7 +176,7 @@ impl TlsServer {
             task,
         })
     }
-    async fn close(mut self) -> anyhow::Result<()> {
+    pub(super) async fn close(mut self) -> anyhow::Result<()> {
         self.handle.graceful_shutdown(Some(Duration::from_secs(2)));
         match tokio::time::timeout(Duration::from_secs(3), &mut self.task).await {
             Ok(result) => {
@@ -209,7 +209,7 @@ async fn observed_node(
     Ok((node, state, server, token))
 }
 
-fn query_app(
+pub(super) fn query_app(
     fixture: &Fixture,
     auth: JwtAuthenticator,
     backend: PrometheusMetrics,

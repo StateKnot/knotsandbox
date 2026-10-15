@@ -309,7 +309,28 @@ jobs:
           source .local/dev.env
           set +a
           cargo test --locked --test keycloak -- --ignored
-          cargo test --locked --test operator_access -- --ignored --test-threads=1
+          cargo test --locked --test operator_access -- --ignored --test-threads=1 --skip native_chain::native_image_pipeline_to_operator_and_admin_is_revocable
+      - name: Native image source through dual Agents, real receiver, operator API and admin
+        shell: bash
+        run: |
+          df -h .
+          # This required case owns its native daemon, private internal network,
+          # Agents, receiver and normally migrated TLS PG. The identity comes
+          # from the real local Keycloak; no production metrics are synthesized.
+          .local/cluster-venv/bin/python scripts/test-node-image-chain.py \
+            --native-artifacts .local/nodeguard-host-artifacts.jsonl \
+            --operator-artifacts .local/review-artifacts.jsonl \
+            --evidence-dir .local/node-image-chain-ci
+      - name: Retain the bounded native image chain receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: node-image-chain-${{ github.sha }}
+          path: .local/node-image-chain-ci/record.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
       - name: Real cross-site Keycloak login, console mutation and live authorization revocation
         shell: bash
         run: |

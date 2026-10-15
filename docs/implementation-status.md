@@ -1,6 +1,8 @@
 # 开发进度与验收证据
 
-最新开发检查点（2026-10-16，P0c2a节点只读消费者）：固定单节点API／HTTPS admin命令、0048窄绑定入口、当前安装／原grant／节点认证I/O前后复核已完成本地验收；不接受枚举、tenant选择、任意PromQL或写操作。独立node2槽、256KiB／216行，最新HA完整cohort／严格原时间／UNKNOWN清值保持；普通Rust486、真实PG/Keycloak/HTTPS十项、真实Prom四场景、既有PG6组29、SDK77、OpenAPI13及strict Clippy/fmt通过。基线eec9106的精确CI 5 job/62 step通过；本轮精确提交CI另核。完整P0c仍待P0c2b同一原生CRI→mTLS→remote-write→operator整链，GPU／云／Kata／CSI／性能成本仍未认证。见[本批交付](../research/node-image-query-delivery-20261016.md)与[使用说明](node-image-query.md)。
+最新开发检查点（2026-10-16，P0c2b同一原生只读链）：最终v5主链82.876秒、native总86.129秒，真实containerd／生产ImageObserver／mTLS／双Agent remote-write／receiver／operator API及实际admin八阶段通过；原始scrape时间与API回包精确对应，两轮故障UNKNOWN清值和原报告推进恢复、在途撤权拒绝、新grant保持原到期时间已验。正常47迁移、十普通角色、源码／制品不变和本次自有资源清理通过；旧network-none原生验收1项、普通Rust486／0失败／291环境ignored、两平台strict Clippy及fmt通过。基线8e1fbbc精确CI 5 job／62 step成功，新提交CI另核。P0只读链本地闭合；P1—P6、pre-pull、GPU／云／Kata／CSI及收益仍未完成／未认证；保留早期失败和未确认匿名卷归属限制。见[本批交付](../research/native-image-chain-delivery-20261016.md)。
+
+上一开发检查点（2026-10-16，P0c2a节点只读消费者）：固定单节点API／HTTPS admin命令、0048窄绑定入口、当前安装／原grant／节点认证I/O前后复核已完成本地验收；不接受枚举、tenant选择、任意PromQL或写操作。独立node2槽、256KiB／216行，最新HA完整cohort／严格原时间／UNKNOWN清值保持；普通Rust486、真实PG/Keycloak/HTTPS十项、真实Prom四场景、既有PG6组29、SDK77、OpenAPI13及strict Clippy/fmt通过。基线eec9106的精确CI 5 job/62 step通过；本轮精确提交CI另核。完整P0c仍待P0c2b同一原生CRI→mTLS→remote-write→operator整链，GPU／云／Kata／CSI／性能成本仍未认证。见[本批交付](../research/node-image-query-delivery-20261016.md)与[使用说明](node-image-query.md)。
 
 最新开发检查点（2026-10-16，P0c1安装级授权）：持久installation UUID、SERVICE精确绑定的24h有限授权／永久撤权、owner管理CLI和JWT `GET /v1/operator/access`已实现并完成本地验收。普通app只有窄EXEC，无私表／管理权限；身份／client／epoch往返不复活旧授权，单例写权限漂移也拒绝启动。最终普通Rust475/0/285ignored、真实HTTP/Keycloak/Docker PG专项6、既有PG6组29、正式自动化25、SDK77、OpenAPI13及strict Clippy/fmt通过；原失败与两轴P2修复均保留。基线dcb7554精确CI 5 job/62 step全绿；本轮新提交另核。完整P0c节点查询/admin读消费者和原生整链仍未完成，pre-pull/GPU/云性能仍未认证。见[本批交付](../research/installation-operator-access-delivery-20261016.md)与[操作文档](installation-operator-access.md)。
 

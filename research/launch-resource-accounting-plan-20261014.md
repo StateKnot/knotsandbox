@@ -4,6 +4,8 @@
 
 后续进展（2026-10-16）：节点镜像P0b的发布dcb7554精确CI 5 job/62 step已通过；本轮P0c1持久安装读授权／永久撤权、owner CLI、普通app/JWT授权检查完成本地验收。46条正常迁移及原45条不变、6专项、6组29 PG、正式自动化25、普通Rust475、SDK77均已验。它不代表启动利用率或完整节点查询已完成，P0c2及同一原生整链继续待开发。见[本批交付](installation-operator-access-delivery-20261016.md)。
 
+后续进展（2026-10-16，P0c2b）：同一原生containerd→scraper mTLS→双Agent remote-write→实际receiver→operator API／admin八阶段整链已本地验收，最终v5主链82.876秒；原始scrape时间／collector报告推进、RPC失败／失联清旧、在途撤权与新grant原期限均通过。基线8e1fbbc的精确CI 5 job／62 step已通过，新提交CI另核；下一项为P1平台／原生引用和硬限组合，pre-pull／GPU／物理缓存与收益认证仍未完成。早期失败及匿名卷归属限制见[本批交付](native-image-chain-delivery-20261016.md)。
+
 ## 数据与身份合同
 
 必须分别保存四种来源：受理时的用户规格；每次launch实际请求合同；经可信登记方回读的Pod request/limit/overhead；现有配额账的PENDING、ALLOCATED、RELEASED回执。宿主cgroup共享祖先的容量上界仍是独立观测，不能与其中任何一项直接等同。
@@ -49,4 +51,4 @@ SQL自动捕获须覆盖所有真实writer，但原0044版本的Rust启动检查
 
 GPU先开发真实设备身份、独占租约、Pod/VM/租户归属、显存与计算利用率采集及可信回收。不得把显存占用率当计算利用率；设备未运行、采集失败及归属丢失用UNKNOWN。随后在实际支持的硬件/驱动上验MIG、时间共享等隔离与资源合同，覆盖撤权、节点重启、故障恢复和数据残留。没有本机GPU不能用CPU fixture签发GPU性能、隔离或成本认证。
 
-后续进展（2026-10-16，P0c2a）：当前安装授权下的单节点镜像固定查询／HTTPS admin读消费者已完成本地验收；原始报告新鲜度、最新单副本整cohort和失败清旧保持，独立两个查询槽不占VM八槽。真实Prom四场景、真实PG／OIDC／HTTPS十项及既有账本／历史升级回归通过；不把node运行时报告作为VM利用率分母或物理缓存容量。P0c2b同一原生整链继续待验，见[本轮交付](node-image-query-delivery-20261016.md)。
+后续进展（2026-10-16，P0c2a）：当前安装授权下的单节点镜像固定查询／HTTPS admin读消费者已完成本地验收；原始报告新鲜度、最新单副本整cohort和失败清旧保持，独立两个查询槽不占VM八槽。真实Prom四场景、真实PG／OIDC／HTTPS十项及既有账本／历史升级回归通过；不把node运行时报告作为VM利用率分母或物理缓存容量。该子项交付时P0c2b同一原生整链待验；随后已通过，见上方P0c2b进展与[P0c2a交付](node-image-query-delivery-20261016.md)。

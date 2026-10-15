@@ -16,7 +16,7 @@ _PROFILES = {
 
 
 @contextmanager
-def fixture_directory(prefix, stores):
+def fixture_directory(prefix, stores, *, docker_command=None, environment=None):
     """Keep test failures intact while the data owner removes its own stores.
 
     Callers stop their fixture containers before leaving this context. The
@@ -53,13 +53,13 @@ def fixture_directory(prefix, stores):
                 # cannot recursively remove those directories. Preserve their
                 # modes, and let the same fixed image's default non-root owner
                 # remove only these offline fixture children after assertions.
-                command = ['docker', 'run', '--rm', '--pull=never', '--network=none',
+                command = [*(docker_command or ['docker']), 'run', '--rm', '--pull=never', '--network=none',
                            '--read-only', '--cap-drop=ALL', '--security-opt=no-new-privileges',
                            '--mount', f'type=bind,src={store},dst=/prometheus',
                            '--entrypoint=/bin/rm', LOCK['prometheus_image'],
                            '-rf', '/prometheus/wal', '/prometheus/chunks_head']
                 completed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                           timeout=30, check=False)
+                                           timeout=30, check=False, env=environment)
                 if completed.returncode:
                     detail = (completed.stdout + completed.stderr)[:4096].decode(errors='replace')
                     raise ValueError(f'FIXTURE_STORE_CLEANUP_FAILED {name}: {detail}')

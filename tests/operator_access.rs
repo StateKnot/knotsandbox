@@ -29,6 +29,8 @@ use uuid::Uuid;
 
 const ACCESS_PATH: &str = "/v1/operator/access";
 
+#[path = "operator_access/native_chain.rs"]
+mod native_chain;
 #[path = "operator_access/node_images.rs"]
 mod node_images;
 

@@ -1,6 +1,6 @@
 # 批准OCI镜像的节点预准备：生产实施计划
 
-状态：**P0a/P0b、P0c1安装授权与P0c2a固定查询／admin消费者已完成本地验收；P0整体与完整P0c未完成，P0c2b同一原生整链及P1—P6仍未完成／未认证。** 本文件承接[开发表12.7](rust-sandbox-development-workbreakdown.md#127-可信启动资源观察与原子登记2026-10-15)的可信资源账本；基线eec9106的精确CI run38786382406，5 job/62 step已通过，当前按以下依赖推进；新源码CI单独核对。
+状态：**P0a—P0c2b只读观察及同一原生整链已完成本地验收；P1—P6仍未完成／未认证。** 本文件承接[开发表12.7](rust-sandbox-development-workbreakdown.md#127-可信启动资源观察与原子登记2026-10-15)的可信资源账本；基线8e1fbbc的精确CI run38799480127，5 job/62 step已通过，当前按以下依赖推进；新源码CI单独核对。
 范围仅为批准OCI镜像在准确节点／运行时中的有预算准备，不创建CPU／GPU VM池，不产生用户进程、工作区或普通launch许可。
 每90分钟是触发间隔，不是开发或验证超时；先接续已有在途工作，再持续完成选中的可验证切片，不因下一次触发重复启动。
 失败保存原现场并继续闭合该切片，不能因触发次数或时间到而标记通过，也不能跳过前置门开放拉取。
@@ -40,7 +40,7 @@
 安装级operator身份必须由可信issuer／subject和显式持久授权确定，普通租户不能通过传一个installation ID变成安装管理员。
 operator读／管理权限分开，授权变更可审计且每次读取前后重新核对；API采用正常非owner数据库角色和窄查询，不复用迁移登录。
 公开租户视图若以后需要，只显示该租户自己的策略／账务；全节点库存汇总和其他租户存在性不能沿实例接口泄露。
-P0c1安装授权与P0c2a固定单节点查询／admin读消费者已本地验收；P0c2b同一原生整链未完成，不开放节点枚举或任意查询。
+P0c1安装授权、P0c2a固定单节点查询／admin和P0c2b同一原生整链已本地验收；不开放节点枚举或任意查询。
 
 ## 第一个完整切片：节点只读基线
 
@@ -65,11 +65,11 @@ P0c1安装授权与P0c2a固定单节点查询／admin读消费者已本地验收
 
 | 顺序／依赖 | 开发文件与接口 | 必须验收 | 退出门 |
 | --- | --- | --- | --- |
-| P0a宿主子项已本地验收；完整P0仍待P0c及原生整链 | `src/nodeguard/image_observation.rs`；接`metrics_server.rs`／固定UDS，只读有界collector及scraper mTLS诊断；见[本批交付](node-image-observation-delivery-20261015.md) | 正常／空镜像／无VM、超大响应、超时、取消、身份／mount切换、部分缺测；真实containerd与FS观察 | RPC／形状成功与统计完整性UNKNOWN分开，逻辑数不冒充容量；无写RPC或任意socket入口 |
+| P0a宿主子项已本地验收；后续P0c2b同链也已通过 | `src/nodeguard/image_observation.rs`；接`metrics_server.rs`／固定UDS，只读有界collector及scraper mTLS诊断；见[本批交付](node-image-observation-delivery-20261015.md) | 正常／空镜像／无VM、超大响应、超时、取消、身份／mount切换、部分缺测；真实containerd与FS观察 | RPC／形状成功与统计完整性UNKNOWN分开，逻辑数不冒充容量；无写RPC或任意socket入口 |
 | P0b已完成本地验收，依赖P0a | `deploy/observability/observability.py`、对应verify／pipeline／tests；独立node allowlist、同Prom双Agent预算 | 实际抓取／remote-write、节点样本不被tenant过滤丢弃、旧VM样本保持、HA不累加、恶意label被剥离、WAL与样本上界 | 新旧两类样本在真实协议管线闭合；原生containerd另验，尚非同一原生整链；见[本批交付](node-image-pipeline-delivery-20261016.md) |
 | P0c1已本地验收，依赖P0a/P0b | `src/operator_access.rs`、正常0047／角色与schema预检、owner CLI和JWT授权检查 | 真实Keycloak/普通PG登录/CLI/TCP、永久撤权与ABA、锁后到期、写权漂移、历史升级；6专项及6组29/自动化25通过 | 安装授权基础可独立使用；仅授权元数据，无节点查询；见[交付](installation-operator-access-delivery-20261016.md) |
 | P0c2a已本地验收，依赖P0c1 | `src/node_image_query.rs`、`src/node_image_metrics.rs`、0048和HTTPS admin读消费者 | 真实JWT／PG／HTTPS十项，真实Prom四场景；固定预算、最新完整单副本cohort、原时间与I/O后重授权 | 普通app窄EXEC，私有认证／写ACL漂移拒绝；仅本子片完成，见[交付](node-image-query-delivery-20261016.md) |
-| P0c2b未完成，完整P0c退出门 | 同一原生CRI→mTLS→双Agent remote-write→operator API/admin | 同一真实节点、原生故障／失联恢复、安装权限撤销清值；无VM也可观察 | 只有该整链闭合后，完整P0c及P0只读slice才可记完成；P1—P4前不开放准备操作 |
+| P0c2b已本地验收，完整P0c只读退出门 | 同一原生CRI→mTLS→双Agent remote-write→operator API/admin | 最终v5主链82.876秒，八阶段及真实原始scrape时间、报告推进／撤权清值通过；正常47迁移、旧native回归及本次资源清理通过 | [完整交付](native-image-chain-delivery-20261016.md)明确本地／合成认证边界与早期匿名卷归属限制；P1—P4前不开放准备操作 |
 | P1，依赖P0 | `research/image-preparation-native-sources-20261015.md`、profile／部署合同 | 固定版本原生lease／content／snapshot引用、namespace／snapshotter、CRI GC交互、存储／内存／FD／专用网络槽的硬限与临时目录逐项源码及实测 | 官方来源＋真实backend证据确定一套受支持组合；共享daemon不能隔离准备开销时不开放该组合 |
 | P2，依赖P1 | `src/image_preparation.rs`、`src/image_preparation_budget.rs`、正常新迁移／角色／preflight | 并发预算预留／拒绝、跨租户归因、同键重放、撤权／epoch／节点换代、schema／列授权漂移 | PG意图／预算／身份持久且不可伪造，未派发任务也可安全关闭；没有直接runtime表写权 |
 | P3，依赖P1/P2 | `src/nodeguard/image_preparation.rs`、独立宿主协议／journal及controller adapter | 本地registry实际descriptor与平台选择、凭据隔离、摘要校验、受限下载／解包、native保护引用、内存／FD／网络槽耗尽与取消／崩溃 | 每任务和每节点真实硬限、瞬态headroom及原VM链路保留量守住；只有精确当前授权任务能产生准备回执 |
@@ -152,4 +152,4 @@ benchmark按相同SKU／安全配置／成功任务统计冷暖p50/p95/p99、失
 
 0048不新增库存或写权限，绑定当前登记节点与认证；普通 app 只获窄EXEC。`GET /v1/operator/nodes/{id}/image-status` 与 `sandbox-admin node-image-status` 已接实际安装授权，I/O后包括失败路径再次检查原grant及当前节点。固定查询／独立两个槽／256KiB／216行，原VM八槽不变。先选最新健康scrape，再检查同cohort字段；部分remote-write不能借另副本旧成功补齐。原始报告严格60秒，UNKNOWN／f64近似／完整性UNKNOWN保持。
 
-真实Prometheus3.13.4经HTTPS代理的四场景与PG／Keycloak／HTTPS／CLI十项已通过；其中是标准Prom实际scrape和query，未经过原生CRI／mTLS scraper／双Agent remote-write同一链。下一步固定为P0c2b整链闭合；P1—P4未验前仍不开放pre-pull。详见[消费说明](../docs/node-image-query.md)与[交付证据](node-image-query-delivery-20261016.md)。
+真实Prometheus3.13.4经HTTPS代理的四场景与PG／Keycloak／HTTPS／CLI十项已通过；其中是标准Prom实际scrape和query，未经过原生CRI／mTLS scraper／双Agent remote-write同一链。P0c2b随后已用同一原生整链完成本地验收，见[最终v5交付](native-image-chain-delivery-20261016.md)；下一步为P1平台／原生引用与硬限组合定型，P1—P4未验前仍不开放pre-pull。详见[消费说明](../docs/node-image-query.md)与[P0c2a交付证据](node-image-query-delivery-20261016.md)。

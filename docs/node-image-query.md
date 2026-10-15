@@ -41,4 +41,4 @@ inventory 与 filesystem 分别按一个健康副本的最新完整 scrape cohor
 
 0048仅增加窄的只读绑定函数；没有新库存副本或运行时写权限。普通 owner 正常迁移后应用 roles.sql，按既有维护升级流程停旧进程、迁移／预检、再启动，不能假定 N−1／N 混跑。startup／维护预检核对函数正文／参数／owner／search_path／ACL、既有节点登记结构／不可变trigger和列级写权限。普通 app 仅获该函数 EXECUTE。
 
-本地真实 PostgreSQL／OIDC／HTTPS、真实 Prometheus evaluator 与目标宿主认证分开记录。同一原生 CRI→mTLS→双Agent remote-write→operator 的完整整链、目标云／Kata／CSI／GPU和性能成本仍须独立验收。本查询不提供物理缓存容量、可释放量、命中率、加速收益或任何自动 pre-pull／删除操作。
+同一原生 containerd→mTLS→双Agent remote-write→实际receiver→operator API与admin的本地整链已通过：八阶段包含RPC失败／采集失联清旧、原报告推进恢复及在途撤权；原始scrape时间与真实API对应，完整证据和本地夹具限制见[本批交付](../research/native-image-chain-delivery-20261016.md)。目标云／Kata／CSI／GPU、生产managed Prom权限和性能成本仍须独立验收。本查询不提供物理缓存容量、可释放量、命中率、加速收益或任何自动 pre-pull／删除操作。

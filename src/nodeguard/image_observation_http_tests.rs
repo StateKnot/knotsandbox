@@ -8,6 +8,10 @@ use std::{collections::BTreeMap, path::PathBuf};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+#[cfg(target_os = "linux")]
+#[path = "image_chain_fixture.rs"]
+mod chain;
+
 fn assert_node_image_metric_contract(
     text: &str,
     node: &NodeBinding,
