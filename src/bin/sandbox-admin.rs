@@ -1,4 +1,4 @@
-//! Installation owner tool; this binary is never served over HTTP.
+//! Installation owner administration and explicit, read-only operator client.
 use std::{fs::File, io::Read, path::PathBuf};
 
 use clap::{ArgGroup, Parser, Subcommand};
@@ -13,6 +13,8 @@ use uuid::Uuid;
 
 #[path = "../admin_backup_cli.rs"]
 mod backup_cli;
+#[path = "../admin_node_image_cli.rs"]
+mod node_image_cli;
 
 #[derive(Parser)]
 #[command(
@@ -49,6 +51,8 @@ enum Command {
     BindServiceIdentity(FenceArgs),
     /// Explicit installation-wide node image read authority; never a tenant grant.
     NodeImageReader(OperatorGrantArgs),
+    /// Read one enrolled node through current OAuth authorization at the API.
+    NodeImageStatus(node_image_cli::NodeImageStatusArgs),
     /// Enroll one quarantined node through reviewed inventory, live K8s and mTLS.
     EnrollNode(EnrollArgs),
     /// Record a node-wide SYSTEM incident affecting all tenants on that node.
@@ -295,6 +299,7 @@ async fn main() -> anyhow::Result<()> {
         return match command {
             Command::BindServiceIdentity(binding) => bind_service_identity(binding).await,
             Command::NodeImageReader(request) => node_image_reader(request).await,
+            Command::NodeImageStatus(request) => node_image_cli::run(request).await,
             Command::EnrollNode(enrollment) => enroll(enrollment).await,
             Command::NodeFence(incident) => fence(incident).await,
             Command::GuardContract(contract) => guard_contract(contract).await,

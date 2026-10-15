@@ -4,6 +4,8 @@ use sqlx::{PgPool, Row};
 use crate::resource_accounting_schema::{verify_table_structure, verify_trigger};
 
 const MIGRATION: &str = include_str!("../migrations/0047_installation_operator_authorization.sql");
+const NODE_MIGRATION: &str = include_str!("../migrations/0014_trusted_termination.sql");
+const BINDING_MIGRATION: &str = include_str!("../migrations/0048_operator_node_image_binding.sql");
 const RUNTIME_ROLES: &str = "'sandbox_app','sandbox_worker','sandbox_gateway','sandbox_admission','sandbox_termination','sandbox_fencing','sandbox_volume_deleter','sandbox_backup','sandbox_automation','sandbox_browser','sandbox_restore','sandbox_restore_admission','sandbox_restore_gc','sandbox_restore_gc_admission'";
 
 pub(crate) async fn verify(pool: &PgPool) -> anyhow::Result<()> {
@@ -115,13 +117,50 @@ pub(crate) async fn verify(pool: &PgPool) -> anyhow::Result<()> {
                 "expires_at",
             ],
         ),
+        (
+            "sandbox_preserve_runtime_node()",
+            "plpgsql",
+            false,
+            "trigger",
+            vec![],
+        ),
+        (
+            "sandbox_node_image_binding(text,text,text,bigint,uuid)",
+            "sql",
+            true,
+            "TABLE(installation_id uuid, cluster_epoch uuid, grant_id uuid, grant_expires_at timestamp with time zone, runtime_node_id uuid, node_uid uuid, host_boot_id uuid, profile_sha256 text, certified_until timestamp with time zone)",
+            vec![
+                "issuer",
+                "subject",
+                "client",
+                "token_exp",
+                "requested_node",
+                "installation_id",
+                "cluster_epoch",
+                "grant_id",
+                "grant_expires_at",
+                "runtime_node_id",
+                "node_uid",
+                "host_boot_id",
+                "profile_sha256",
+                "certified_until",
+            ],
+        ),
     ] {
         let name = signature
             .split('(')
             .next()
             .ok_or_else(|| anyhow::anyhow!("Invalid authority signature"))?;
-        let reader = name == "sandbox_node_image_access";
-        let body = MIGRATION
+        let reader = matches!(
+            name,
+            "sandbox_node_image_access" | "sandbox_node_image_binding"
+        );
+        let migration = match name {
+            "sandbox_node_image_binding" => BINDING_MIGRATION,
+            "sandbox_preserve_runtime_node" => NODE_MIGRATION,
+            _ => MIGRATION,
+        };
+        let body = migration
             .split_once(&format!("CREATE FUNCTION {name}("))
             .and_then(|(_, tail)| tail.split("$$").nth(1))
             .ok_or_else(|| anyhow::anyhow!("Missing reviewed authority function"))?;
@@ -197,5 +236,57 @@ pub(crate) async fn verify(pool: &PgPool) -> anyhow::Result<()> {
     ] {
         verify_trigger(pool, table, name, function, kind, false, &[]).await?;
     }
+    let enrollment_shape: serde_json::Value =
+        serde_json::from_str(include_str!("node_image_enrollment_schema_contract.json"))?;
+    verify_table_structure(pool, "runtime_node_enrollments", &enrollment_shape).await?;
+    for table in ["runtime_nodes", "runtime_node_enrollments"] {
+        let closed: bool = sqlx::query_scalar(&format!(r#"
+          SELECT c.relowner=(SELECT relowner FROM pg_class WHERE oid='public._sqlx_migrations'::regclass)
+           AND c.relpersistence='p' AND NOT c.relispartition AND NOT c.relrowsecurity AND NOT c.relforcerowsecurity
+           AND NOT EXISTS(SELECT 1 FROM aclexplode(COALESCE(c.relacl,acldefault('r',c.relowner))) a
+             WHERE a.grantee<>c.relowner AND (a.privilege_type<>'SELECT' OR $1='runtime_node_enrollments'))
+           AND NOT EXISTS(SELECT 1 FROM pg_attribute att CROSS JOIN LATERAL aclexplode(att.attacl) a
+             WHERE att.attrelid=c.oid AND a.grantee<>c.relowner AND (a.privilege_type<>'SELECT' OR $1='runtime_node_enrollments'))
+           AND NOT EXISTS(SELECT 1 FROM pg_roles r WHERE r.rolname IN({RUNTIME_ROLES})
+             AND (has_table_privilege(r.oid,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+               OR has_any_column_privilege(r.oid,c.oid,'INSERT,UPDATE,REFERENCES')
+               OR ($1='runtime_node_enrollments' AND (has_table_privilege(r.oid,c.oid,'SELECT') OR has_any_column_privilege(r.oid,c.oid,'SELECT')))))
+          FROM pg_class c WHERE c.oid=('public.'||$1)::regclass
+        "#)).bind(table).fetch_one(pool).await?;
+        anyhow::ensure!(
+            closed,
+            "Node image binding source owner or write privileges differ: {table}"
+        );
+    }
+    verify_trigger(
+        pool,
+        "runtime_node_enrollments",
+        "runtime_node_enrollments_append_only",
+        "sandbox_prevent_audit_mutation",
+        27,
+        false,
+        &[],
+    )
+    .await?;
+    verify_trigger(
+        pool,
+        "runtime_nodes",
+        "runtime_node_identity_immutable",
+        "sandbox_preserve_runtime_node",
+        19,
+        false,
+        &[],
+    )
+    .await?;
+    verify_trigger(
+        pool,
+        "runtime_nodes",
+        "runtime_node_no_delete",
+        "sandbox_prevent_audit_mutation",
+        11,
+        false,
+        &[],
+    )
+    .await?;
     Ok(())
 }

@@ -233,6 +233,12 @@ jobs:
           mkdir -p .local
           cargo test --locked --all-targets --no-run --message-format=json > .local/review-artifacts.jsonl
           python3 scripts/test-review-fixes.py --artifacts .local/review-artifacts.jsonl --evidence-dir .local/review-regressions
+          python3 - <<'PY'
+          import json, subprocess
+          lock = json.load(open('deploy/observability/versions.lock.json'))
+          subprocess.run(['docker', 'pull', lock['prometheus_image']], check=True)
+          PY
+          .local/cluster-venv/bin/python scripts/test-node-image-query.py --artifacts .local/review-artifacts.jsonl --evidence-dir .local/node-image-query-ci
       - name: Retain non-secret identity and lifecycle regression evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -248,6 +254,8 @@ jobs:
             .local/nodeguard-image-observation/record.json
             .local/review-regressions/*.json
             .local/review-regressions/*.log
+            .local/node-image-query-ci/*.json
+            .local/node-image-query-ci/*.log
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
@@ -383,11 +391,6 @@ jobs:
           retention-days: 14
       - name: Verify metric expressions with the locked official Prometheus evaluator
         run: |
-          python3 - <<'PY'
-          import json, subprocess
-          lock = json.load(open('deploy/observability/versions.lock.json'))
-          subprocess.run(['docker', 'pull', lock['prometheus_image']], check=True)
-          PY
           cargo test --locked --lib metrics::tests::official_prometheus -- --ignored
       - name: Build and smoke-test non-root service and runner images
         run: |

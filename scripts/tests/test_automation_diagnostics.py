@@ -53,6 +53,13 @@ class AutomationDiagnosticsTest(unittest.TestCase):
         text += "Error: Process test requires formal 1..37+39..43 and no invented migration38\n"
         self.assertEqual(self.diagnostic(text, code=101)["classification"], "FORMAL_SCHEMA_MISMATCH")
 
+    def test_current_and_previous_formal_contract_failures_remain_diagnosable(self):
+        for version in (47, 48):
+            with self.subTest(version=version):
+                text = self.process("test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out;")
+                text += f"Error: Process test requires formal 1..37+39..{version} and no invented migration38\n"
+                self.assertEqual(self.diagnostic(text, code=101)["classification"], "FORMAL_SCHEMA_MISMATCH")
+
     def test_zero_wrong_test_ignored_failed_exit_and_duplicate_summaries_never_pass(self):
         good = "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;"
         cases = ((self.process("test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out;"), 0),

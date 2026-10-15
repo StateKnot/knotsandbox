@@ -10,7 +10,7 @@
 
 合同绑定tenant、project、instance、workspace、generation、launch与安装epoch。实际Pod观察再绑定Pod UID、Node UID、节点boot身份和登记许可。RuntimeClass的UID、resourceVersion及overhead保存为配置观察；Pod自身的资源值来自其实际UID回读。跨对象读取不是原子快照，不伪造Pod采用了某一RuntimeClass版本的证明。采用固定kata-qemu和真实VAP/Binding保护受控配置，当前配置身份是Class UID加规范化受控内容SHA-256；resourceVersion仅表示本次回读元数据。创建/回读前后核对守卫、Class及完整Pod UID/spec/resources，纯RV或status变化不等于资源漂移。配置变化、UID替换或证据冲突拒绝验证；只有通过原子可信登记的回读才成为历史观察，缺观察旧launch不由当前配置回填。停止和清理仍允许依据原可信终止证据进行，不能被当前RuntimeClass变化卡住。Kubernetes v1.35并未天然将整个Class配置设为不可变，缓存admission也不提供adopted RV证明，官方源码依据见[回读设计](runtime-class-resource-readback-20261015.md#官方行为与实现依据)。
 
-0045已新增append-only请求合同、配额状态回执、精确普通启动绑定与冻结旧预约基线；0046再增加不可变Pod观察及封闭旧授权ACK基线，复合FK、有界数量和FORCE RLS保持。原44条迁移字节不变，当前正式迁移为1..37加39..46，共45条，0038仍未发布。只有切换前真实提交的base/extension ACK能进入新冻结基线，旧permit或缺观察本身不能获得历史豁免。旧launch没有足够证据时返回明确缺证据；不能按今天的Flavor、overhead或更新时间补造历史。
+0045已新增append-only请求合同、配额状态回执、精确普通启动绑定与冻结旧预约基线；0046再增加不可变Pod观察及封闭旧授权ACK基线，复合FK、有界数量和FORCE RLS保持。原44条迁移字节不变，第4步当时正式迁移为1..37加39..46，共45条，0038仍未发布。只有切换前真实提交的base/extension ACK能进入新冻结基线，旧permit或缺观察本身不能获得历史豁免。旧launch没有足够证据时返回明确缺证据；不能按今天的Flavor、overhead或更新时间补造历史。
 
 ## 实现与开发验收表
 
@@ -48,3 +48,5 @@ SQL自动捕获须覆盖所有真实writer，但原0044版本的Rust启动检查
 资源账本交付后，再开发有预算、到期、撤销和GC合同的镜像/节点预准备。分开观测accepted、queue、placement、镜像准备、CRI调用、VM readiness、route及首次正确执行；以端到端成功任务测冷暖p50/p95/p99、峰值并发、失败率和单位成功任务成本。预准备本身的空闲占用、镜像体积、实际释放证明须可计量；没有节点实测前不承诺启动毫秒数或资源节省比例。
 
 GPU先开发真实设备身份、独占租约、Pod/VM/租户归属、显存与计算利用率采集及可信回收。不得把显存占用率当计算利用率；设备未运行、采集失败及归属丢失用UNKNOWN。随后在实际支持的硬件/驱动上验MIG、时间共享等隔离与资源合同，覆盖撤权、节点重启、故障恢复和数据残留。没有本机GPU不能用CPU fixture签发GPU性能、隔离或成本认证。
+
+后续进展（2026-10-16，P0c2a）：当前安装授权下的单节点镜像固定查询／HTTPS admin读消费者已完成本地验收；原始报告新鲜度、最新单副本整cohort和失败清旧保持，独立两个查询槽不占VM八槽。真实Prom四场景、真实PG／OIDC／HTTPS十项及既有账本／历史升级回归通过；不把node运行时报告作为VM利用率分母或物理缓存容量。P0c2b同一原生整链继续待验，见[本轮交付](node-image-query-delivery-20261016.md)。

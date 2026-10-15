@@ -77,6 +77,41 @@ paths:
           "$ref": "#/components/responses/Unavailable"
         default:
           "$ref": "#/components/responses/Problem"
+  "/v1/operator/nodes/{id}/image-status":
+    get:
+      tags: [InstallationOperator]
+      operationId: getInstallationNodeImageStatus
+      summary: Read image observations for one enrolled node
+      description: |
+        Installation node_images:read SERVICE authority, current epoch and a still-certified
+        enabled node are checked before and after one fixed monitoring query, including
+        backend errors. No tenant header, node discovery, free PromQL, range or query
+        parameter is accepted. Replacement grant IDs cannot authorize an in-flight read.
+        HA replicas are not summed or mixed field by field. Components use one fresh
+        scrape cohort and original runtime observation times strictly newer than 60 seconds.
+        Missing, stale or incomplete reports remain null; a recent success flag alone does
+        not prove a complete fresh report. Quantities are approximate f64 telemetry, not
+        exact accounting, physical cache capacity, reclaimable storage or GPU utilization.
+        Completeness is always UNKNOWN, including an empty visible filesystem list.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Bounded current observations; null reports explicitly mean unknown
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/NodeImageStatus"}
+        '400': {"$ref": "#/components/responses/Problem"}
+        '401': {"$ref": "#/components/responses/Problem"}
+        '403': {"$ref": "#/components/responses/Problem"}
+        '404': {"$ref": "#/components/responses/Problem"}
+        '409': {"$ref": "#/components/responses/Problem"}
+        '502': {"$ref": "#/components/responses/Problem"}
+        '503': {"$ref": "#/components/responses/Unavailable"}
+        default: {"$ref": "#/components/responses/Problem"}
   "/health/live":
     get:
       tags:
@@ -4005,6 +4040,69 @@ components:
           schema:
             "$ref": "#/components/schemas/AcceptedExecution"
   schemas:
+    NodeImageStatus:
+      type: object
+      additionalProperties: false
+      required: [installation_id, cluster_epoch, grant_id, runtime_node_id, node_uid, host_boot_id, profile_sha256, metrics]
+      properties:
+        installation_id: {type: string, format: uuid}
+        cluster_epoch: {type: string, format: uuid}
+        grant_id: {type: string, format: uuid}
+        runtime_node_id: {type: string, format: uuid}
+        node_uid: {type: string, format: uuid}
+        host_boot_id: {type: string, format: uuid}
+        profile_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        metrics: {"$ref": "#/components/schemas/NodeImageMetrics"}
+    NodeImageMetrics:
+      type: object
+      additionalProperties: false
+      required: [evaluated_at_seconds, source, completeness, accuracy, inventory_observation_success, filesystem_observation_success, inventory, filesystem]
+      properties:
+        evaluated_at_seconds: {type: number, exclusiveMinimum: 0}
+        source: {type: string, enum: [RUNTIME_REPORTED]}
+        completeness: {type: string, enum: [UNKNOWN]}
+        accuracy: {type: string, enum: [APPROXIMATE_F64]}
+        inventory_observation_success: {type: [boolean, 'null']}
+        filesystem_observation_success: {type: [boolean, 'null']}
+        inventory:
+          anyOf:
+          - {"$ref": "#/components/schemas/NodeImageInventory"}
+          - {type: 'null'}
+        filesystem:
+          anyOf:
+          - {"$ref": "#/components/schemas/NodeImageFilesystemReport"}
+          - {type: 'null'}
+    NodeImageInventory:
+      type: object
+      additionalProperties: false
+      required: [collector_replica, scraped_at_seconds, observed_at_seconds, count, compressed_logical_bytes]
+      properties:
+        collector_replica: {type: string, minLength: 1, maxLength: 64}
+        scraped_at_seconds: {type: number, exclusiveMinimum: 0}
+        observed_at_seconds: {type: number, exclusiveMinimum: 0}
+        count: {type: number, minimum: 0, maximum: 1024, multipleOf: 1}
+        compressed_logical_bytes: {type: number, minimum: 0}
+    NodeImageFilesystemReport:
+      type: object
+      additionalProperties: false
+      required: [collector_replica, scraped_at_seconds, observed_at_seconds, filesystems]
+      properties:
+        collector_replica: {type: string, minLength: 1, maxLength: 64}
+        scraped_at_seconds: {type: number, exclusiveMinimum: 0}
+        observed_at_seconds: {type: number, exclusiveMinimum: 0}
+        filesystems:
+          type: array
+          maxItems: 16
+          items: {"$ref": "#/components/schemas/NodeImageFilesystem"}
+    NodeImageFilesystem:
+      type: object
+      additionalProperties: false
+      required: [filesystem_id, reported_at_seconds, used_bytes, inodes_used]
+      properties:
+        filesystem_id: {type: string, pattern: '^[0-9a-f]{64}$'}
+        reported_at_seconds: {type: number, exclusiveMinimum: 0}
+        used_bytes: {type: [number, 'null'], minimum: 0}
+        inodes_used: {type: [number, 'null'], minimum: 0}
     InstallationNodeImageAccess:
       type: object
       additionalProperties: false

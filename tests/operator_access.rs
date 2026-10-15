@@ -29,6 +29,9 @@ use uuid::Uuid;
 
 const ACCESS_PATH: &str = "/v1/operator/access";
 
+#[path = "operator_access/node_images.rs"]
+mod node_images;
+
 fn grant_document() -> Value {
     json!({
         "grant_id": Uuid::new_v4(), "installation_id": Uuid::new_v4(), "cluster_epoch": Uuid::new_v4(),

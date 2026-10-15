@@ -191,8 +191,8 @@ def run(args):
             sql.append("CREATE ROLE " + role + " LOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD '" + password + "';")
         fixture.invoke(psql, env=psql_env, text="\n".join(sql))
         expected = [{"version": int(path.name.split("_", 1)[0]), "success": True, "checksum": hashlib.sha384(path.read_bytes()).hexdigest()} for path in sorted((ROOT / "migrations").glob("*.sql"))]
-        if [row["version"] for row in expected] != list(range(1, 38)) + [39, 40, 41, 42, 43, 44, 45, 46, 47]:
-            raise RuntimeError("review requires real formal migrations 1..37+39..47, never 38")
+        if [row["version"] for row in expected] != list(range(1, 38)) + [39, 40, 41, 42, 43, 44, 45, 46, 47, 48]:
+            raise RuntimeError("review requires real formal migrations 1..37+39..48, never 38")
         for index, (name, target, filter_name, required) in enumerate(SUITES, 1):
             if not re.fullmatch(r"[a-z][a-z0-9_]{0,39}", name):
                 raise RuntimeError("interface suite name invalid")

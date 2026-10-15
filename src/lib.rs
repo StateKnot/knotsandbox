@@ -64,6 +64,7 @@ pub mod gateway;
 pub mod execution_output;
 
 pub mod node_enrollment;
+pub mod node_image_query;
 pub mod nodeguard;
 pub mod service_clients;
 pub mod tenant_audit;

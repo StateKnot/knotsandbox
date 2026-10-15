@@ -91,6 +91,10 @@ pub fn router_with_automations(
         .route("/v1/capabilities", get(get_capabilities))
         .route("/v1/operator/access", get(operator_access))
         .route(
+            "/v1/operator/nodes/{id}/image-status",
+            get(node_image_status),
+        )
+        .route(
             "/v1/service-clients",
             get(list_service_clients).post(register_service_client),
         )
@@ -292,6 +296,27 @@ async fn operator_access(
     }
     let identity = verify_identity(&state, &headers).await?;
     Ok(Json(state.database.node_image_access(&identity).await?))
+}
+
+async fn node_image_status(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    path: Result<Path<Uuid>, PathRejection>,
+    uri: axum::http::Uri,
+) -> Result<Json<crate::node_image_query::NodeImageStatus>, ApiError> {
+    if uri.query().is_some() {
+        return Err(ApiError::invalid(
+            "Node image status does not accept query parameters",
+        ));
+    }
+    let identity = verify_identity(&state, &headers).await?;
+    let Path(id) = path.map_err(|_| ApiError::invalid("Invalid runtime node ID"))?;
+    Ok(Json(
+        state
+            .database
+            .node_image_status(&identity, id, state.metrics.as_ref())
+            .await?,
+    ))
 }
 
 fn json_body<T>(payload: Result<Json<T>, JsonRejection>) -> Result<T, ApiError> {

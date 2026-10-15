@@ -420,6 +420,8 @@ async fn snapshot(owner: &PgPool, scopes: &[Scope]) -> anyhow::Result<Snapshot> 
               ('platform_configuration','node_image_reader_scope_change'))) r
     "#).fetch_one(owner).await?;
     facts.insert("existing_trigger_contracts".to_owned(), triggers);
+    // 0048 adds only this exact node-image binding function; no historical
+    // relation, column or trigger is excluded for that migration.
     let functions: Value = sqlx::query_scalar(r#"
         SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.function),'[]'::jsonb)
         FROM (SELECT oid::regprocedure::text AS function,prosecdef,proconfig FROM pg_proc f
@@ -436,7 +438,8 @@ async fn snapshot(owner: &PgPool, scopes: &[Scope]) -> anyhow::Result<Snapshot> 
               'public.sandbox_invalidate_node_image_reader()',
               'public.sandbox_grant_node_image_reader(uuid,uuid,uuid,text,text,text,timestamptz,text)',
               'public.sandbox_revoke_node_image_reader(uuid,uuid,uuid,text)',
-              'public.sandbox_node_image_access(text,text,text,bigint)'
+              'public.sandbox_node_image_access(text,text,text,bigint)',
+              'public.sandbox_node_image_binding(text,text,text,bigint,uuid)'
             ]::text[]) added(signature) WHERE f.oid=to_regprocedure(added.signature))) r
     "#).fetch_one(owner).await?;
     facts.insert("existing_function_security".to_owned(), functions);
@@ -640,7 +643,8 @@ async fn assert_operator_authorization_upgrade(
             ('public.sandbox_invalidate_node_image_reader()',false),
             ('public.sandbox_grant_node_image_reader(uuid,uuid,uuid,text,text,text,timestamptz,text)',false),
             ('public.sandbox_revoke_node_image_reader(uuid,uuid,uuid,text)',false),
-            ('public.sandbox_node_image_access(text,text,text,bigint)',true)
+            ('public.sandbox_node_image_access(text,text,text,bigint)',true),
+            ('public.sandbox_node_image_binding(text,text,text,bigint,uuid)',true)
         ) expected(signature,reader)
         LEFT JOIN pg_proc p ON p.oid=to_regprocedure(expected.signature)
     "#)
@@ -649,7 +653,7 @@ async fn assert_operator_authorization_upgrade(
     .await?;
     ensure!(
         narrow,
-        "Migration 47 must close PUBLIC/runtime management execution and grant only the explicit app reader"
+        "Migrations 47/48 must close PUBLIC/runtime management execution and grant only the explicit app readers"
     );
     Ok(installation)
 }

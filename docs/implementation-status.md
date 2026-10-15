@@ -1,5 +1,7 @@
 # 开发进度与验收证据
 
+最新开发检查点（2026-10-16，P0c2a节点只读消费者）：固定单节点API／HTTPS admin命令、0048窄绑定入口、当前安装／原grant／节点认证I/O前后复核已完成本地验收；不接受枚举、tenant选择、任意PromQL或写操作。独立node2槽、256KiB／216行，最新HA完整cohort／严格原时间／UNKNOWN清值保持；普通Rust486、真实PG/Keycloak/HTTPS十项、真实Prom四场景、既有PG6组29、SDK77、OpenAPI13及strict Clippy/fmt通过。基线eec9106的精确CI 5 job/62 step通过；本轮精确提交CI另核。完整P0c仍待P0c2b同一原生CRI→mTLS→remote-write→operator整链，GPU／云／Kata／CSI／性能成本仍未认证。见[本批交付](../research/node-image-query-delivery-20261016.md)与[使用说明](node-image-query.md)。
+
 最新开发检查点（2026-10-16，P0c1安装级授权）：持久installation UUID、SERVICE精确绑定的24h有限授权／永久撤权、owner管理CLI和JWT `GET /v1/operator/access`已实现并完成本地验收。普通app只有窄EXEC，无私表／管理权限；身份／client／epoch往返不复活旧授权，单例写权限漂移也拒绝启动。最终普通Rust475/0/285ignored、真实HTTP/Keycloak/Docker PG专项6、既有PG6组29、正式自动化25、SDK77、OpenAPI13及strict Clippy/fmt通过；原失败与两轴P2修复均保留。基线dcb7554精确CI 5 job/62 step全绿；本轮新提交另核。完整P0c节点查询/admin读消费者和原生整链仍未完成，pre-pull/GPU/云性能仍未认证。见[本批交付](../research/installation-operator-access-delivery-20261016.md)与[操作文档](installation-operator-access.md)。
 
 最新开发检查点（2026-10-16，P0b节点指标管线）：独立`/metrics/node-images`、每node显式profile绑定与双Agent白名单/预算、现场闭集身份核验、独立失联/UNKNOWN/陈旧告警已完成本地验收。默认不启用；原VM3584/2MB、抓取槽、队列、WAL70%、权限/期限/线程栈保持。原观察时间与FS时间先过滤，HA取有效副本不相加；来源RUNTIME_REPORTED、完整性UNKNOWN，近似f64不用于预算。
@@ -178,7 +180,7 @@ Linux v6不可变668文件源码点 `7be7c22a0af3765adbd4033f32bfcd18f7658497f8a
 | G3-04 | 事件与通知 | 开发中 | 已有受租户项目隔离的SSE事件流与控制台断点重连/撤权清空证据；0042异常收件箱及正常分页/详情/幂等确认API已接SDK和UI。真实BFF异常ACK丢回执、UNKNOWN重载、读写撤权、原键/旧ETag重放和业务事实不变已通过；外发Webhook、归档保留、事件/通知容量及目标云入口慢消费者仍待验收 |
 | G3-05 | 安全防护 | 开发中 | 正式1..37上的只读/security API、OpenAPI/SDK/控制台已接入；实际PG/JWT/JWKS/真实Node SDK安全专项8项及capabilities 1项通过，最后DB时钟判定权限期限；压缩文档展开上限、数值精度、历史证据、optional脱敏与撤权已测，5组OpenAPI合同和2项Chrome HTTP合同通过。期望/历史/独立证据分离，独立认证仍UNKNOWN；持久隔离/解除隔离、拒绝历史和镜像认证待开发 |
 | G3-06 | 健康诊断 | 开发中 | 持久只读报告/120秒截止/30天保留与当前权限脱敏已接worker/API/OpenAPI/SDK/控制台；独立能力、结构化证据、原期限有界GET与请求记录重开已实现，8项PG/HTTP/JWT、capabilities1项及真实Chrome/OIDC/正常worker全链通过；guest探测与自动修复未实现 |
-| G3-07 | 定时与事件自动化 | 开发中 | 独立0039、0040 SERVICE绑定、0041公平扫描、0042通知、八条管理API及专用worker保持；当前正式安装1..37+39..46，无38。历史升级metadata只精确区分0045／0046新增对象，独立核对其RLS／触发器／函数，不削弱旧对象断言。原业务／通知／进程／BFF证据保留，本轮37组201项分批通过；实云副作用、HA容量和统一签名发布仍独立 |
+| G3-07 | 定时与事件自动化 | 开发中 | 独立0039、0040 SERVICE绑定、0041公平扫描、0042通知、八条管理API及专用worker保持；当前正式安装1..37+39..48，无38。历史升级metadata精确区分0045／0046新增对象及0047／0048窄函数，独立核对其RLS／触发器／函数，不削弱旧对象断言。原业务／通知／进程／BFF证据保留，本轮37组201项分批通过；实云副作用、HA容量和统一签名发布仍独立 |
 | G3-08 | 备份与恢复产品化 | 开发中 | 冷备份账本、独立库存/签名/可信关闭、owner注册/激活和部署标签验证已有PG/TLS证据；恢复私有受理、Job/Pod/调度与历史控制、STOPPED交付/首次START、never-started DELETE和独立临时GC有新库PG/HTTP/mTLS阶段证据。存储用途映射及初始raw PVC准入/实际Pending父UID与早期PV意图已补齐，无父Bound拒绝已测；生成PV/selected-node/CSI状态、单AZ云身份与START拓扑约束、完整失败收口、正式listener/API及实云验收未完成 |
 | G3-09 | 租户账户与客户端 | 开发中 | 机器身份及项目grant管理已有真实全链；新增独立租户账户审计API/SDK/UI，无需项目选择，脱敏和当前授权5项实际PG/签名HTTP/Node专项通过。人类账户生命周期、MFA/邮件与生产HA待完成 |
 | G3-10 | 产品安装与控制台 | 开发中 | 新增租户账户审计和备份能力UI约束，控制台66单测及新增9项Chrome HTTP合同/生产构建通过；已有OIDC/BFF管理链证据保留，新审计尚未计作BFF全链。必跑CI新增tenant_audit真实数据库suite与SDK制品漂移检查，远端未执行。全产品安装组合、统一Linux八ELF/四OCI签名发布、实云/PKI/HA/容量待完成 |

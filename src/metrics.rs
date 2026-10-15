@@ -9,6 +9,13 @@ use serde::{Deserialize, Serialize};
 use tokio::{io::AsyncReadExt, sync::Semaphore};
 use uuid::Uuid;
 
+#[path = "node_image_metrics.rs"]
+mod node_image_metrics;
+pub use node_image_metrics::{
+    NodeImageAccuracy, NodeImageCompleteness, NodeImageFilesystem, NodeImageFilesystemReport,
+    NodeImageInventory, NodeImageMetricBinding, NodeImageMetricSource, NodeImageMetrics,
+};
+
 const MAX_BODY: usize = 2 * 1024 * 1024;
 const MAX_POINTS: i64 = 1441;
 const STALE_SECONDS: f64 = 60.0;
@@ -202,6 +209,7 @@ struct Inner {
     url: url::Url,
     config: MetricsBackendConfig,
     reads: Semaphore,
+    node_reads: Semaphore,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -301,6 +309,7 @@ impl PrometheusMetrics {
                 url,
                 config,
                 reads: Semaphore::new(8),
+                node_reads: Semaphore::new(2),
             }),
         })
     }
@@ -317,7 +326,7 @@ impl PrometheusMetrics {
             .map_err(|_| MetricsError::Overloaded)?;
         let labels = binding.labels(&self.inner.config.deployment)?;
         let query = expression(&labels, metric);
-        let mut request = self.inner.client.get(self.inner.url.clone()).query(&[
+        let request = self.inner.client.get(self.inner.url.clone()).query(&[
             ("query", query),
             ("start", range.start.to_string()),
             ("end", range.end.to_string()),
@@ -325,6 +334,15 @@ impl PrometheusMetrics {
             ("timeout", "5s".into()),
             ("limit", "5".into()),
         ]);
+        let bytes = self.request_bytes(request, MAX_BODY).await?;
+        decode(&bytes, &labels, &self.inner.config.replicas, metric, range)
+    }
+
+    async fn request_bytes(
+        &self,
+        mut request: reqwest::RequestBuilder,
+        max_body: usize,
+    ) -> Result<Vec<u8>> {
         match &self.inner.config.auth {
             MetricsAuthentication::Bearer { token_file } => {
                 request = request.bearer_auth(secret(token_file).await?)
@@ -357,7 +375,7 @@ impl PrometheusMetrics {
         }
         if response
             .content_length()
-            .is_some_and(|n| n > MAX_BODY as u64)
+            .is_some_and(|n| n > max_body as u64)
         {
             return Err(MetricsError::Response);
         }
@@ -367,12 +385,12 @@ impl PrometheusMetrics {
             .await
             .map_err(|_| MetricsError::Unavailable)?
         {
-            if bytes.len() + chunk.len() > MAX_BODY {
+            if bytes.len() + chunk.len() > max_body {
                 return Err(MetricsError::Response);
             }
             bytes.extend_from_slice(&chunk);
         }
-        decode(&bytes, &labels, &self.inner.config.replicas, metric, range)
+        Ok(bytes)
     }
 }
 

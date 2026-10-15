@@ -30,6 +30,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/operator/nodes/{id}/image-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read image observations for one enrolled node
+         * @description Installation node_images:read SERVICE authority, current epoch and a still-certified
+         *     enabled node are checked before and after one fixed monitoring query, including
+         *     backend errors. No tenant header, node discovery, free PromQL, range or query
+         *     parameter is accepted. Replacement grant IDs cannot authorize an in-flight read.
+         *     HA replicas are not summed or mixed field by field. Components use one fresh
+         *     scrape cohort and original runtime observation times strictly newer than 60 seconds.
+         *     Missing, stale or incomplete reports remain null; a recent success flag alone does
+         *     not prove a complete fresh report. Quantities are approximate f64 telemetry, not
+         *     exact accounting, physical cache capacity, reclaimable storage or GPU utilization.
+         *     Completeness is always UNKNOWN, including an empty visible filesystem list.
+         */
+        get: operations["getInstallationNodeImageStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health/live": {
         parameters: {
             query?: never;
@@ -1517,6 +1546,54 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        NodeImageStatus: {
+            /** Format: uuid */
+            installation_id: string;
+            /** Format: uuid */
+            cluster_epoch: string;
+            /** Format: uuid */
+            grant_id: string;
+            /** Format: uuid */
+            runtime_node_id: string;
+            /** Format: uuid */
+            node_uid: string;
+            /** Format: uuid */
+            host_boot_id: string;
+            profile_sha256: string;
+            metrics: components["schemas"]["NodeImageMetrics"];
+        };
+        NodeImageMetrics: {
+            evaluated_at_seconds: number;
+            /** @enum {string} */
+            source: "RUNTIME_REPORTED";
+            /** @enum {string} */
+            completeness: "UNKNOWN";
+            /** @enum {string} */
+            accuracy: "APPROXIMATE_F64";
+            inventory_observation_success: boolean | null;
+            filesystem_observation_success: boolean | null;
+            inventory: components["schemas"]["NodeImageInventory"] | null;
+            filesystem: components["schemas"]["NodeImageFilesystemReport"] | null;
+        };
+        NodeImageInventory: {
+            collector_replica: string;
+            scraped_at_seconds: number;
+            observed_at_seconds: number;
+            count: number;
+            compressed_logical_bytes: number;
+        };
+        NodeImageFilesystemReport: {
+            collector_replica: string;
+            scraped_at_seconds: number;
+            observed_at_seconds: number;
+            filesystems: components["schemas"]["NodeImageFilesystem"][];
+        };
+        NodeImageFilesystem: {
+            filesystem_id: string;
+            reported_at_seconds: number;
+            used_bytes: number | null;
+            inodes_used: number | null;
+        };
         InstallationNodeImageAccess: {
             /** Format: uuid */
             installation_id: string;
@@ -3337,6 +3414,36 @@ export interface operations {
             400: components["responses"]["Problem"];
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
+            503: components["responses"]["Unavailable"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    getInstallationNodeImageStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bounded current observations; null reports explicitly mean unknown */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeImageStatus"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            502: components["responses"]["Problem"];
             503: components["responses"]["Unavailable"];
             default: components["responses"]["Problem"];
         };

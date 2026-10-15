@@ -48,7 +48,8 @@ PROCESS_ASSERTIONS = (
      ("Process test requires formal 1..37+39..43 and no invented migration38",
       "Process test requires formal 1..37+39..44 and no invented migration38",
       "Process test requires formal 1..37+39..46 and no invented migration38",
-      "Process test requires formal 1..37+39..47 and no invented migration38"),
+      "Process test requires formal 1..37+39..47 and no invented migration38",
+      "Process test requires formal 1..37+39..48 and no invented migration38"),
      "The strict process-test migration set differs from the normally migrated database."),
     ("STARTUP_LOCK_WINDOW", "tests/automation_process.rs",
      "Actual connected startup blocker was not observed within original window",
@@ -467,7 +468,7 @@ def run(args):
         expected_ledger = [{"version": int(path.name.split("_", 1)[0]), "success": True,
                             "checksum": hashlib.sha384(path.read_bytes()).hexdigest()}
                            for path in sorted((ROOT / "migrations").glob("*.sql"))]
-        if [row["version"] for row in expected_ledger] != list(range(1, 38)) + [39, 40, 41, 42, 43, 44, 45, 46, 47]:
+        if [row["version"] for row in expected_ledger] != list(range(1, 38)) + [39, 40, 41, 42, 43, 44, 45, 46, 47, 48]:
             raise RuntimeError("formal automation requires the complete real migration ledger without 0038")
         for database in (DATABASE, PROCESS_DATABASE) if process_migrated else (DATABASE,):
             psql_env["PGDATABASE"] = database

@@ -74,3 +74,4 @@ GRANT SELECT ON launch_pod_resource_observations TO sandbox_app;
 
 -- Fixed installation read authority only. Management and audit remain owner-only.
 GRANT EXECUTE ON FUNCTION sandbox_node_image_access(text,text,text,bigint) TO sandbox_app;
+GRANT EXECUTE ON FUNCTION sandbox_node_image_binding(text,text,text,bigint,uuid) TO sandbox_app;

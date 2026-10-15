@@ -1,0 +1,412 @@
+{
+  "columns": [
+    {
+      "name": "id",
+      "type": "uuid",
+      "default": null,
+      "identity": "",
+      "not_null": true,
+      "generated": ""
+    },
+    {
+      "name": "runtime_node_id",
+      "type": "uuid",
+      "default": null,
+      "identity": "",
+      "not_null": true,
+      "generated": ""
+    },
+    {
+      "name": "cluster_epoch",
+      "type": "uuid",
+      "default": null,
+      "identity": "",
+      "not_null": true,
+      "generated": ""
+    },
+    {
+      "name": "artifact_sha256",
+      "type": "text",
+      "default": null,
+      "identity": "",
+      "not_null": true,
+      "generated": ""
+    },
+    {
+      "name": "terraform_output_sha256",
+      "type": "text",
+      "default": null,
+      "identity": "",
+      "not_null": true,
+      "generated": ""
+    },
+    {
+      "name": "settings_sha256",
+      "type": "text",
+      "default": null,
+      "identity": "",
+      "not_null": true,
+      "generated": ""
+    },
+    {
+      "name": "certification_report_sha256",
+      "type": "text",
+      "default": null,
+      "identity": "",
+      "not_null": true,
+      "generated": ""
+    },
+    {
+      "name": "certification_expires_at",
+      "type": "timestamp with time zone",
+      "default": null,
+      "identity": "",
+      "not_null": true,
+      "generated": ""
+    },
+    {
+      "name": "observed_node_resource_version",
+      "type": "text",
+      "default": null,
+      "identity": "",
+      "not_null": true,
+      "generated": ""
+    },
+    {
+      "name": "observed_at",
+      "type": "timestamp with time zone",
+      "default": null,
+      "identity": "",
+      "not_null": true,
+      "generated": ""
+    },
+    {
+      "name": "database_role",
+      "type": "text",
+      "default": null,
+      "identity": "",
+      "not_null": true,
+      "generated": ""
+    },
+    {
+      "name": "receipt",
+      "type": "jsonb",
+      "default": null,
+      "identity": "",
+      "not_null": true,
+      "generated": ""
+    },
+    {
+      "name": "registered_at",
+      "type": "timestamp with time zone",
+      "default": "clock_timestamp()",
+      "identity": "",
+      "not_null": true,
+      "generated": ""
+    },
+    {
+      "name": "certification_reviewed_at",
+      "type": "timestamp with time zone",
+      "default": null,
+      "identity": "",
+      "not_null": true,
+      "generated": ""
+    }
+  ],
+  "indexes": [
+    {
+      "keys": [
+        {
+          "column": "runtime_node_id",
+          "options": 0,
+          "collation": null,
+          "operator_class": "pg_catalog.uuid_ops"
+        },
+        {
+          "column": "certification_expires_at",
+          "options": 3,
+          "collation": null,
+          "operator_class": "pg_catalog.timestamptz_ops"
+        }
+      ],
+      "name": "runtime_node_certification_expiry",
+      "ready": true,
+      "valid": true,
+      "unique": false,
+      "primary": false,
+      "immediate": true,
+      "key_count": 2,
+      "predicate": null,
+      "expressions": null,
+      "access_method": "btree",
+      "attribute_count": 2,
+      "nulls_not_distinct": false
+    },
+    {
+      "keys": [
+        {
+          "column": "id",
+          "options": 0,
+          "collation": null,
+          "operator_class": "pg_catalog.uuid_ops"
+        }
+      ],
+      "name": "runtime_node_enrollments_pkey",
+      "ready": true,
+      "valid": true,
+      "unique": true,
+      "primary": true,
+      "immediate": true,
+      "key_count": 1,
+      "predicate": null,
+      "expressions": null,
+      "access_method": "btree",
+      "attribute_count": 1,
+      "nulls_not_distinct": false
+    },
+    {
+      "keys": [
+        {
+          "column": "runtime_node_id",
+          "options": 0,
+          "collation": null,
+          "operator_class": "pg_catalog.uuid_ops"
+        },
+        {
+          "column": "certification_report_sha256",
+          "options": 0,
+          "collation": "pg_catalog.default",
+          "operator_class": "pg_catalog.text_ops"
+        }
+      ],
+      "name": "runtime_node_report_once",
+      "ready": true,
+      "valid": true,
+      "unique": true,
+      "primary": false,
+      "immediate": true,
+      "key_count": 2,
+      "predicate": null,
+      "expressions": null,
+      "access_method": "btree",
+      "attribute_count": 2,
+      "nulls_not_distinct": false
+    }
+  ],
+  "constraints": [
+    {
+      "kind": "c",
+      "name": "certification_review_precedes_expiry",
+      "local": true,
+      "match": " ",
+      "columns": [
+        "certification_reviewed_at",
+        "certification_expires_at"
+      ],
+      "validated": true,
+      "deferrable": false,
+      "expression": "(certification_reviewed_at < certification_expires_at)",
+      "no_inherit": false,
+      "delete_action": " ",
+      "update_action": " ",
+      "inherited_count": 0,
+      "referenced_table": null,
+      "initially_deferred": false,
+      "referenced_columns": []
+    },
+    {
+      "kind": "c",
+      "name": "runtime_node_enrollments_artifact_sha256_check",
+      "local": true,
+      "match": " ",
+      "columns": [
+        "artifact_sha256"
+      ],
+      "validated": true,
+      "deferrable": false,
+      "expression": "(artifact_sha256 ~ '^[0-9a-f]{64}$'::text)",
+      "no_inherit": false,
+      "delete_action": " ",
+      "update_action": " ",
+      "inherited_count": 0,
+      "referenced_table": null,
+      "initially_deferred": false,
+      "referenced_columns": []
+    },
+    {
+      "kind": "c",
+      "name": "runtime_node_enrollments_certification_report_sha256_check",
+      "local": true,
+      "match": " ",
+      "columns": [
+        "certification_report_sha256"
+      ],
+      "validated": true,
+      "deferrable": false,
+      "expression": "(certification_report_sha256 ~ '^[0-9a-f]{64}$'::text)",
+      "no_inherit": false,
+      "delete_action": " ",
+      "update_action": " ",
+      "inherited_count": 0,
+      "referenced_table": null,
+      "initially_deferred": false,
+      "referenced_columns": []
+    },
+    {
+      "kind": "c",
+      "name": "runtime_node_enrollments_check",
+      "local": true,
+      "match": " ",
+      "columns": [
+        "certification_expires_at",
+        "registered_at"
+      ],
+      "validated": true,
+      "deferrable": false,
+      "expression": "(certification_expires_at > registered_at)",
+      "no_inherit": false,
+      "delete_action": " ",
+      "update_action": " ",
+      "inherited_count": 0,
+      "referenced_table": null,
+      "initially_deferred": false,
+      "referenced_columns": []
+    },
+    {
+      "kind": "c",
+      "name": "runtime_node_enrollments_check1",
+      "local": true,
+      "match": " ",
+      "columns": [
+        "observed_at",
+        "registered_at"
+      ],
+      "validated": true,
+      "deferrable": false,
+      "expression": "((observed_at >= (registered_at - '00:00:10'::interval)) AND (observed_at <= (registered_at + '00:00:02'::interval)))",
+      "no_inherit": false,
+      "delete_action": " ",
+      "update_action": " ",
+      "inherited_count": 0,
+      "referenced_table": null,
+      "initially_deferred": false,
+      "referenced_columns": []
+    },
+    {
+      "kind": "c",
+      "name": "runtime_node_enrollments_observed_node_resource_version_check",
+      "local": true,
+      "match": " ",
+      "columns": [
+        "observed_node_resource_version"
+      ],
+      "validated": true,
+      "deferrable": false,
+      "expression": "((char_length(observed_node_resource_version) >= 1) AND (char_length(observed_node_resource_version) <= 256))",
+      "no_inherit": false,
+      "delete_action": " ",
+      "update_action": " ",
+      "inherited_count": 0,
+      "referenced_table": null,
+      "initially_deferred": false,
+      "referenced_columns": []
+    },
+    {
+      "kind": "p",
+      "name": "runtime_node_enrollments_pkey",
+      "local": true,
+      "match": " ",
+      "columns": [
+        "id"
+      ],
+      "validated": true,
+      "deferrable": false,
+      "expression": null,
+      "no_inherit": true,
+      "delete_action": " ",
+      "update_action": " ",
+      "inherited_count": 0,
+      "referenced_table": null,
+      "initially_deferred": false,
+      "referenced_columns": []
+    },
+    {
+      "kind": "c",
+      "name": "runtime_node_enrollments_receipt_check",
+      "local": true,
+      "match": " ",
+      "columns": [
+        "receipt"
+      ],
+      "validated": true,
+      "deferrable": false,
+      "expression": "((jsonb_typeof(receipt) = 'object'::text) AND (octet_length((receipt)::text) <= 16384))",
+      "no_inherit": false,
+      "delete_action": " ",
+      "update_action": " ",
+      "inherited_count": 0,
+      "referenced_table": null,
+      "initially_deferred": false,
+      "referenced_columns": []
+    },
+    {
+      "kind": "f",
+      "name": "runtime_node_enrollments_runtime_node_id_fkey",
+      "local": true,
+      "match": "s",
+      "columns": [
+        "runtime_node_id"
+      ],
+      "validated": true,
+      "deferrable": false,
+      "expression": null,
+      "no_inherit": true,
+      "delete_action": "a",
+      "update_action": "a",
+      "inherited_count": 0,
+      "referenced_table": "public.runtime_nodes",
+      "initially_deferred": false,
+      "referenced_columns": [
+        "id"
+      ]
+    },
+    {
+      "kind": "c",
+      "name": "runtime_node_enrollments_settings_sha256_check",
+      "local": true,
+      "match": " ",
+      "columns": [
+        "settings_sha256"
+      ],
+      "validated": true,
+      "deferrable": false,
+      "expression": "(settings_sha256 ~ '^[0-9a-f]{64}$'::text)",
+      "no_inherit": false,
+      "delete_action": " ",
+      "update_action": " ",
+      "inherited_count": 0,
+      "referenced_table": null,
+      "initially_deferred": false,
+      "referenced_columns": []
+    },
+    {
+      "kind": "c",
+      "name": "runtime_node_enrollments_terraform_output_sha256_check",
+      "local": true,
+      "match": " ",
+      "columns": [
+        "terraform_output_sha256"
+      ],
+      "validated": true,
+      "deferrable": false,
+      "expression": "(terraform_output_sha256 ~ '^[0-9a-f]{64}$'::text)",
+      "no_inherit": false,
+      "delete_action": " ",
+      "update_action": " ",
+      "inherited_count": 0,
+      "referenced_table": null,
+      "initially_deferred": false,
+      "referenced_columns": []
+    }
+  ]
+}
