@@ -4,6 +4,8 @@
 Consumes ordinary Cargo --message-format=json build output. Each interface suite
 owns a fresh normally migrated database; the exact historical upgrade case
 installs its own version-41 schema in an empty owned database before upgrading.
+The fresh setup case instead runs the ordinary shared test initializer from an
+empty database, without a preceding sandboxd migration that could mask drift.
 Bootstrap shares its explicit database initialization prerequisite. No existing
 database can be selected.
 Credentials stay in child environments/stdin. Reuses the automation fixture's
@@ -37,7 +39,13 @@ HISTORICAL_UPGRADE_SUITE = (
 HISTORICAL_UPGRADE_MARKER = "AUTO_UPGRADE_V41_CURRENT_FACTS_OLD_MIGRATOR_REFUSAL_VERIFIED"
 HISTORICAL_STATE_MARKER = "AUTO_UPGRADE_NONEMPTY_HISTORY_SCHEMA42_ACK_CURRENT_REPLAY_REVOKE_VERIFIED"
 HISTORICAL_PROGRESSION_MARKER = "AUTO_UPGRADE_UNKNOWN_FAILED_DISTINCT_SOURCES_ACK_REPLAY_ISOLATION_VERIFIED"
+FRESH_DATABASE_SUITE = (
+    "fresh_database_setup", "database",
+    "forced_rls_isolates_rows_and_transaction_context_does_not_leak",
+    "forced_rls_isolates_rows_and_transaction_context_does_not_leak",
+)
 SUITES = [
+    FRESH_DATABASE_SUITE,
     ("resource_accounting", "resource_accounting", "", "accepted_create_freezes_launch_request_and_scoped_pending_receipts_once"),
     ("resource_accounting_http", "resource_accounting_http", "", "signed_resource_http_and_node_sdk_preserve_decimal_quantities_and_revocation"),
     ("pod_observation", "sandbox_platform", "launch_resource_observation_tests::", "actual_lost_commit_ack_replays_original_registration_and_observation_id"),
@@ -53,6 +61,7 @@ SUITES = [
     ("worker_dispatch", "worker_dispatch", "", "worker_fills_capacity_and_recovers_missing_hints_future_work_and_listener_loss"),
     ("worker_continuation", "worker_continuation", "", "continuous_lost_commit_ack_stops_old_batch_and_recovers_same_uid"),
     ("output_identity", "sandbox_platform", "output_page_rechecks_identity_and_expiry_after_storage_io", ""),
+    ("output_startup", "sandbox_platform", "output_short_lived_token_is_issued_after_startup_preflight_wait", "output_short_lived_token_is_issued_after_startup_preflight_wait"),
     ("action_scope", "sandbox_platform", "action_scope_ceiling_blocks_mutations_streams_and_delegation", ""),
     ("bootstrap_prerequisite", "database", "forced_rls_isolates_rows_and_transaction_context_does_not_leak", ""),
     ("bootstrap", "bootstrap", "", ""),
@@ -63,7 +72,7 @@ SUITES = [
 ]
 # A broader local acceptance caller may supply exact expected counts. The
 # standalone review matrix retains its established selection and resources.
-EXPECTED_COUNTS = {"resource_accounting": 9, "resource_accounting_http": 3, "pod_observation": 8, "pod_observation_http": 1, "db_cancellation": 1, "bff_pg": 4, "automation_upgrade": 1, "worker_dispatch": 3, "worker_continuation": 6}
+EXPECTED_COUNTS = {"fresh_database_setup": 1, "output_startup": 1, "resource_accounting": 9, "resource_accounting_http": 3, "pod_observation": 8, "pod_observation_http": 1, "db_cancellation": 1, "bff_pg": 4, "automation_upgrade": 1, "worker_dispatch": 3, "worker_continuation": 6}
 
 
 def public_fingerprints():
@@ -190,6 +199,9 @@ def run(args):
             historical_upgrade = name == "automation_upgrade" or target == "automation_upgrade"
             if historical_upgrade and (name, target, filter_name, required) != HISTORICAL_UPGRADE_SUITE:
                 raise RuntimeError("historical upgrade requires its exact mandatory interface case")
+            fresh_setup = name == FRESH_DATABASE_SUITE[0]
+            if fresh_setup and (name, target, filter_name, required) != FRESH_DATABASE_SUITE:
+                raise RuntimeError("fresh setup requires its exact mandatory database interface case")
             database = "sandbox_worker_process_" + str(time.time_ns()) + "_test" if name == "worker_process" else "sandbox_review_" + ("bootstrap" if name == "bootstrap_prerequisite" else name) + "_test"
             if len(database) > 63:
                 raise RuntimeError("interface database identifier exceeds PostgreSQL bound")
@@ -214,15 +226,14 @@ def run(args):
                 # Only this fixture creates its own additional random test
                 # databases. Do not expose admin authority to interface suites.
                 test_env["TEST_POSTGRES_ADMIN_DATABASE_URL"] = "postgresql://" + admin + ":" + environment["POSTGRES_PASSWORD"] + "@127.0.0.1:" + str(port) + "/postgres?" + tls_query
-            if historical_upgrade:
-                # This one case exercises the real historical installation and
-                # upgrade. A current sandboxd migration here would silently
-                # turn it into a fresh-schema test. Verify the database created
-                # by this fixture still has no user relations before dispatch.
+            if historical_upgrade or fresh_setup:
+                # Both cases must install their own schema. Premigrating would
+                # erase the historical upgrade or hide the ordinary shared
+                # initializer's missing component grants. Prove emptiness.
                 relation_count = fixture.invoke(psql, env=dict(psql_env, PGDATABASE=database), text="SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname !~ '^pg_toast' AND n.nspname !~ '^pg_temp';")
                 if relation_count != "0":
-                    raise RuntimeError("historical upgrade requires a new empty owned database")
-                schema_preparation = {"mode": "TEST_INSTALLS_V41_THEN_CURRENT", "pre_run_user_relation_count": 0}
+                    raise RuntimeError("self-initializing suite requires a new empty owned database")
+                schema_preparation = {"mode": "TEST_INSTALLS_CURRENT_FROM_EMPTY" if fresh_setup else "TEST_INSTALLS_V41_THEN_CURRENT", "pre_run_user_relation_count": 0}
             else:
                 migration_env = dict(test_env, SANDBOX_DATABASE_URL=test_env["TEST_MIGRATION_DATABASE_URL"])
                 fixture.invoke([str(binaries["sandboxd"]), "--role", "migrate"], env=migration_env, timeout=120)

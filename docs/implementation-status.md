@@ -1,5 +1,13 @@
 # 开发进度与验收证据
 
+最新CI修复检查点（2026-10-15）：公开a164d85的[CI run 38729681955](https://github.com/StateKnot/knotsandbox/actions/runs/38729681955)有两个已确认的前置失败：production-console显式Docker COPY遗漏已允许的SDK `resource-observation.ts`；verify第14步空库database20项在共享fixture漏装既有termination角色授权后，被原schema守卫全部拒绝。后续缺少artifact是前置未执行的结果。本轮补准确COPY；仅在该独立登录已存在时执行原termination-role.sql，不新建角色、不放宽生产权限或schema检查。新增必跑fresh单例先确认空库，直接由共享initializer安装正常迁移，取消本地harness对该例的sandboxd预迁移掩盖。
+
+空库原制品20/20 RED；修复后独立空库database20＋database_roles1共21项GREEN，原函数安全属性、角色与授权逐项核对。最终Docker回归另发现短期输出测试JWT在启动schema预检前签发：真实PG精确锁等待2250ms的新增反例先得到过期401，再仅移动原签发代码到预检之后，授权200及真实单段输出通过；原2秒期限、3秒I/O过期拒绝和3秒数据库锁期限均保持。首次3秒锁屏障击中lock_timeout的失败也保留，不将它计为JWT反例。该调整只影响测试夹具，没有修改生产鉴权或业务逻辑。
+
+本轮最终验收：39组203项独立TLS-PG／JWT／HTTP／Node SDK回归按最终制品分两批通过（12组52项未变摘要复用＋27组151项最终重跑），0失败／0ignored，PASS_BATCHED_FINAL_ARTIFACTS；各批source/bin/SDK稳定、自有容器／进程和每库清理均确认。普通原生62程序461通过／0失败／279环境专项ignored：仅变化的lib程序重跑，其余61个摘要相同，不能从ignored推导环境验收。严格all-target Clippy与fmt通过。真实linux/amd64 console构建22.086秒、原check_image TLS／nonroot／read-only检查8.878秒通过；533个冻结上下文输入中，后续仅两个测试文件变化，控制台生产消费输入保持。额外5项console部署配置测试通过。原完整CI失败不改写；本批新提交CI待同步后按精确head核对，不称完整CI已通过。
+
+Standards审查0项违反／0项smell；Spec最初1项未来准备方案遗漏内存／FD／专用网络槽硬预算，已补每任务／每节点硬限、正常VM／CRI保留量、缺测拒绝和真实副作用退出后释放槽；追加令牌回归审查0项，当前未关闭0项。下一阶段[批准镜像节点预准备方案](../research/image-preparation-production-plan-20261015.md)及[开发表12.8](../research/rust-sandbox-development-workbreakdown.md#128-批准镜像节点预准备后续有序实施2026-10-15)已补充，P0—P6仍未实现／未认证。每90分钟跟进已启用，优先接续在途任务和失败门。未新增正式迁移，原45条逐字保持；实际利用率、镜像预准备收益、GPU及目标云／Kata生产验收仍分别待完成。
+
 最新开发检查点（2026-10-15，第4步）：普通CPU可信启动资源观察、0046原子授权登记与固定证据分页已实现并完成本地验收。完整37组201项按最终制品分两批通过（42＋159），0失败／0ignored，汇总PASS_BATCHED_FINAL_ARTIFACTS，不称单轮全跑；新提交CI待同步后核对。新数据库8项、真实JWT/HTTP/独立Node SDK组合专项1项、普通Rust按三批未变SHA复用461通过／0失败／278环境ignored、SDK77项及资源账本Chrome8项另行通过；正常0045→0046维护门和真实amd64 runtime／runner生产构建、4项受限smoke及secrets-init检查通过。资源API、生成SDK和控制台协同升级，旧账本游标从第一页重读；缺证据旧launch仍NOT_CAPTURED，捕获后明确KUBERNETES_API_READBACK。Standards0发现，Spec1项过期旧ACK缺陷已修复、0未关闭；初始失败及夹具修正保留。详见[可信观察交付与验收范围](../research/trusted-launch-resource-observation-20261015.md)。实际利用率、预算化预准备、冷暖实测、GPU及恢复／云认证仍独立待完成。
 
 上一账本检查点（2026-10-15）：逐次启动资源账本第2/5步及相关6/7/8子项已实现并完成本地整轮验收。最终50文件冻结候选单轮27组164项、0失败、0ignored，PASS_FULL_ACCEPTANCE；44条正式迁移字节/checksum、source/bin/SDK稳定及自有清理均核对，09ca生产二进制未改。真实44→45维护门、旧数据/16预约基线、SDK75、维护18、OpenAPI13、Chrome34/consolebuild、最新Clippy-v3/fmt-v4分别通过。旧分批结果和v2/v3/49候选失败保留；precommit测试注入过早击中Worker启动检查，test-only post-policy响应barrier修正后专项10项及整轮6项GREEN，原5/12/35秒和断言保持。早期其他503/timer原因UNKNOWN，不将本次数据库20/timers8/worker4通过称为未知原因已修复。普通453/0/269早于integration修订，不从ignored推导PG证明。第3/4步实际Pod/RuntimeClass、利用率、预热与GPU待开发。见[交付记录](../research/launch-resource-accounting-delivery-20261015.md)。基线5086b28 CI成功不代替新提交CI；本轮上传后触发新CI，实际状态由本机交付回执另记。

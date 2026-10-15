@@ -321,3 +321,18 @@ b66177be完整CI已确认资源容量与18组PG等前置门通过，但真实诊
 独立Standards审查0项发现；Spec发现1项并已修复，0项未关闭：数据库续期但extension尚未ACK时，过期旧注册请求／ACK不能被当前较长compute lease续命。入口及最终阻塞后均以DB当前时钟检查本次请求和ACK期限；真实自然过期反例拒绝且无观察／ACK半提交。BFF自建库补正常termination角色脚本，历史automation升级只精确区分新增0046 metadata并独立验证；初始失败保留，未放宽生产权限或期限。
 
 完整矩阵为前9组42项与后28组159项；两批间仅automation_upgrade测试及其独立程序变化，其他公开源码／二进制／SDK逐SHA不变，各批运行稳定及自有清理确认。精确摘要和后续新提交CI状态见[本轮交付记录](trusted-launch-resource-observation-20261015.md)。本子项完成后才进入有预算／期限／撤销／GC的镜像和节点预准备，再进行冷暖端到端实测；GPU设备身份／独占租约／真实采样与可信回收继续按原表单独开发认证。当前不输出利用率、节省比例或GPU已完成结论。
+
+### 12.8 批准镜像节点预准备：后续有序实施（2026-10-15）
+
+本节P0—P6是下一阶段方案，**未实现、未验收**；本轮先完成已发布CI失败的本地修复与回归，新提交CI仍须独立核对，再逐个交付有完整消费者和退出门的切片。详见[生产实施计划](image-preparation-production-plan-20261015.md)及[固定版本官方源码核对](image-preparation-native-sources-20261015.md)。范围是批准OCI镜像准备，不预造CPU／GPU VM池，不产生普通launch许可。
+
+| 顺序／工作包 | 开发内容与接口 | 退出门／依赖 |
+| --- | --- | --- |
+| 0；G4-01/G4-02 | 核对当前CI及失败回执，先修复已发布输入；每90分钟继续最前未闭合切片 | console准确COPY、fresh角色初始化和测试JWT签发顺序已修复；真实console镜像／TLS与39组203项最终分批回归通过，原生461／0／279ignored、严格Clippy／fmt通过；新提交CI待核对，不因定时触发跳过失败或重复提交未验收改动 |
+| P0a—P0c；G0-08/G1-09/G3-12 | 同nodeguard／scraper CA／固定UDS只读CRI snapshotter报告与镜像库存；同Prom双Agent独立node allowlist／预算；安装级operator授权及固定查询／admin消费者 | 真containerd→mTLS→remote-write→operator闭环，无VM也可读；失败／撤权清旧，不泄路径／repo，不借instances:read。ImageFsInfo排除content store且统计可能不完整，完整cache／capacity／reclaimable保持UNKNOWN |
+| P1；G1-04/G1-09/G1-12 | 定型平台manifest、namespace／snapshotter、native lease／content／snapshot引用及真实存储硬限组合 | 官方固定版本源码和实际backend证据；nil sandbox config会选default，不能仅传handler后宣称Kata已准备；未核实支持保持关闭 |
+| P2/P3；G2-01/G2-13/G1-12 | PG准备意图／预算及最小权限；独立准备授权、准确node／boot/profile/epoch；批准index＋selected manifest＋platform；短时凭据及有硬限的下载／解包 | P1通过后才pre-pull；瞬态headroom、inode／metadata／并发上界与真实写入硬限同时守住；不能拼普通launch许可 |
+| P4；G2-07/G4-02/G4-06 | 同键lost ACK／重启恢复、到期／撤销、活动共享引用保护、只释放本产品native引用和GC／物理对账 | UNKNOWN保留必要预算；引用释放不等于物理回收，RemoveImage不能盲删共享alias；不清全局目录／他人镜像 |
+| P5/P6；G0-07/G3-03/G4-05/G4-09 | placement后才复核HIT／MISS／UNKNOWN；普通启动许可和Ready原合同保持；真实本地协议与目标环境冷暖基线 | Docker可验PG／registry／containerd及硬限，不代Kata／GPU／云p95/p99、72h成本及生产隔离认证；无实测不承诺加速或节省比例 |
+
+每轮记录具体开发文件／接口、真实验收与剩余门；完整分步表在上述计划中。只读基线先完成，原生引用及硬预算未闭合前不开放后台pre-pull；计划表和研究来源不计实现进度。

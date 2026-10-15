@@ -177,6 +177,16 @@ impl Fixture {
                 sqlx::raw_sql(include_str!("../../scripts/sql/automation-role.sql"))
                     .execute(&owner)
                     .await?;
+                let termination_exists: bool = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='sandbox_termination')",
+                )
+                .fetch_one(&owner)
+                .await?;
+                if termination_exists {
+                    sqlx::raw_sql(include_str!("../../scripts/sql/termination-role.sql"))
+                        .execute(&owner)
+                        .await?;
+                }
                 sqlx::query(
                     "INSERT INTO platform_configuration(singleton,cluster_epoch,safe_mode) \
                      VALUES(true,$1,false) ON CONFLICT(singleton) DO UPDATE SET safe_mode=false",

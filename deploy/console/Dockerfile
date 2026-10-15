@@ -3,7 +3,8 @@ FROM node:24.19.0-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733cee
 WORKDIR /build/console
 COPY console/package.json console/package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
-COPY sdk/typescript/src/schema.d.ts sdk/typescript/src/events.ts sdk/typescript/src/event-message.ts \
+COPY sdk/typescript/src/schema.d.ts sdk/typescript/src/resource-observation.ts \
+     sdk/typescript/src/events.ts sdk/typescript/src/event-message.ts \
      sdk/typescript/src/sse.ts sdk/typescript/src/transport.ts /build/sdk/typescript/src/
 COPY console/index.html console/tsconfig.json console/vite.config.ts ./
 COPY console/src ./src

@@ -253,12 +253,6 @@ impl OutputFixture {
         let mut header = Header::new(Algorithm::RS256);
         header.typ = Some("at+jwt".into());
         header.kid = Some(kid);
-        let now = Utc::now().timestamp();
-        let token = encode(
-            &header,
-            &json!({"iss":"https://issuer.example.test","sub":self.db.actor.principal_id.to_string(),"aud":"sandbox-api","client_id":"output-test","jti":Uuid::new_v4().to_string(),"iat":now,"exp":now+lifetime,"scope":scope}),
-            &EncodingKey::from_rsa_der(include_bytes!("../tests/fixtures/auth/rsa-a.der")),
-        )?;
         let state = Arc::new(AppState {
             database: self.db.database.clone(),
             auth,
@@ -272,6 +266,12 @@ impl OutputFixture {
         });
         let runtime = Arc::new(crate::automation::api::AutomationApiRuntime { app: state.clone() });
         runtime.check_schema().await?;
+        let now = Utc::now().timestamp();
+        let token = encode(
+            &header,
+            &json!({"iss":"https://issuer.example.test","sub":self.db.actor.principal_id.to_string(),"aud":"sandbox-api","client_id":"output-test","jti":Uuid::new_v4().to_string(),"iat":now,"exp":now+lifetime,"scope":scope}),
+            &EncodingKey::from_rsa_der(include_bytes!("../tests/fixtures/auth/rsa-a.der")),
+        )?;
         let app = crate::api::router_with_automations(state, shutdown, None, None, Some(runtime));
         Ok((app, token, task))
     }
@@ -486,6 +486,113 @@ async fn http_output_checks_manifest_corruption_and_revocation_after_object_read
     }
     server.abort();
     Ok(())
+}
+
+#[tokio::test]
+#[ignore = "Requires real PostgreSQL startup lock wait, loopback JWKS and signed OSS transport"]
+async fn output_short_lived_token_is_issued_after_startup_preflight_wait() -> anyhow::Result<()> {
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+
+    let _serial = serial().await;
+    let f = OutputFixture::new().await?;
+    f.segment(0, "after-startup-preflight").await?;
+    let mut blocker = f.db.owner.begin().await?;
+    let blocker_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *blocker)
+        .await?;
+    sqlx::query("LOCK TABLE public._sqlx_migrations IN ACCESS EXCLUSIVE MODE")
+        .execute(&mut *blocker)
+        .await?;
+
+    // Observe the real restricted API login waiting on this exact owner lock.
+    // No pg_stat_activity query text or extra monitoring privileges are needed.
+    let waiters = "SELECT a.pid FROM pg_locks l JOIN pg_stat_activity a ON a.pid=l.pid \
+        WHERE a.datname=current_database() AND a.usename='sandbox_app' \
+        AND l.locktype='relation' AND l.database=(SELECT oid FROM pg_database WHERE datname=current_database()) \
+        AND l.relation='public._sqlx_migrations'::regclass AND l.mode='AccessShareLock' AND NOT l.granted \
+        AND $1=ANY(pg_blocking_pids(a.pid))";
+    let release = async {
+        let held = async {
+            let waiter = tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    let pids: Vec<i32> = sqlx::query_scalar(waiters)
+                        .bind(blocker_pid)
+                        .fetch_all(&f.db.owner)
+                        .await?;
+                    anyhow::ensure!(pids.len() <= 1, "ambiguous startup schema lock waiter");
+                    if let Some(pid) = pids.first() {
+                        return Ok::<_, anyhow::Error>(*pid);
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .context("startup preflight did not wait on the exact migration relation lock")??;
+            // Only after PostgreSQL proves the app is blocked, outwait the
+            // unchanged two-second token lifetime while staying below the
+            // normal three-second database lock timeout. No storage delay.
+            tokio::time::sleep(Duration::from_millis(2_250)).await;
+            let still_waiting: Vec<i32> = sqlx::query_scalar(waiters)
+                .bind(blocker_pid)
+                .fetch_all(&f.db.owner)
+                .await?;
+            anyhow::ensure!(
+                still_waiting == [waiter],
+                "startup must remain blocked until this owner releases the schema lock"
+            );
+            Ok::<_, anyhow::Error>(())
+        }
+        .await;
+        // JWT times have whole-second precision. Sample immediately before
+        // rollback so issuance in the release second is accepted as well.
+        let release_second = Utc::now().timestamp();
+        let released = blocker.rollback().await;
+        held?;
+        released?;
+        Ok::<_, anyhow::Error>(release_second)
+    };
+    // Always release the barrier, even on observer failure, then recover the
+    // normal helper's JWKS handle before checking any response assertion.
+    let (ready, released) = tokio::join!(f.app(2, CancellationToken::new()), release);
+    let (app, token, server) = ready?;
+    let outcome = async {
+        let release_second = released?;
+        let claims: Value = serde_json::from_slice(
+            &URL_SAFE_NO_PAD.decode(token.split('.').nth(1).context("JWT claims")?)?,
+        )?;
+        let issued = claims["iat"].as_i64().context("JWT issued-at")?;
+        let expires = claims["exp"].as_i64().context("JWT expires-at")?;
+        anyhow::ensure!(expires - issued == 2, "retain the exact short token lifetime");
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/v1/executions/{}/output", f.execution))
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("x-tenant-id", f.db.actor.tenant_id.to_string())
+                    .body(Body::empty())?,
+            )
+            .await?;
+        let status = response.status();
+        let body = response.into_body().collect().await?.to_bytes();
+        anyhow::ensure!(
+            issued >= release_second && status == StatusCode::OK,
+            "short token must be issued after startup releases its schema lock: issued={issued}, release_second={release_second}, HTTP={status}"
+        );
+        let body: Value = serde_json::from_slice(&body)?;
+        anyhow::ensure!(
+            body["segments"].as_array().is_some_and(|v| v.len() == 1)
+                && body["segments"][0]["frames"]
+                    .as_array()
+                    .is_some_and(|v| v.len() == 1)
+                && body["segments"][0]["frames"][0]["data"] == "YWZ0ZXItc3RhcnR1cC1wcmVmbGlnaHQ=",
+            "the real authorized output page must contain the single stored segment"
+        );
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    server.abort();
+    let _ = server.await;
+    outcome
 }
 
 #[tokio::test]
