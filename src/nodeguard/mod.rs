@@ -10,6 +10,7 @@ mod cri_transport;
 #[cfg(any(target_os = "linux", test))]
 mod cri_work;
 pub mod host;
+pub mod image_observation;
 pub mod journal;
 #[cfg(any(target_os = "linux", test))]
 pub mod metrics;

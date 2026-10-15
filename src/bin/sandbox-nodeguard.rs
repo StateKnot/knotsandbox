@@ -53,6 +53,10 @@ mod linux {
         listen: SocketAddr,
         deployment: String,
         scraper_client_ca: PathBuf,
+        /// Opt in only with a newly certified HostProfile that contains the
+        /// matching read-only policy. Installers keep this disabled by default.
+        #[serde(default)]
+        image_observation: bool,
     }
     fn control_address(address: SocketAddr) -> anyhow::Result<()> {
         let private = match address.ip() {
@@ -190,10 +194,28 @@ mod linux {
                 &read(&config.tls_key, true)?,
                 &metrics_ca,
             )?;
+            let images = if metrics.image_observation {
+                match sandbox_platform::nodeguard::image_observation::ImageObserver::connect(
+                    proxy.journal.node().clone(),
+                    &config.profile_file,
+                ).await {
+                    Ok(images) => Some(images),
+                    Err(_) => {
+                        // Diagnostics cannot become a new dependency of the
+                        // existing CRI/control listeners. Unapproved policy
+                        // never exposes a read route or starts collector I/O.
+                        tracing::warn!("read-only image diagnostics disabled: certified configuration is unavailable");
+                        None
+                    }
+                }
+            } else {
+                None
+            };
             Some((
                 tokio::net::TcpListener::bind(metrics.listen).await?,
                 tls,
-                metrics_server::router(proxy.clone(), metrics.deployment)?,
+                metrics_server::router(proxy.clone(), metrics.deployment, images.clone())?,
+                images,
             ))
         } else {
             None
@@ -248,8 +270,26 @@ mod linux {
         );
         let metrics_cancel = cancel.clone();
         let metrics = async move {
-            if let Some((listener, tls, router)) = metrics {
-                serve_metrics(listener, tls, router, metrics_cancel).await
+            if let Some((listener, tls, router, images)) = metrics {
+                let observer_cancel = metrics_cancel.clone();
+                // Both futures stay owned by the metrics lifecycle. A listener
+                // error cancels the collector; neither a dropped scrape nor a
+                // backend failure detaches work or delays the original VM RPCs.
+                let (served, ()) = tokio::join!(
+                    async {
+                        let result = serve_metrics(listener, tls, router, metrics_cancel.clone()).await;
+                        metrics_cancel.cancel();
+                        result
+                    },
+                    async {
+                        if let Some(images) = images
+                            && images.run(observer_cancel).await.is_err()
+                        {
+                            tracing::warn!("read-only image observation is unavailable");
+                        }
+                    }
+                );
+                served
             } else {
                 metrics_cancel.cancelled().await;
                 Ok(())

@@ -1,6 +1,12 @@
 # 开发进度与验收证据
 
-最新CI修复检查点（2026-10-15）：公开a164d85的[CI run 38729681955](https://github.com/StateKnot/knotsandbox/actions/runs/38729681955)有两个已确认的前置失败：production-console显式Docker COPY遗漏已允许的SDK `resource-observation.ts`；verify第14步空库database20项在共享fixture漏装既有termination角色授权后，被原schema守卫全部拒绝。后续缺少artifact是前置未执行的结果。本轮补准确COPY；仅在该独立登录已存在时执行原termination-role.sql，不新建角色、不放宽生产权限或schema检查。新增必跑fresh单例先确认空库，直接由共享initializer安装正常迁移，取消本地harness对该例的sandboxd预迁移掩盖。
+最新开发检查点（2026-10-15，镜像诊断P0a）：固定containerd只读ImageService adapter、profile/boot/peer/同FD及mount身份验证、独立有界owner与scraper CA的`GET /v1/node-image-status`已实现并完成本地验收。默认关闭，不新增节点Prometheus样本，不借实例权限开放全节点数据；P0b管线与P0c安装级OIDC/授权/API仍未完成。库存逻辑大小与snapshot-store报告来源为RUNTIME_REPORTED、完整性UNKNOWN，未输出物理缓存容量/可释放量/命中率。
+
+原生62程序472通过／0失败／279环境ignored；最终仅Linux cfg lint变化后全部62二进制SHA相同复用。Linux70项、真实containerd→独立mTLS无VM专项1项、Python11项，以及两平台strict all-target Clippy/fmt通过，精确自有清理确认。两轴审查的启动依赖、原FS时间超龄、预检回执与晚中断假PASS问题均修复；失败现场保留。先核对基线ff16330的CI 5 job／61 step首次全绿，本轮新提交远端完整树及精确CI另行核对，不能沿用基线成功。下一项为P0b；pre-pull、冷暖收益、GPU和云/Kata/CSI仍单独开发认证。见[本批交付](../research/node-image-observation-delivery-20261015.md)与[接口合同](node-image-observation.md)。
+
+以下保留历史检查点当时的范围与状态，当前状态以上述最新检查点为准。
+
+上一CI修复检查点（2026-10-15）：公开a164d85的[CI run 38729681955](https://github.com/StateKnot/knotsandbox/actions/runs/38729681955)有两个已确认的前置失败：production-console显式Docker COPY遗漏已允许的SDK `resource-observation.ts`；verify第14步空库database20项在共享fixture漏装既有termination角色授权后，被原schema守卫全部拒绝。后续缺少artifact是前置未执行的结果。本轮补准确COPY；仅在该独立登录已存在时执行原termination-role.sql，不新建角色、不放宽生产权限或schema检查。新增必跑fresh单例先确认空库，直接由共享initializer安装正常迁移，取消本地harness对该例的sandboxd预迁移掩盖。
 
 空库原制品20/20 RED；修复后独立空库database20＋database_roles1共21项GREEN，原函数安全属性、角色与授权逐项核对。最终Docker回归另发现短期输出测试JWT在启动schema预检前签发：真实PG精确锁等待2250ms的新增反例先得到过期401，再仅移动原签发代码到预检之后，授权200及真实单段输出通过；原2秒期限、3秒I/O过期拒绝和3秒数据库锁期限均保持。首次3秒锁屏障击中lock_timeout的失败也保留，不将它计为JWT反例。该调整只影响测试夹具，没有修改生产鉴权或业务逻辑。
 

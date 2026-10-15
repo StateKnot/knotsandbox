@@ -212,6 +212,7 @@ jobs:
           python3 -m py_compile scripts/dev-database-roles.py
           python3 -m unittest discover -s scripts/release/tests -v
           python3 -m unittest discover -s scripts/tests -p 'test_nodeguard_host_observation.py' -v
+          python3 -m unittest discover -s scripts/tests -p 'test_nodeguard_image_observation.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_console_browser.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_automation_diagnostics.py' -v
           python3 scripts/test-nodeguard-trust-linux.py --self-test
@@ -223,6 +224,9 @@ jobs:
           cargo test --locked --lib --no-run --message-format=json > .local/nodeguard-host-artifacts.jsonl
           python3 scripts/test-nodeguard-host-observation.py --artifacts .local/nodeguard-host-artifacts.jsonl --evidence-dir .local/nodeguard-host-observation
           python3 scripts/test-nodeguard-capacity.py --artifacts .local/nodeguard-host-artifacts.jsonl --evidence-dir .local/nodeguard-capacity
+      - name: Native containerd ImageService observation through scraper-only mutual TLS
+        run: |
+          python3 scripts/test-nodeguard-image-observation.py --artifacts .local/nodeguard-host-artifacts.jsonl --evidence-dir .local/nodeguard-image-observation
       - name: Required isolated identity and lifecycle review regressions
         run: |
           df -h .
@@ -241,6 +245,7 @@ jobs:
             .local/nodeguard-host-observation/*.log
             .local/nodeguard-capacity/*.json
             .local/nodeguard-capacity/*.log
+            .local/nodeguard-image-observation/record.json
             .local/review-regressions/*.json
             .local/review-regressions/*.log
           include-hidden-files: true

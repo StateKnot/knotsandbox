@@ -1,6 +1,6 @@
 //! Dedicated read-only scrape surface. Serve only with its own scraper-client
 //! CA, never the controller CA and never on the CRI control router.
-use super::{GuardError, cri::CriProxy, metrics::CgroupCounters};
+use super::{GuardError, cri::CriProxy, image_observation::ImageObserver, metrics::CgroupCounters};
 use crate::metrics::{RuntimeMetric, RuntimeMetricBinding};
 use axum::{
     Router,
@@ -21,9 +21,14 @@ struct MetricsState {
     proxy: Arc<CriProxy>,
     deployment: String,
     slots: Arc<tokio::sync::Semaphore>,
+    images: Option<Arc<ImageObserver>>,
 }
 
-pub fn router(proxy: Arc<CriProxy>, deployment: String) -> Result<Router, GuardError> {
+pub fn router(
+    proxy: Arc<CriProxy>,
+    deployment: String,
+    images: Option<Arc<ImageObserver>>,
+) -> Result<Router, GuardError> {
     if deployment.is_empty()
         || deployment.len() > 63
         || !deployment
@@ -32,13 +37,28 @@ pub fn router(proxy: Arc<CriProxy>, deployment: String) -> Result<Router, GuardE
     {
         return Err(GuardError::Invalid);
     }
-    Ok(Router::new()
-        .route("/metrics", get(scrape))
-        .with_state(MetricsState {
-            proxy,
-            deployment,
-            slots: Arc::new(tokio::sync::Semaphore::new(1)),
-        }))
+    let mut router = Router::new().route("/metrics", get(scrape));
+    if images.is_some() {
+        router = router.route("/v1/node-image-status", get(image_status));
+    }
+    Ok(router.with_state(MetricsState {
+        proxy,
+        deployment,
+        slots: Arc::new(tokio::sync::Semaphore::new(1)),
+        images,
+    }))
+}
+
+// This is a host diagnostic for the separate scraper CA. It is not the
+// installation operator API and grants no tenant access. Reading the bounded
+// cache never starts CRI work or holds the VM scrape semaphore.
+async fn image_status(State(state): State<MetricsState>) -> Response {
+    match state.images {
+        Some(images) => {
+            ([("cache-control", "no-store")], axum::Json(images.status())).into_response()
+        }
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 fn write_samples(
@@ -267,7 +287,7 @@ mod tests {
             .serve(app.into_make_service());
         Ok((format!("https://{address}"), stop, tokio::spawn(server)))
     }
-    fn client(identity: Option<(&[u8], &[u8])>) -> anyhow::Result<reqwest::Client> {
+    pub(super) fn client(identity: Option<(&[u8], &[u8])>) -> anyhow::Result<reqwest::Client> {
         let mut c = reqwest::Client::builder()
             .https_only(true)
             .no_proxy()
@@ -352,7 +372,7 @@ mod tests {
             read_shutdown: tokio_util::sync::CancellationToken::new(),
         });
         let (metrics, stop_metrics, metrics_task) = listen(
-            router(proxy.clone(), "production-a".into())?,
+            router(proxy.clone(), "production-a".into(), None)?,
             include_bytes!("../../tests/fixtures/admission/apiserver-ca.pem"),
         )
         .await?;
@@ -408,6 +428,15 @@ mod tests {
                     .status(),
                 404
             );
+            assert_eq!(
+                scraper
+                    .get(format!("{metrics}/v1/node-image-status"))
+                    .send()
+                    .await?
+                    .status(),
+                404,
+                "image observation has no route when the certified feature is disabled"
+            );
             let response = scraper.get(format!("{metrics}/metrics")).send().await?;
             assert_eq!(response.status(), 200);
             let text = response.text().await?;
@@ -428,3 +457,7 @@ mod tests {
         result
     }
 }
+
+#[cfg(test)]
+#[path = "image_observation_http_tests.rs"]
+mod image_tests;

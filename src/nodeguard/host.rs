@@ -34,6 +34,8 @@ pub struct HostProfile {
     pub containerd_configuration: PinnedFile,
     pub kubelet_configuration: PinnedFile,
     pub kubelet_environment: PinnedFile,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_observation: Option<super::image_observation::ImageObservationConfig>,
 }
 impl HostProfile {
     pub fn validate(&self) -> Result<(), GuardError> {
@@ -42,6 +44,9 @@ impl HostProfile {
             || self.containerd_version != "2.3.5"
         {
             return Err(GuardError::Invalid);
+        }
+        if let Some(config) = &self.image_observation {
+            config.validate()?;
         }
         let files = [
             &self.qemu,
@@ -368,6 +373,7 @@ mod linux {
                     containerd_configuration: file.clone(),
                     kubelet_configuration: file.clone(),
                     kubelet_environment: file,
+                    image_observation: None,
                 },
                 sandboxes: Mutex::new(BTreeMap::new()),
             }
@@ -921,6 +927,7 @@ mod linux {
                 containerd_configuration: other.clone(),
                 kubelet_configuration: other.clone(),
                 kubelet_environment: other,
+                image_observation: None,
             };
             let mut child = std::process::Command::new(executable)
                 .arg("20")
@@ -1056,6 +1063,7 @@ mod linux {
                 containerd_configuration: other.clone(),
                 kubelet_configuration: other.clone(),
                 kubelet_environment: other,
+                image_observation: None,
             };
             let mut child = std::process::Command::new(executable)
                 .arg("20")
