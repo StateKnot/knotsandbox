@@ -113,6 +113,10 @@ pub fn router_with_automations(
             get(get_instance).delete(delete_instance),
         )
         .route("/v1/instances/{id}/details", get(get_instance_details))
+        .route(
+            "/v1/instances/{id}/resource-accounting",
+            get(get_resource_accounting),
+        )
         .route("/v1/instances/{id}/security", get(get_instance_security))
         .route("/v1/instances/{id}/metrics", get(get_instance_metrics))
         .route(
@@ -751,6 +755,31 @@ async fn get_instance_security(
         Json(result),
     )
         .into_response())
+}
+
+async fn get_resource_accounting(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    path: Result<Path<Uuid>, PathRejection>,
+    query: Result<Query<crate::resource_accounting::ResourceAccountingQuery>, QueryRejection>,
+) -> Result<Response, ApiError> {
+    let Query(query) = query.map_err(|_| ApiError::invalid("Invalid resource accounting query"))?;
+    let Path(id) = path.map_err(|_| ApiError::invalid("Invalid instance ID"))?;
+    let (actor, identity) = authenticate(&state, &headers).await?;
+    let result = state
+        .database
+        .resource_accounting(&actor, id, &query, &state.cursor_signer)
+        .await;
+    let current = state
+        .database
+        .resolve_actor(&identity, actor.tenant_id, actor.request_id)
+        .await?;
+    if current.principal_id != actor.principal_id
+        || identity.expires_at <= chrono::Utc::now().timestamp()
+    {
+        return Err(request::unauthenticated());
+    }
+    Ok(Json(result?).into_response())
 }
 
 async fn get_instance_metrics(

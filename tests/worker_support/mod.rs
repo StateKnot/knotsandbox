@@ -34,6 +34,7 @@ pub(super) struct MockKube {
     pub(super) state: Arc<Mutex<KubeState>>,
     pub(super) expire_pod_create: Arc<AtomicBool>,
     pub(super) not_ready: Arc<AtomicBool>,
+    pub(super) pause_policy_create_response: Arc<AtomicBool>,
     pub(super) pause_policy_get: Arc<AtomicBool>,
     pub(super) pause_pvc_get: Arc<AtomicBool>,
     pub(super) pause_pod_get: Arc<AtomicBool>,
@@ -66,6 +67,7 @@ impl MockKube {
             state: Default::default(),
             expire_pod_create: Default::default(),
             not_ready: Default::default(),
+            pause_policy_create_response: Default::default(),
             pause_policy_get: Default::default(),
             pause_pvc_get: Default::default(),
             pause_pod_get: Default::default(),
@@ -228,6 +230,18 @@ impl MockKube {
                 )
             }
         };
+        // The object is already present in the remote fixture, but the caller
+        // cannot record its UID/checkpoint until this response is released.
+        // No mock-state mutex is held across the barrier.
+        if method == Method::POST
+            && path.ends_with("/ciliumnetworkpolicies")
+            && self
+                .pause_policy_create_response
+                .swap(false, Ordering::SeqCst)
+        {
+            self.paused.add_permits(1);
+            self.resume.acquire().await?.forget();
+        }
         if method == Method::POST
             && path.ends_with("/pods")
             && self.expire_pod_create.swap(false, Ordering::SeqCst)

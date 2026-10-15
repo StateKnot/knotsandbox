@@ -29,6 +29,54 @@ export type AutomationNotificationPage = components["schemas"]["AutomationNotifi
 export type AutomationNotificationReceipt = components["schemas"]["AutomationNotificationReceipt"];
 export type TenantAuditRecord = components["schemas"]["TenantAuditRecord"];
 export type TenantAuditRecordPage = components["schemas"]["TenantAuditRecordPage"];
+export type ResourceAccounting = components["schemas"]["ResourceAccounting"];
+export type QuotaResourceReceipt = components["schemas"]["QuotaResourceReceipt"];
+export interface ResourceAccountingOptions {
+  launchId?: string;
+  limit?: number;
+  cursor?: string;
+  signal?: AbortSignal;
+}
+
+/** Read one page of immutable quota facts without converting decimal strings. */
+export async function getResourceAccounting(
+  client: SandboxClient,
+  tenantId: string,
+  instanceId: string,
+  options: ResourceAccountingOptions = {},
+): Promise<ResourceAccounting> {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const limit = options.limit ?? 50;
+  if (!uuid.test(tenantId) || !uuid.test(instanceId) ||
+      (options.launchId !== undefined && !uuid.test(options.launchId)) ||
+      !Number.isSafeInteger(limit) || limit < 1 || limit > 100 ||
+      (options.cursor !== undefined && (options.cursor.length < 1 || options.cursor.length > 2048))) {
+    throw new Error("INVALID_RESOURCE_ACCOUNTING_QUERY");
+  }
+  const response = await client.GET("/v1/instances/{id}/resource-accounting", {
+    params: {
+      path: { id: instanceId }, header: { "X-Tenant-ID": tenantId },
+      query: { limit, ...(options.launchId ? { launch_id: options.launchId } : {}),
+        ...(options.cursor ? { cursor: options.cursor } : {}) },
+    },
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
+  if (response.error || !response.data) {
+    throw new ResourceAccountingQueryError(instanceId, response.response.status, response.error);
+  }
+  return response.data;
+}
+
+export class ResourceAccountingQueryError extends Error {
+  constructor(
+    public readonly instanceId: string,
+    public readonly status: number,
+    public readonly problem: components["schemas"]["Problem"] | undefined,
+  ) {
+    super("RESOURCE_ACCOUNTING_QUERY_FAILED");
+    this.name = "ResourceAccountingQueryError";
+  }
+}
 export interface WaitOptions {
   timeoutMs?: number;
   pollIntervalMs?: number;

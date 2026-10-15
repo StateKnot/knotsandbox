@@ -377,6 +377,60 @@ paths:
           "$ref": "#/components/responses/Unavailable"
         default:
           "$ref": "#/components/responses/Problem"
+  "/v1/instances/{id}/resource-accounting":
+    parameters:
+    - "$ref": "#/components/parameters/TenantId"
+    - "$ref": "#/components/parameters/ResourceId"
+    get:
+      tags: [Instances]
+      operationId: getInstanceResourceAccounting
+      summary: Read immutable launch requests and actual quota state receipts
+      description: |
+        Requires instances:read, checked before and after the database page query.
+        Request contracts describe admitted ordinary CPU compute, not Pod resource
+        observations, host capacity or utilization. pod_resource_evidence=NOT_CAPTURED
+        explicitly identifies missing observations; HISTORY_START_NOT_CAPTURED never
+        reconstructs old requests from current flavor. Tenant and project scopes
+        must never be added together. State receipts are quota accounting facts.
+
+        Omit launch_id to select the current contract and all associated purposes
+        and history. Explicit launch_id selects only ordinary compute receipts bound
+        to that launch in the current installation epoch. Historical unbound rows
+        remain LEGACY_UNBOUND without a manufactured PENDING event.
+        Descending (captured_at,id) pagination uses a signed 24-hour cursor bound to
+        caller, tenant/project, instance, launch filter and limit. Repeat all filters.
+        A concurrent epoch/launch change rejects the page. All quantities, generations
+        and account versions are decimal strings, never JavaScript Numbers.
+      parameters:
+      - name: launch_id
+        in: query
+        schema: { type: string, format: uuid }
+      - name: limit
+        in: query
+        schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      - name: cursor
+        in: query
+        schema: { type: string, minLength: 1, maxLength: 2048 }
+      responses:
+        '200':
+          description: Requested launch evidence and a bounded page of quota state facts
+          headers:
+            X-Request-ID: { "$ref": "#/components/headers/RequestId" }
+            Cache-Control: { "$ref": "#/components/headers/NoStore" }
+            X-Content-Type-Options: { "$ref": "#/components/headers/NoSniff" }
+          content:
+            application/json:
+              schema: { "$ref": "#/components/schemas/ResourceAccounting" }
+        '400': { "$ref": "#/components/responses/BadRequest" }
+        '401': { "$ref": "#/components/responses/Unauthenticated" }
+        '404': { "$ref": "#/components/responses/NotFound" }
+        '409':
+          description: RESOURCE_ACCOUNTING_EPOCH_CHANGED or RESOURCE_ACCOUNTING_BINDING_CHANGED; select the launch again
+          content:
+            application/problem+json:
+              schema: { "$ref": "#/components/schemas/Problem" }
+        '503': { "$ref": "#/components/responses/Unavailable" }
+        default: { "$ref": "#/components/responses/Problem" }
   "/v1/instances/{id}/metrics":
     parameters:
     - "$ref": "#/components/parameters/TenantId"
@@ -5681,6 +5735,255 @@ components:
           oneOf:
           - type: 'null'
           - "$ref": "#/components/schemas/ActiveExecutionMetadata"
+    ResourceDecimal:
+      type: string
+      pattern: ^(0|[1-9][0-9]{0,18})$
+      maxLength: 19
+      description: Canonical nonnegative decimal integer <= 9223372036854775807. Retain
+        as string or BigInt; never convert to JavaScript Number.
+    LaunchResourceContract:
+      type: object
+      required:
+      - id
+      - instance_id
+      - workspace_id
+      - generation
+      - launch_id
+      - cluster_epoch
+      - operation_id
+      - cpu_millis
+      - memory_mib
+      - source
+      - recorded_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        instance_id:
+          type: string
+          format: uuid
+        workspace_id:
+          type: string
+          format: uuid
+        generation:
+          $ref: '#/components/schemas/ResourceDecimal'
+        launch_id:
+          type: string
+          format: uuid
+        cluster_epoch:
+          type: string
+          format: uuid
+        operation_id:
+          type: string
+          format: uuid
+        cpu_millis:
+          $ref: '#/components/schemas/ResourceDecimal'
+        memory_mib:
+          $ref: '#/components/schemas/ResourceDecimal'
+        source:
+          type: string
+          enum:
+          - REQUESTED_COMPUTE_QUOTA
+        recorded_at:
+          type: string
+          format: date-time
+    QuotaResourceReceipt:
+      type: object
+      required:
+      - id
+      - reservation_id
+      - quota_account_id
+      - operation_id
+      - resource_id
+      - operation_kind
+      - purpose
+      - dimension
+      - unit
+      - account_scope
+      - account_project_id
+      - amount
+      - limit_value
+      - account_version
+      - pending_value
+      - allocated_value
+      - previous_status
+      - status
+      - history_start
+      - captured_at
+      - contract_id
+      - generation
+      - launch_id
+      - cluster_epoch
+      properties:
+        id:
+          type: string
+          format: uuid
+        reservation_id:
+          type: string
+          format: uuid
+        quota_account_id:
+          type: string
+          format: uuid
+        operation_id:
+          type: string
+          format: uuid
+        resource_id:
+          type: string
+          format: uuid
+        operation_kind:
+          type: string
+        purpose:
+          type: string
+          enum:
+          - ORDINARY_COMPUTE
+          - INSTANCE_LIFETIME
+          - WORKSPACE_STORAGE
+          - EXECUTION
+          - FILE_PROCESS
+          - FILE_CONTENT
+          - BACKUP_ISOLATED_COMPUTE
+          - BACKUP_RETAINED_STORAGE
+          - BACKUP_TEMP_STORAGE
+          - RESTORE_ISOLATED_COMPUTE
+          - RESTORE_TEMP_STORAGE
+          - LEGACY_UNBOUND
+        dimension:
+          type: string
+          enum:
+          - INSTANCES
+          - CPU_MILLIS
+          - MEMORY_MIB
+          - WORKSPACE_GIB
+          - EXECUTIONS
+          - BACKUP_GIB
+          - BACKUP_TEMP_GIB
+          - FILE_TRANSFERS
+          - FILE_TRANSFER_BYTES
+        unit:
+          type: string
+          enum:
+          - COUNT
+          - MILLICORES
+          - MIB
+          - GIB
+          - BYTES
+        account_scope:
+          type: string
+          enum:
+          - TENANT
+          - PROJECT
+        account_project_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        amount:
+          $ref: '#/components/schemas/ResourceDecimal'
+        limit_value:
+          $ref: '#/components/schemas/ResourceDecimal'
+        account_version:
+          $ref: '#/components/schemas/ResourceDecimal'
+        pending_value:
+          $ref: '#/components/schemas/ResourceDecimal'
+        allocated_value:
+          $ref: '#/components/schemas/ResourceDecimal'
+        previous_status:
+          type:
+          - string
+          - 'null'
+          enum:
+          - PENDING
+          - ALLOCATED
+          - null
+        status:
+          type: string
+          enum:
+          - PENDING
+          - ALLOCATED
+          - RELEASED
+        history_start:
+          type: string
+          enum:
+          - CAPTURED
+          - LEGACY_UNBOUND
+        captured_at:
+          type: string
+          format: date-time
+        contract_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        generation:
+          anyOf:
+          - $ref: '#/components/schemas/ResourceDecimal'
+          - type: 'null'
+        launch_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        cluster_epoch:
+          type:
+          - string
+          - 'null'
+          format: uuid
+    QuotaResourceReceiptPage:
+      type: object
+      required:
+      - items
+      - next_cursor
+      - cutoff
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/QuotaResourceReceipt'
+        next_cursor:
+          type:
+          - string
+          - 'null'
+          minLength: 1
+          maxLength: 2048
+        cutoff:
+          type: string
+          format: date-time
+    ResourceAccounting:
+      type: object
+      required:
+      - instance_id
+      - selected_launch_id
+      - cluster_epoch
+      - request_evidence
+      - pod_resource_evidence
+      - contract
+      - receipts
+      properties:
+        instance_id:
+          type: string
+          format: uuid
+        selected_launch_id:
+          type: string
+          format: uuid
+        cluster_epoch:
+          type: string
+          format: uuid
+        request_evidence:
+          type: string
+          enum:
+          - CAPTURED
+          - HISTORY_START_NOT_CAPTURED
+        pod_resource_evidence:
+          type: string
+          enum:
+          - NOT_CAPTURED
+        contract:
+          anyOf:
+          - $ref: '#/components/schemas/LaunchResourceContract'
+          - type: 'null'
+        receipts:
+          $ref: '#/components/schemas/QuotaResourceReceiptPage'
     InstanceDetails:
       type: object
       required:

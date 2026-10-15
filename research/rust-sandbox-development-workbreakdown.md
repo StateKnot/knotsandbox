@@ -281,3 +281,16 @@ b66177be完整CI已确认资源容量与18组PG等前置门通过，但真实诊
 2026-10-14后置门补验：eeb6c6ec的真实自动化、Prometheus、发行镜像和Linux host导出均通过，第23步投射凭证wrapper失败，父调用丢子诊断，第24上传跳过。已用同一普通AMD64 ELF实证旧API检视参数缺陷，按实际容器与两种Docker存储形状修复平台/digest绑定；原Rust身份/能力/PEM否定条件保持，旧API及当前API各exact1通过、协议10项通过，经典存储待新CI实测。CI保留闭集失败回执并将独立凭证门前移，未放宽或跳过生产边界。资源第12节及GPU状态仍按原表推进，完整交付事实见[交付记录](resource-capacity-faststart-delivery-20261013.md)。
 
 2026-10-14构建环境补验：6ee7381的67项实际浏览器合同、完整产品链、独立PG及正式自动化通过，凭证门真实容器start非零，具体内层原因仍UNKNOWN。已证明Ubuntu宿主ELF与固定Bookworm执行环境存在未验证的ABI边界，并以真实正常编译的新glibc依赖程序复现相同入口失败。正在将精确凭据测试改为继承正式builder的独立离线release test-export，复用已验证依赖及缓存，保留完整原权限断言和八个正式二进制边界；本地真实目标构建、源码审查及新全部CI未通过前不计完成或发布认证。第12.4已完成的quantity/provision合同不变，下一步仍为不可变launch请求合同与真实quota释放回执，之后推进预算化预准备、冷/热首任务实测和GPU独占租约。
+
+### 12.5 启动申请与配额释放账本（2026-10-15）
+
+本轮完成[逐次启动账本方案](launch-resource-accounting-plan-20261014.md)第2/5步及相关6/7/8账本子项的本地整轮验收。最终50文件冻结候选单轮27组164项、0失败、0ignored，PASS_FULL_ACCEPTANCE；44条迁移逐项字节/checksum、source/bin/SDK稳定及自有清理确认，生产09ca/SQL保持。历史分批、v2/v3和49候选FAIL保留；precommit测试注入过早击中Worker启动检查，经test-only post-policy响应barrier修正后专项10项及整轮6项GREEN，原期限/断言未改。早期其他503/timer原因UNKNOWN；第3/4步实际Pod观察、新CI及原61工作包发布门独立核验。
+
+| 工作包／步骤 | 本轮已实现子项 | 已有证据 | 保留缺口 |
+| --- | --- | --- | --- |
+| G0-08/G2-01/G2-13/G3-12；2/5 | 0045不可变普通launch请求、全部purpose即时状态快照、延迟精确归属与旧预约冻结基线；CREATE/START真实身份、RESTART旧release与新申请分属原/新合同、renew无新合同；原proof+cleanup及never-authorized两事务释放 | 账本9项和签名HTTP/实际Node SDK3项纳入最终单轮27组164项PASS；旧数据维护升级另验；数量/version/generation十进制字符串保19位，tenant/project scope不相加 | 第3/4步实际Pod/RuntimeClass request/limit/overhead可信观察未开发，Pod保持NOT_CAPTURED；有效期实际容量、利用率、资源时长与成本仍缺证据 |
+| G1-03/G2-01/G4-01/G4-06；6 | API仅三表SELECT，非API组件不加账本读取、runtime禁写/禁读baseline；新版本bind/claim前严格schema/RLS/函数/trigger/权限预检；实际维护门固定摘要、准入封闭、排空、owner迁移、普通身份预检与目标恢复 | 最终09ca3005普通sandboxd的本地Kubernetes+TLS PostgreSQL 44→45全门PASS；5类原表逐行摘要不变、2租户16条旧预约完整冻结、零补造历史，实际新Ready UID不同，自有K3s/PG及锁清理确认；维护18项通过 | 真实生产OCI、目标云/身份/HA与恢复演练仍独立验收；不承诺旧0044 writer与新schema滚动混跑或直接应用回退 |
+| G2-03/G2-11/G3-01/G3-12；7 | instances:read只读API、签名分页、前后撤权/epoch和身份复查；默认实例全部purpose/history，显式launch仅bound ordinary CPU/MEM；SDK与实例账本页面 | SDK75、OpenAPI13、Chrome34/34、console生产build、最终严格all-target Clippy-v3及fmt-v4通过，全部未知历史/Pod缺证据保留，scope/撤权/失败清旧明细；只读使用文档已补 | 实际Pod观察展示、利用率/节省比例、自动优化/调档、预热和GPU保持未开放 |
+| G2-12/G4-02/G4-06；8 | 普通角色TLS PostgreSQL、JWT/JWKS/HTTP与精确整数、延迟tenant上下文检查、维护失败与并发操作锁验收 | 最终50候选单轮27组164项、0失败/0ignored、44条迁移及source/bin/SDK/清理全部通过；原分批和v2/v3/49候选FAIL保留。barrier专项10项及本轮continuation6项GREEN；普通453/0/269早于integration修订，不替代实PG | test-only barrier先等真实policy POST、后锁domain_events并放行，独立启动5秒，原5/12/35秒与断言保持；49候选SQLx锁超时原因是注入过早。早期其他503/timer原因UNKNOWN，此次database20/timers8/worker4通过不代表修复未知原因；新CI待上传触发 |
+
+基线5086b28的GitHub CI run38464971503已实际completed/success，只证明该旧提交；本轮新提交CI待上传后触发，其实际状态由本机交付回执另行记录。两项维护P2和延迟上下文审查反馈均已处理，无未关闭项；完整安全/签名发布门及真实Kata/CSI/Cilium/GPU认证仍未因此完成。精确摘要、失败路径、维护范围和后续门见[本轮交付记录](launch-resource-accounting-delivery-20261015.md)，用户用法见[资源账本](../docs/resource-accounting.md)。

@@ -8,6 +8,7 @@ export default defineConfig({
     "tenant-audit.spec.ts",
     "backup-capability.spec.ts",
     "runtime-metrics.spec.ts",
+    "resource-accounting.spec.ts",
   ],
   fullyParallel: false,
   workers: 1,

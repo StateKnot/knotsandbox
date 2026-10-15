@@ -38,6 +38,8 @@ HISTORICAL_UPGRADE_MARKER = "AUTO_UPGRADE_V41_CURRENT_FACTS_OLD_MIGRATOR_REFUSAL
 HISTORICAL_STATE_MARKER = "AUTO_UPGRADE_NONEMPTY_HISTORY_SCHEMA42_ACK_CURRENT_REPLAY_REVOKE_VERIFIED"
 HISTORICAL_PROGRESSION_MARKER = "AUTO_UPGRADE_UNKNOWN_FAILED_DISTINCT_SOURCES_ACK_REPLAY_ISOLATION_VERIFIED"
 SUITES = [
+    ("resource_accounting", "resource_accounting", "", "accepted_create_freezes_launch_request_and_scoped_pending_receipts_once"),
+    ("resource_accounting_http", "resource_accounting_http", "", "signed_resource_http_and_node_sdk_preserve_decimal_quantities_and_revocation"),
     ("db_cancellation", "sandbox_platform", "db::cancellation_tests::", "cancelled_begin_returns_runtime_tls_connection_idle_and_autocommit_safe"),
     ("bff_pg", "sandbox_platform", "bff::tests::", "browser_fixture_tagged_pools_drain_before_ordinary_database_drop"),
     ("service_clients", "service_clients", "", "service_client_binding_rejects_other_client_and_owner_rotation_revokes_delegation"),
@@ -59,7 +61,7 @@ SUITES = [
 ]
 # A broader local acceptance caller may supply exact expected counts. The
 # standalone review matrix retains its established selection and resources.
-EXPECTED_COUNTS = {"db_cancellation": 1, "bff_pg": 4, "automation_upgrade": 1, "worker_dispatch": 3, "worker_continuation": 6}
+EXPECTED_COUNTS = {"resource_accounting": 9, "resource_accounting_http": 3, "db_cancellation": 1, "bff_pg": 4, "automation_upgrade": 1, "worker_dispatch": 3, "worker_continuation": 6}
 
 
 def public_fingerprints():
@@ -178,8 +180,8 @@ def run(args):
             sql.append("CREATE ROLE " + role + " LOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD '" + password + "';")
         fixture.invoke(psql, env=psql_env, text="\n".join(sql))
         expected = [{"version": int(path.name.split("_", 1)[0]), "success": True, "checksum": hashlib.sha384(path.read_bytes()).hexdigest()} for path in sorted((ROOT / "migrations").glob("*.sql"))]
-        if [row["version"] for row in expected] != list(range(1, 38)) + [39, 40, 41, 42, 43, 44]:
-            raise RuntimeError("review requires real formal migrations 1..37+39..44, never 38")
+        if [row["version"] for row in expected] != list(range(1, 38)) + [39, 40, 41, 42, 43, 44, 45]:
+            raise RuntimeError("review requires real formal migrations 1..37+39..45, never 38")
         for index, (name, target, filter_name, required) in enumerate(SUITES, 1):
             if not re.fullmatch(r"[a-z][a-z0-9_]{0,39}", name):
                 raise RuntimeError("interface suite name invalid")

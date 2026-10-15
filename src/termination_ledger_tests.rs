@@ -509,12 +509,28 @@ async fn restart_is_new_generation_only_after_fresh_authority_and_delete_keeps_s
                 .bind(claim.operation_id)
                 .fetch_optional(&mut *tx)
                 .await?;
+        let old_releases: i64 = sqlx::query_scalar("SELECT count(*) FROM quota_resource_receipts r JOIN launch_quota_bindings b ON(b.tenant_id,b.reservation_id)=(r.tenant_id,r.reservation_id) JOIN launch_resource_contracts c ON(c.tenant_id,c.id)=(b.tenant_id,b.contract_id) WHERE r.tenant_id=$1 AND c.instance_id=$2 AND c.launch_id=$3 AND r.status='RELEASED' AND r.purpose='ORDINARY_COMPUTE'")
+            .bind(f.f.actor.tenant_id).bind(f.launch.instance_id).bind(f.launch.launch_id).fetch_one(&mut *tx).await?;
+        ensure!(
+            old_releases == 4,
+            "trusted cleanup releases only reservations owned by the old launch"
+        );
+        let new_pending: Vec<(Uuid,i64,i64)> = sqlx::query_as("SELECT c.launch_id,c.generation,count(*) FROM quota_resource_receipts r JOIN launch_quota_bindings b ON(b.tenant_id,b.reservation_id)=(r.tenant_id,r.reservation_id) JOIN launch_resource_contracts c ON(c.tenant_id,c.id)=(b.tenant_id,b.contract_id) WHERE r.tenant_id=$1 AND c.instance_id=$2 AND c.operation_id=$3 AND r.status='PENDING' AND r.purpose='ORDINARY_COMPUTE' GROUP BY c.launch_id,c.generation")
+            .bind(f.f.actor.tenant_id).bind(f.launch.instance_id).bind(claim.operation_id).fetch_all(&mut *tx).await?;
         if expected == TerminationCompletion::RestartQueued {
             assert_eq!(observed.0, f.launch.generation + 1);
             assert_ne!(observed.1, f.launch.launch_id);
             assert_eq!(observed.2, "PENDING");
             assert_eq!(route.as_deref(), Some("WORKER"));
+            ensure!(
+                new_pending == vec![(observed.1, observed.0, 4)],
+                "restart's pending receipts belong to the committed new launch"
+            );
         } else {
+            ensure!(
+                new_pending.is_empty(),
+                "blocked restart and delete must not acquire a new compute contract"
+            );
             assert_eq!(observed.0, f.launch.generation);
             assert_eq!(observed.1, f.launch.launch_id);
             assert_eq!(

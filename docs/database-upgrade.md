@@ -9,7 +9,7 @@
 | 历史 schema | 当前正式迁移目录中版本 ≤41 的实际源码前缀，即 1..37、39、40、41；0038 永久保留，没有占位或伪造账本。这是 schema 来源，不能命名为一个已发布的 v41 产品版本。 |
 | 历史基础 ACL | `tests/fixtures/upgrade/v41-roles.sql`，冻结自真实 Git HEAD `d5f7a70afadde40e30ca01a2e9871a5312153d57` 的 `scripts/sql/roles.sql`。 |
 | 历史自动化 ACL | `tests/fixtures/upgrade/v41-automation-role.sql`，冻结自同一 HEAD 的 `scripts/sql/automation-role.sql`。它表示该源码时点的权限合同，不能代替真实旧发行包。 |
-| 当前 schema | 全部正式迁移 1..37 加39..43，共42条；逐项成功标志和 SHA384 必须与源码一致。 |
+| 当前 schema | 全部正式迁移 1..37 加39..45，共44条；逐项成功标志和 SHA384 必须与源码一致。 |
 | 当前调用链 | 普通 Cargo 构建的 `automation_upgrade` 测试产物、正式 Migrator 和最小权限角色；其他必跑组继续使用正常 `sandboxd --role migrate`。 |
 
 历史权限脚本只用于一次性测试库，先于当前权限安装；不得在生产新 schema 上运行这些旧脚本来“恢复权限”。测试不修改已冻结正式迁移、不重写 `_sqlx_migrations`、不通过管理员连接执行被测 writer，也不给 owner 或运行身份 `CREATEDB` 权限。
@@ -73,6 +73,8 @@ python3 scripts/test-review-fixes.py \
 非空执行/备份、完整生命周期及controller未知结果恢复、真实旧发行包进程仍需相应独立用例；不能从这一个历史升级用例推断它们已经通过。
 
 ## 生产升级执行顺序
+
+启动资源与释放账本的 0045 升级另须执行[维护升级门](../deploy/resource-accounting-upgrade/README.md)，完成实际 writer 准入封闭、停写、排空、正常迁移、普通身份预检与目标恢复。该模块的申请／历史／释放语义见[资源账本](resource-accounting.md)。本页上方 41→42→43 验收保留其原始历史范围，不代表 0045 维护切换或 N/N−1 滚动共存已经通过。
 
 生产部署继续通过正常 `sandboxd --role migrate` 安装当前迁移与权限，没有新增 dry-run、safe-mode、自动降级或修复账本的 CLI。以下操作由部署流水线和运维职责执行，不能将本地空库脚本直接指向生产。
 

@@ -67,3 +67,6 @@ GRANT EXECUTE ON FUNCTION sandbox_never_authorized_stop_candidate(uuid,uuid) TO 
 
 GRANT SELECT,INSERT ON diagnoses TO sandbox_app;
 GRANT EXECUTE ON FUNCTION sandbox_expire_tenant_diagnoses(uuid,integer) TO sandbox_app;
+
+-- Immutable launch accounting: runtime components cannot author ledger facts.
+GRANT SELECT ON launch_resource_contracts,quota_resource_receipts,launch_quota_bindings TO sandbox_app;

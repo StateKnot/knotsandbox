@@ -112,6 +112,14 @@ async fn closure_survives_controller_crash_and_releases_compute_only() -> anyhow
         f.close(&claim).await? == Some(closed),
         "closure retry must preserve identity"
     );
+    let mut tx = r.f.owner_transaction().await?;
+    let released: i64 = sqlx::query_scalar("SELECT count(*) FROM quota_resource_receipts WHERE tenant_id=$1 AND resource_id=$2 AND status='RELEASED'")
+        .bind(r.f.actor.tenant_id).bind(r.launch.instance_id).fetch_one(&mut *tx).await?;
+    ensure!(
+        released == 0,
+        "a durable closure alone must not manufacture a resource release receipt"
+    );
+    tx.commit().await?;
     ensure!(
         r.engine
             .database
@@ -133,6 +141,12 @@ async fn closure_survives_controller_crash_and_releases_compute_only() -> anyhow
     );
     let events:i64=sqlx::query_scalar("SELECT count(*) FROM domain_events WHERE tenant_id=$1 AND aggregate_id=$2 AND event_type='instance.deleted'").bind(r.f.actor.tenant_id).bind(r.launch.instance_id).fetch_one(&mut *tx).await?;
     ensure!(events == 1, "completion exactly once");
+    let releases: (i64,i64,i64) = sqlx::query_as("SELECT count(*),count(*) FILTER(WHERE purpose='ORDINARY_COMPUTE'),count(*) FILTER(WHERE purpose='INSTANCE_LIFETIME') FROM quota_resource_receipts WHERE tenant_id=$1 AND resource_id=$2 AND status='RELEASED'")
+        .bind(r.f.actor.tenant_id).bind(r.launch.instance_id).fetch_one(&mut *tx).await?;
+    ensure!(
+        releases == (6, 4, 2),
+        "only actual second-transaction compute and instance releases are captured"
+    );
     tx.commit().await?;
     ensure!(
         r.engine

@@ -85,6 +85,12 @@ async fn crash_after_pod_create_recovers_uid_once_and_requires_trusted_launch_re
         .fetch_one(&mut *tx)
         .await?;
     assert_eq!(pending, 0);
+    let receipts: (i64,i64,i64) = sqlx::query_as("SELECT count(*),count(*) FILTER(WHERE status='PENDING'),count(*) FILTER(WHERE status='ALLOCATED' AND previous_status='PENDING') FROM quota_resource_receipts WHERE tenant_id=$1 AND operation_id=$2")
+        .bind(f.actor.tenant_id).bind(op).fetch_one(&mut *tx).await?;
+    ensure!(
+        receipts == (16, 8, 8),
+        "trusted READY must atomically capture the eight real allocation transitions once"
+    );
     tx.commit().await?;
     let stopped = f
         .database

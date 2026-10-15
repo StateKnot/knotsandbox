@@ -6,6 +6,7 @@ use sandbox_platform::{
     error::ApiError,
     model::{CreateInstance, Flavor, WorkspaceSpec},
 };
+use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Postgres, Transaction, postgres::PgPoolOptions};
 use tokio::sync::{Mutex, MutexGuard, OnceCell};
 use url::Url;
@@ -399,16 +400,56 @@ impl Fixture {
         Ok(node)
     }
 
+    /// Owner-seeded API prerequisite, with explicit synthetic launch, STOP,
+    /// termination and cleanup records. This exercises the normal accounting
+    /// guards; these test-only records do not certify a host or a physical VM.
     pub async fn release_fixture_compute(&self, instance: Uuid) -> anyhow::Result<()> {
+        let node = self
+            .seed_test_launch_certification(
+                instance,
+                chrono::Utc::now() + chrono::Duration::hours(1),
+            )
+            .await?;
         let mut tx = self.owner_transaction().await?;
-        let reservations: Vec<(Uuid, Uuid, i64)> = sqlx::query_as("SELECT r.id,r.quota_account_id,r.amount FROM quota_reservations r JOIN quota_accounts q ON q.tenant_id=r.tenant_id AND q.id=r.quota_account_id WHERE r.tenant_id=$1 AND r.resource_id=$2 AND r.status='PENDING' AND q.dimension IN ('CPU_MILLIS','MEMORY_MIB')")
+        sqlx::query("SELECT w.id FROM workspaces w JOIN instances i ON(i.tenant_id,i.workspace_id)=(w.tenant_id,w.id) WHERE i.tenant_id=$1 AND i.id=$2 FOR UPDATE OF w")
+            .bind(self.actor.tenant_id).bind(instance).fetch_one(&mut *tx).await?;
+        let stopped: bool = sqlx::query_scalar("SELECT observed_state='STOPPED' AND desired_state='STOPPED' AND active_operation_id IS NULL FROM instances WHERE tenant_id=$1 AND id=$2 FOR UPDATE")
+            .bind(self.actor.tenant_id).bind(instance).fetch_one(&mut *tx).await?;
+        ensure!(
+            stopped,
+            "synthetic release requires the explicit STOPPED API prerequisite"
+        );
+        let operation = Uuid::new_v4();
+        let challenge = Uuid::new_v4();
+        let proof = Uuid::new_v4();
+        let evidence = serde_json::json!({"test_only":true,"physical_runtime_certified":false,"purpose":"API_STOPPED_PREREQUISITE"});
+        let evidence_sha256 = hex::encode(Sha256::digest(evidence.to_string().as_bytes()));
+        sqlx::query("INSERT INTO operations(id,tenant_id,project_id,instance_id,workspace_id,kind,status,stage,request,actor_principal_id,request_id,deadline,completed_at) SELECT $1,tenant_id,project_id,id,workspace_id,'STOP','SUCCEEDED','TEST_ONLY_SYNTHETIC_CLEANUP',$2,$3,$4,clock_timestamp()+interval '30 minutes',clock_timestamp() FROM instances WHERE tenant_id=$5 AND id=$6")
+            .bind(operation).bind(&evidence).bind(self.actor.principal_id).bind(Uuid::new_v4()).bind(self.actor.tenant_id).bind(instance).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO termination_challenges(id,tenant_id,project_id,permit_id,operation_id,lease_token,reason,created_at,expires_at) SELECT $1,p.tenant_id,p.project_id,p.id,$2,1,'STOP',clock_timestamp(),clock_timestamp()+interval '29 seconds' FROM launch_permits p JOIN instances i ON(i.tenant_id,i.id,i.runtime_generation,i.launch_id,i.pod_uid,i.cluster_epoch)=(p.tenant_id,p.instance_id,p.generation,p.launch_id,p.pod_uid,p.cluster_epoch) WHERE i.tenant_id=$3 AND i.id=$4 AND p.runtime_node_id=$5")
+            .bind(challenge).bind(operation).bind(self.actor.tenant_id).bind(instance).bind(node).execute(&mut *tx).await?;
+        let pod_uid: Uuid = sqlx::query_scalar("INSERT INTO local_termination_proofs(id,tenant_id,project_id,challenge_id,permit_id,instance_id,workspace_id,generation,launch_id,pod_uid,cluster_epoch,runtime_node_id,journal_revision,evidence,evidence_sha256,observed_at) SELECT $1,p.tenant_id,p.project_id,$2,p.id,p.instance_id,p.workspace_id,p.generation,p.launch_id,p.pod_uid,p.cluster_epoch,p.runtime_node_id,1,$3,$4,clock_timestamp() FROM launch_permits p JOIN termination_challenges c ON(c.tenant_id,c.permit_id)=(p.tenant_id,p.id) WHERE c.tenant_id=$5 AND c.id=$2 RETURNING pod_uid")
+            .bind(proof).bind(challenge).bind(&evidence).bind(evidence_sha256).bind(self.actor.tenant_id).fetch_one(&mut *tx).await?;
+        sqlx::query("INSERT INTO termination_cleanup_receipts(proof_id,tenant_id,old_pod_uid,pod_resource_version,pod_absent_at,volume_checked_at,completion) VALUES($1,$2,$3,'test-only-no-apiserver-observation',clock_timestamp(),clock_timestamp(),'STOPPED')")
+            .bind(proof).bind(self.actor.tenant_id).bind(pod_uid).execute(&mut *tx).await?;
+        sqlx::query(
+            "UPDATE instances SET last_termination_proof_id=$3 WHERE tenant_id=$1 AND id=$2",
+        )
+        .bind(self.actor.tenant_id)
+        .bind(instance)
+        .bind(proof)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("SELECT id FROM quota_accounts WHERE tenant_id=$1 AND(project_id=$2 OR project_id IS NULL) ORDER BY id FOR UPDATE")
+            .bind(self.actor.tenant_id).bind(self.request.project_id).fetch_all(&mut *tx).await?;
+        let reservations: Vec<(Uuid, Uuid, i64)> = sqlx::query_as("SELECT r.id,r.quota_account_id,r.amount FROM quota_reservations r JOIN quota_accounts q ON q.tenant_id=r.tenant_id AND q.id=r.quota_account_id WHERE r.tenant_id=$1 AND r.resource_id=$2 AND r.status='PENDING' AND q.dimension IN ('CPU_MILLIS','MEMORY_MIB') ORDER BY r.quota_account_id,r.id FOR UPDATE OF r")
             .bind(self.actor.tenant_id).bind(instance).fetch_all(&mut *tx).await?;
         ensure!(
             reservations.len() == 4,
             "Expected the create's tenant/project compute reservations"
         );
         for (reservation, account, amount) in reservations {
-            sqlx::query("UPDATE quota_accounts SET pending=pending-$2 WHERE id=$1")
+            sqlx::query("UPDATE quota_accounts SET pending=pending-$2,version=version+1,updated_at=clock_timestamp() WHERE id=$1")
                 .bind(account)
                 .bind(amount)
                 .execute(&mut *tx)

@@ -94,6 +94,57 @@ Pass an OAuth token provider that uses your chosen IdP's supported client authen
 
 Unit tests include a real local HTTP redirect, replay after a simulated lost commit response, 401 refresh limits, retry budgets, unchanged preconditions, body/deadline bounds, tenant mismatches, operation/execution polling and unknown outcomes. The Rust `keycloak` integration suite also starts a real HTTP listener and invokes this built client in a separate Node process using real Keycloak and PostgreSQL. It checks refresh after a 401, a lost response after the server commits, duplicate-free replay, renewal, stale ETag rejection, stopping, and polling timeouts without cancellation. Run `npm run build` before that suite. This does not certify a real sandbox VM or a production deployment. Project events use the dedicated `subscribeEvents` async iterator; see [event streaming and recovery](../../docs/event-stream-sdk.md). Execution output has a [separate resumable stream](../../docs/execution-output-stream.md); management buffering must not be reused for a stream. File transfer and terminal sessions remain separate work.
 
+### Resource accounting
+
+Use `getResourceAccounting` for the read-only launch request and quota receipt
+view. It requires current `instances:read`; the helper validates UUIDs and bounded
+pagination inputs and preserves decimal strings, including 19-digit account
+values. It makes no mutation and never releases quota.
+
+```ts
+import { getResourceAccounting } from '@sandbox-platform/client';
+
+const abortController = new AbortController();
+// Omit launchId to read the current contract and all associated purposes/history.
+const accountingOptions = { limit: 50, signal: abortController.signal };
+const first = await getResourceAccounting(client, tenantId, job.instanceId, accountingOptions);
+if (first.contract) {
+  // Keep these as strings for storage/display; use BigInt for exact arithmetic.
+  await jobs.saveRequestedCompute(job.id, {
+    launchId: first.contract.launch_id,
+    cpuMillis: first.contract.cpu_millis,
+    memoryMiB: first.contract.memory_mib,
+  });
+}
+const second = first.receipts.next_cursor === null ? null :
+  await getResourceAccounting(client, tenantId, job.instanceId, {
+    ...accountingOptions,
+    cursor: first.receipts.next_cursor,
+  });
+
+// An explicit launchId narrows receipts to ordinary compute bound to that launch.
+const launchPage = await getResourceAccounting(client, tenantId, job.instanceId, {
+  launchId: job.recordedLaunchId,
+  limit: 50,
+  signal: abortController.signal,
+});
+```
+
+Continue a page with the same tenant, identity, instance, launch filter (including
+its omission), and limit. Cursors expire after 24 hours and bind the platform
+epoch and selected launch; a changed selected launch or filter requires a fresh first
+page. `ResourceAccountingQueryError` exposes the HTTP `status` and structured
+`problem`; permission rejection must clear any previously displayed evidence.
+
+`REQUESTED_COMPUTE_QUOTA` describes admitted CPU/memory requests. Actual Pod
+resources remain `NOT_CAPTURED`; missing old contracts remain
+`HISTORY_START_NOT_CAPTURED` and legacy receipts remain `LEGACY_UNBOUND`.
+Tenant and project quota scopes must not be added together, and neither receipt
+amounts nor requested compute are utilization denominators. A `RELEASED` receipt
+applies to that purpose; it does not prove every resource was released. See
+[resource accounting](../../docs/resource-accounting.md) for history, closure
+proofs and the maintenance upgrade gate.
+
 ### Runtime metrics and cold backups
 
 The generated `GET /v1/instances/{id}/security` returns `InstanceSecurity` and

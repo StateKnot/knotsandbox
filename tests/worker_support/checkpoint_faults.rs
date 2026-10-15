@@ -1,7 +1,7 @@
 //! A real PostgreSQL pre-COMMIT checkpoint failure. Holding domain_events blocks
 //! the checkpoint read/insert before COMMIT. This is not a lost-ACK experiment.
 
-use std::time::Duration;
+use std::{sync::atomic::Ordering, time::Duration};
 
 use anyhow::{Context, ensure};
 use sandbox_platform::worker::Worker;
@@ -32,9 +32,6 @@ pub(crate) async fn verify_precommit_rollback(
         let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
             .fetch_one(&mut *holder)
             .await?;
-        sqlx::query("LOCK TABLE public.domain_events IN ACCESS EXCLUSIVE MODE")
-            .execute(&mut *holder)
-            .await?;
         Ok::<_, anyhow::Error>((original_stage, pid))
     }
     .await;
@@ -45,10 +42,40 @@ pub(crate) async fn verify_precommit_rollback(
             return Err(error);
         }
     };
+    mock.pause_policy_create_response
+        .store(true, Ordering::SeqCst);
     let shutdown = CancellationToken::new();
     let mut task = tokio::spawn(worker.clone().run(shutdown.clone()));
     let mut joined = false;
     let outcome = async {
+        // Reach a real post-startup claim before injecting the database fault:
+        // the policy exists remotely, while its POST response still withholds
+        // the UID from the checkpoint writer. Startup guards remain unblocked.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::select! {
+                result = &mut task => {
+                    joined = true;
+                    result.context("owned worker exited before policy response barrier")??;
+                    anyhow::bail!("owned worker returned before policy response barrier");
+                },
+                permit = mock.paused.acquire() => {
+                    permit.context("owned policy response barrier closed")?.forget();
+                    Ok::<_, anyhow::Error>(())
+                },
+            }
+        })
+        .await
+        .context("owned policy response startup barrier was not reached")??;
+        ensure!(
+            mock.posts("CiliumNetworkPolicy")? == 1
+                && mock.posts("PersistentVolumeClaim")? == 0
+                && mock.posts("Pod")? == 0,
+            "fault injection requires the first policy response before any next resource"
+        );
+        sqlx::query("LOCK TABLE public.domain_events IN ACCESS EXCLUSIVE MODE")
+            .execute(&mut *holder)
+            .await?;
+        mock.resume.add_permits(1);
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             ensure!(!task.is_finished(), "owned worker stopped before checkpoint fault");
@@ -137,6 +164,11 @@ pub(crate) async fn verify_precommit_rollback(
     .await;
 
     shutdown.cancel();
+    // If startup observation or lock acquisition failed, release the response
+    // barrier before draining so the owned worker cannot remain parked in I/O.
+    mock.pause_policy_create_response
+        .store(false, Ordering::SeqCst);
+    mock.resume.add_permits(1);
     let drained = if joined {
         Ok(())
     } else {
@@ -156,8 +188,10 @@ pub(crate) async fn verify_precommit_rollback(
     let released = holder.rollback().await;
     let closed =
         tokio::time::timeout(Duration::from_secs(5), worker.engine.database.pool.close()).await;
-    outcome?;
-    drained?;
+    // A failed observation can be only a symptom of an earlier worker exit.
+    // Preserve that task's actual error chain after running every cleanup.
+    drained.context("WORKER_PRECOMMIT_WORKER_EXIT_FAILED")?;
+    outcome.context("WORKER_PRECOMMIT_FAULT_OBSERVATION_FAILED")?;
     released?;
     closed.context("owned fault worker pool failed to close")?;
     println!("WORKER_PRECOMMIT_CHECKPOINT_ROLLBACK_NO_NEXT_RESOURCE_VERIFIED");

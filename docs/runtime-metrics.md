@@ -2,6 +2,8 @@
 
 `GET /v1/instances/{id}/metrics` 提供已授权实例某一次 launch 的宿主资源时间序列。采集源是 nodeguard 已登记并固定的 VM cgroup，不接受租户提供的 exporter、标签或 PromQL。它用于资源观察，不构成应用健康、VM 死亡、卷卸载或配额释放证据。
 
+[启动资源与释放账本](resource-accounting.md)提供独立的申请合同和配额状态历史。其 `REQUESTED_COMPUTE_QUOTA` 是受理的 CPU／内存申请，当前实际 Pod 资源仍为 `NOT_CAPTURED`；它既不是本接口的宿主采样，也不能作为利用率分母。两类接口的 `launch_id` 默认范围不同：指标省略时查询当前 launch，账本省略时读取当前合同及实例全部用途和历史；精确对照时必须检查各记录自身的启动身份与恢复纪元。
+
 2026-10-12首批资源效率开发将固定指标从5项扩展为11项，补充CPU自身限额节流、匿名/文件内存和宿主OOM观察；2026-10-13新增宿主真实采样的CPU、内存容量上界，当前共13项。容量上界不是有效期request/limit/overhead账本，也不是专属预留、可用余量或节点利用率；尚未提供利用率百分比、规格推荐、节点成本治理或GPU指标。idle公开策略配置与安全委派仍待开发，`idle_timeout_seconds` 默认NULL。完整计划见[61项开发表](../research/rust-sandbox-development-workbreakdown.md#11-资源效率与gpu新增交付顺序)，首批实现与验收见[交付记录](../research/resource-observability-delivery-20261012.md)，本轮开发边界见[容量与CRI观测子项](../research/rust-sandbox-development-workbreakdown.md#123-宿主容量与cri启动调用观测2026-10-13)。
 
 ## 调用合同

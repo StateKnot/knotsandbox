@@ -1,7 +1,14 @@
 //! A frozen schema/ACL contract upgrade, not a claim about a released old binary.
 //! The runner supplies one freshly created TLS database. This suite never uses
 //! an administrator, creates/drops a database, clears data, or bypasses RLS.
-use std::{borrow::Cow, collections::BTreeMap, env, path::Path, str::FromStr, time::Duration};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, BTreeSet},
+    env,
+    path::Path,
+    str::FromStr,
+    time::Duration,
+};
 
 use anyhow::{Context, ensure};
 use axum::http::StatusCode;
@@ -254,6 +261,49 @@ async fn write_event(
 
 type Snapshot = BTreeMap<String, Value>;
 
+fn snapshot_matches(expected: &Snapshot, actual: Snapshot) -> bool {
+    if expected == &actual {
+        return true;
+    }
+    // Only this closed set of categories reaches diagnostics: never tenant
+    // identifiers, row payloads, policy definitions or arbitrary snapshot keys.
+    let mut categories = BTreeSet::new();
+    for key in expected.keys().chain(actual.keys()) {
+        if expected.get(key) == actual.get(key) {
+            continue;
+        }
+        categories.insert(match key.as_str() {
+            "existing_rls_policies" => "RLS_POLICIES",
+            "existing_trigger_contracts" => "TRIGGER_CONTRACTS",
+            "existing_function_security" => "FUNCTION_SECURITY",
+            "platform_configuration" => "PLATFORM_CONFIGURATION",
+            _ => match key.rsplit(':').next() {
+                Some("quota_accounts" | "quota_reservations") => "QUOTA_FACTS",
+                Some("workspace_holds" | "workspace_hold_releases") => "HOLD_FACTS",
+                Some("management_receipts" | "idempotency_keys") => "ACCEPTANCE_RECEIPTS",
+                Some(
+                    "domain_events"
+                    | "audit_events"
+                    | "event_stream_heads"
+                    | "event_stream_positions",
+                ) => "EVENT_FACTS",
+                Some(
+                    "automation_delegations"
+                    | "automations"
+                    | "automation_runs"
+                    | "automation_claims",
+                ) => "AUTOMATION_FACTS",
+                _ => "OTHER_HISTORICAL_FACTS",
+            },
+        });
+    }
+    eprintln!(
+        "UPGRADE_SNAPSHOT_DIFFERENCE_CATEGORIES={}",
+        categories.into_iter().collect::<Vec<_>>().join(",")
+    );
+    false
+}
+
 async fn snapshot(owner: &PgPool, scopes: &[Scope]) -> anyhow::Result<Snapshot> {
     let mut facts = Snapshot::new();
     for scope in scopes {
@@ -328,13 +378,87 @@ async fn snapshot(owner: &PgPool, scopes: &[Scope]) -> anyhow::Result<Snapshot> 
     .fetch_one(owner)
     .await?;
     facts.insert("platform_configuration".to_owned(), config);
-    let rls: Value = sqlx::query_scalar("SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.relname),'[]'::jsonb) FROM (SELECT c.relname,c.relrowsecurity,c.relforcerowsecurity,(SELECT jsonb_agg(to_jsonb(p) ORDER BY p.polname) FROM pg_policy p WHERE p.polrelid=c.oid) AS policies FROM pg_class c WHERE c.relnamespace='public'::regnamespace AND c.relkind IN('r','p') AND c.relname<>'automation_notifications') r").fetch_one(owner).await?;
+    // Exclude only additive 0042/0045 relations. Every historical relation's
+    // RLS flags and complete policy rows remain in the exact comparison.
+    let rls: Value = sqlx::query_scalar("SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.relname),'[]'::jsonb) FROM (SELECT c.relname,c.relrowsecurity,c.relforcerowsecurity,(SELECT jsonb_agg(to_jsonb(p) ORDER BY p.polname) FROM pg_policy p WHERE p.polrelid=c.oid) AS policies FROM pg_class c WHERE c.relnamespace='public'::regnamespace AND c.relkind IN('r','p') AND c.relname NOT IN('automation_notifications','launch_resource_contracts','quota_resource_receipts','launch_quota_bindings','quota_resource_legacy_baseline')) r").fetch_one(owner).await?;
     facts.insert("existing_rls_policies".to_owned(), rls);
-    let triggers: Value = sqlx::query_scalar("SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.relation,r.tgname),'[]'::jsonb) FROM (SELECT tgrelid::regclass::text AS relation,tgname,tgenabled,tgtype,tgdeferrable,tginitdeferred,tgfoid::regprocedure::text AS function FROM pg_trigger WHERE NOT tgisinternal AND tgrelid IN(SELECT oid FROM pg_class WHERE relnamespace='public'::regnamespace) AND tgname NOT IN('immutable_automation_notification','automation_notification_no_delete','domain_event_stream_automation_notification_capture','worker_dispatch_hint')) r").fetch_one(owner).await?;
+    // A trigger name alone is not its identity: append_only already protects
+    // older tables. Match each new 0045 trigger by its exact relation and name.
+    let triggers: Value = sqlx::query_scalar(r#"
+        SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.relation,r.tgname),'[]'::jsonb)
+        FROM (SELECT t.tgrelid::regclass::text AS relation,t.tgname,t.tgenabled,t.tgtype,
+            t.tgdeferrable,t.tginitdeferred,t.tgfoid::regprocedure::text AS function
+          FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
+          WHERE NOT t.tgisinternal AND c.relnamespace='public'::regnamespace
+            AND t.tgname NOT IN('immutable_automation_notification','automation_notification_no_delete','domain_event_stream_automation_notification_capture','worker_dispatch_hint')
+            AND (c.relname,t.tgname) NOT IN (
+              ('launch_resource_contracts','append_only'),
+              ('quota_resource_receipts','append_only'),
+              ('launch_quota_bindings','append_only'),
+              ('quota_resource_legacy_baseline','append_only'),
+              ('quota_resource_legacy_baseline','baseline_closed'),
+              ('quota_reservations','quota_resource_identity_guard'),
+              ('quota_accounts','quota_account_resource_identity_guard'),
+              ('quota_reservations','quota_resource_capture'),
+              ('instances','launch_resource_capture'),
+              ('launch_resource_contracts','launch_resource_quota_complete'),
+              ('quota_reservations','quota_resource_launch_binding'),
+              ('quota_reservations','compute_quota_release_proof'))) r
+    "#).fetch_one(owner).await?;
     facts.insert("existing_trigger_contracts".to_owned(), triggers);
-    let functions: Value = sqlx::query_scalar("SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.function),'[]'::jsonb) FROM (SELECT oid::regprocedure::text AS function,prosecdef,proconfig FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname NOT IN('sandbox_file_activity_match','sandbox_guard_automation_notification','sandbox_capture_automation_notification','sandbox_lock_automation_notification_head','sandbox_notify_worker_dispatch')) r").fetch_one(owner).await?;
+    let functions: Value = sqlx::query_scalar("SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.function),'[]'::jsonb) FROM (SELECT oid::regprocedure::text AS function,prosecdef,proconfig FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname NOT IN('sandbox_file_activity_match','sandbox_guard_automation_notification','sandbox_capture_automation_notification','sandbox_lock_automation_notification_head','sandbox_notify_worker_dispatch') AND NOT (prokind='f' AND pronargs=0 AND proname IN('sandbox_guard_quota_resource_identity','sandbox_capture_quota_resource','sandbox_capture_launch_resource','sandbox_bind_launch_quota','sandbox_guard_compute_quota_release'))) r").fetch_one(owner).await?;
     facts.insert("existing_function_security".to_owned(), functions);
     Ok(facts)
+}
+
+async fn assert_resource_accounting_upgrade(
+    owner: &PgPool,
+    scopes: &[Scope],
+) -> anyhow::Result<()> {
+    let guarded_tables: i64 = sqlx::query_scalar(
+        r#"
+        SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace
+          AND relname IN('launch_resource_contracts','quota_resource_receipts',
+            'launch_quota_bindings','quota_resource_legacy_baseline')
+          AND relkind='r' AND relrowsecurity AND relforcerowsecurity
+    "#,
+    )
+    .fetch_one(owner)
+    .await?;
+    ensure!(
+        guarded_tables == 4,
+        "Migration 45 requires all four new accounting tables with FORCE RLS"
+    );
+    let mut total_baseline = 0;
+    for scope in scopes {
+        let mut tx = tenant_tx(owner, scope.tenant).await?;
+        let facts: (i64, i64, i64, i64, bool) = sqlx::query_as(
+            r#"
+            SELECT (SELECT count(*) FROM quota_resource_legacy_baseline WHERE tenant_id=$1),
+              (SELECT count(*) FROM launch_resource_contracts WHERE tenant_id=$1),
+              (SELECT count(*) FROM quota_resource_receipts WHERE tenant_id=$1),
+              (SELECT count(*) FROM launch_quota_bindings WHERE tenant_id=$1),
+              (SELECT array_agg(reservation_id ORDER BY reservation_id)
+                FROM quota_resource_legacy_baseline WHERE tenant_id=$1)
+                IS NOT DISTINCT FROM (SELECT array_agg(id ORDER BY id)
+                  FROM quota_reservations WHERE tenant_id=$1)
+        "#,
+        )
+        .bind(scope.tenant)
+        .fetch_one(&mut *tx)
+        .await?;
+        ensure!(
+            facts == (8, 0, 0, 0, true),
+            "Migration 45 must freeze the exact historical reservation IDs without fabricating launch contracts, quota bindings or receipt history"
+        );
+        total_baseline += facts.0;
+        tx.commit().await?;
+    }
+    ensure!(
+        total_baseline == 16,
+        "Both historical tenants require a complete 16-reservation legacy baseline"
+    );
+    Ok(())
 }
 
 async fn ledger(owner: &PgPool) -> anyhow::Result<Vec<(i64, Value)>> {
@@ -469,7 +593,7 @@ async fn upgrade_from_v41_preserves_historical_automation_and_rejects_invalid_so
         .await
         .context("Cannot expand schema 41 to schema 42")?;
     ensure!(
-        snapshot(&owner, &scopes).await? == before,
+        snapshot_matches(&before, snapshot(&owner, &scopes).await?),
         "Upgrade altered historical facts, source epochs, timers, file intents or configuration"
     );
     let expanded_ledger = ledger(&owner).await?;
@@ -560,8 +684,9 @@ async fn upgrade_from_v41_preserves_historical_automation_and_rejects_invalid_so
         dispatch_hint_security,
         "Migration 44 dispatch hint must have an exact owner-only fixed-path trigger contract"
     );
+    assert_resource_accounting_upgrade(&owner, &scopes).await?;
     ensure!(
-        snapshot(&owner, &scopes).await? == before_current_roles
+        snapshot_matches(&before_current_roles, snapshot(&owner, &scopes).await?)
             && notification_snapshot(&owner, &scopes).await? == notices_at42,
         "Current migrations changed historical quota, holds, receipts, ACK, source events or authority"
     );
@@ -577,7 +702,7 @@ async fn upgrade_from_v41_preserves_historical_automation_and_rejects_invalid_so
     );
     all_roles(&owner).await?;
     ensure!(
-        snapshot(&owner, &scopes).await? == before_current_roles
+        snapshot_matches(&before_current_roles, snapshot(&owner, &scopes).await?)
             && notification_snapshot(&owner, &scopes).await? == notices_at42,
         "Current role installation changed committed historical or new facts"
     );
@@ -751,14 +876,14 @@ async fn upgrade_from_v41_preserves_historical_automation_and_rejects_invalid_so
         );
         tx.rollback().await?;
         ensure!(
-            snapshot(&owner, &scopes).await? == stable
+            snapshot_matches(&stable, snapshot(&owner, &scopes).await?)
                 && notification_snapshot(&owner, &scopes).await? == notification_before,
             "Rejected source left run, event, stream sequence, audit, routing or notification side effects"
         );
     }
     verify_deferred_activity(&app, &scopes).await?;
     ensure!(
-        snapshot(&owner, &scopes).await? == stable
+        snapshot_matches(&stable, snapshot(&owner, &scopes).await?)
             && notification_snapshot(&owner, &scopes).await? == notification_before
     );
     // Resolving an unknown outcome is a real coordinator source transition.
@@ -782,7 +907,7 @@ async fn upgrade_from_v41_preserves_historical_automation_and_rejects_invalid_so
         "Migration/role replay rewrote its immutable ledger"
     );
     ensure!(
-        snapshot(&owner, &scopes).await? == stable
+        snapshot_matches(&stable, snapshot(&owner, &scopes).await?)
             && notification_snapshot(&owner, &scopes).await? == notification_before,
         "Migration/role replay altered historical or new facts"
     );
@@ -806,10 +931,11 @@ async fn upgrade_from_v41_preserves_historical_automation_and_rejects_invalid_so
     );
     ensure!(
         ledger(&owner).await? == upgraded_ledger
-            && snapshot(&owner, &scopes).await? == stable
+            && snapshot_matches(&stable, snapshot(&owner, &scopes).await?)
             && notification_snapshot(&owner, &scopes).await? == notification_before,
         "Old migration refusal must leave all committed facts unchanged"
     );
+    assert_resource_accounting_upgrade(&owner, &scopes).await?;
     let hidden: i64 = sqlx::query_scalar("SELECT count(*) FROM automation_notifications")
         .fetch_one(&app)
         .await?;

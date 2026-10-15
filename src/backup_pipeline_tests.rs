@@ -535,6 +535,12 @@ async fn capture_uses_once_only_authority_then_trusted_close_before_handoff() ->
     );
     let mut tx = p.f.base.f.owner_transaction().await?;
     let(status,hold,compute,storage):(String,bool,i64,i64)=sqlx::query_as("SELECT b.status,EXISTS(SELECT 1 FROM workspace_hold_releases r WHERE r.tenant_id=b.tenant_id AND r.hold_id=b.hold_id),(SELECT count(*) FROM quota_reservations r JOIN quota_accounts q ON q.id=r.quota_account_id WHERE r.tenant_id=b.tenant_id AND r.operation_id=b.operation_id AND q.dimension IN('CPU_MILLIS','MEMORY_MIB') AND r.status='RELEASED'),(SELECT count(*) FROM quota_reservations r JOIN quota_accounts q ON q.id=r.quota_account_id WHERE r.tenant_id=b.tenant_id AND r.operation_id=b.operation_id AND q.dimension IN('BACKUP_GIB','BACKUP_TEMP_GIB') AND r.status='ALLOCATED') FROM backups b WHERE b.tenant_id=$1 AND b.id=$2").bind(p.claim.tenant_id).bind(record.id).fetch_one(&mut *tx).await?;
+    let isolated: (i64,i64,i64) = sqlx::query_as("SELECT count(*),count(*) FILTER(WHERE purpose='BACKUP_ISOLATED_COMPUTE'),count(b.contract_id) FROM quota_resource_receipts r LEFT JOIN launch_quota_bindings b ON(b.tenant_id,b.reservation_id)=(r.tenant_id,r.reservation_id) WHERE r.tenant_id=$1 AND r.operation_id=$2 AND r.status='RELEASED'")
+        .bind(p.claim.tenant_id).bind(p.claim.operation_id).fetch_one(&mut *tx).await?;
+    ensure!(
+        isolated == (4, 4, 0),
+        "backup cleanup releases independent job compute without assigning it to the workload VM contract"
+    );
     tx.commit().await?;
     assert_eq!(
         (status, hold, compute, storage),

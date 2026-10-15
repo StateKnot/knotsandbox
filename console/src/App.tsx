@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Accounts } from "./Accounts.tsx";
 import { AutomationInbox } from "./AutomationInbox.tsx";
+import { ResourceAccounting } from "./ResourceAccounting.tsx";
 import {
   notificationAckId,
   notificationEtag,
@@ -1050,6 +1051,7 @@ function InstancePane({
                 ["details", "详情与安全"],
                 ["security", "安全防护"],
                 ["metrics", "监控"],
+                ["resources", "资源账本"],
                 ["execute", "执行与输出"],
                 ["files", "文件"],
                 ["diagnosis", "健康诊断"],
@@ -1193,6 +1195,14 @@ function InstancePane({
                     context={context}
                     id={id}
                     enabled={caps?.api_features?.runtime_metrics === true}
+                  />
+                )}
+                {tab === "resources" && (
+                  <ResourceAccounting
+                    context={context}
+                    instance={detail.data.instance}
+                    project={project}
+                    revision={revision}
                   />
                 )}
                 {tab === "execute" && (

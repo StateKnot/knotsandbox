@@ -395,6 +395,14 @@ async fn continuous_lost_commit_ack_stops_old_batch_and_recovers_same_uid() -> a
         mock.resume.add_permits(1);
         let ready=wait_stage(&f,op,"COMPLETED",5).await?;
         ensure!(ready.0=="SUCCEEDED" && ready.3==2 && ready.4==2);
+        let mut ledger=f.owner_transaction().await?;
+        let receipts:(i64,i64,i64)=sqlx::query_as("SELECT count(*),count(*) FILTER(WHERE status='PENDING'),count(*) FILTER(WHERE status='ALLOCATED') FROM quota_resource_receipts WHERE tenant_id=$1 AND operation_id=$2")
+            .bind(f.actor.tenant_id).bind(op).fetch_one(&mut *ledger).await?;
+        ensure!(receipts==(16,8,8),"real committed ACK loss/reclaim must preserve one PENDING and ALLOCATED fact per reservation");
+        let contracts:i64=sqlx::query_scalar("SELECT count(*) FROM launch_resource_contracts WHERE tenant_id=$1 AND operation_id=$2")
+            .bind(f.actor.tenant_id).bind(op).fetch_one(&mut *ledger).await?;
+        ensure!(contracts==1,"unknown COMMIT ACK must not invent a second launch contract");
+        ledger.commit().await?;
         let retired:bool=sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM pg_stat_activity WHERE pid=$1 AND backend_start=$2)")
             .bind(identity.0).bind(identity.1).fetch_one(&monitor.engine.database.pool).await?;
         ensure!(retired,"lost-ACK backend must actually retire");

@@ -29,6 +29,8 @@ pub mod lifecycle;
 pub mod logging;
 pub mod model;
 pub mod request;
+pub mod resource_accounting;
+mod resource_accounting_schema;
 pub mod runner;
 pub mod runtime;
 pub mod runtime_manifest;

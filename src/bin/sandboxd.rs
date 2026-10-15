@@ -15,6 +15,21 @@ async fn main() -> anyhow::Result<()> {
     if arguments.get(1).is_some_and(|arg| arg == "secrets-init") {
         return sandbox_platform::api_secret_init::command(arguments);
     }
+    if arguments
+        .get(1)
+        .is_some_and(|arg| arg == "resource-accounting-check")
+    {
+        anyhow::ensure!(
+            arguments.len() == 2,
+            "resource-accounting-check accepts no arguments"
+        );
+        let url = std::env::var("SANDBOX_DATABASE_URL")
+            .map_err(|_| anyhow::anyhow!("SANDBOX_DATABASE_URL is required"))?;
+        let database = Database::connect(&url, 1).await?;
+        let result = database.verify_runtime_role().await;
+        database.pool.close().await;
+        return result;
+    }
     sandbox_platform::logging::init()?;
     let config = Config::parse();
     config.validate()?;

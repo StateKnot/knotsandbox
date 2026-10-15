@@ -39,6 +39,7 @@ jobs:
           .local/cluster-venv/bin/python -m unittest discover -s deploy/admission/tests -v
           .local/cluster-venv/bin/python deploy/admission/schema_check.py
           .local/cluster-venv/bin/python scripts/tests/api-contract.py
+          .local/cluster-venv/bin/python -m unittest discover -s deploy/resource-accounting-upgrade/tests -v
       - name: Verify independent metrics collectors, mTLS and persisted WAL
         run: |
           .local/cluster-venv/bin/python - <<'PY'

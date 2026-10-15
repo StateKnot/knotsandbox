@@ -1,0 +1,1559 @@
+{
+  "launch_quota_bindings": {
+    "columns": [
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "tenant_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "reservation_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "contract_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": "clock_timestamp()",
+        "generated": "",
+        "identity": "",
+        "name": "recorded_at",
+        "not_null": true,
+        "type": "timestamp with time zone"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "tenant_id",
+          "reservation_id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "p",
+        "local": true,
+        "match": " ",
+        "name": "launch_quota_bindings_pkey",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "contract_id"
+        ],
+        "deferrable": false,
+        "delete_action": "a",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "f",
+        "local": true,
+        "match": "s",
+        "name": "launch_quota_bindings_tenant_id_contract_id_fkey",
+        "no_inherit": true,
+        "referenced_columns": [
+          "tenant_id",
+          "id"
+        ],
+        "referenced_table": "public.launch_resource_contracts",
+        "update_action": "a",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "reservation_id"
+        ],
+        "deferrable": false,
+        "delete_action": "a",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "f",
+        "local": true,
+        "match": "s",
+        "name": "launch_quota_bindings_tenant_id_reservation_id_fkey",
+        "no_inherit": true,
+        "referenced_columns": [
+          "tenant_id",
+          "id"
+        ],
+        "referenced_table": "public.quota_reservations",
+        "update_action": "a",
+        "validated": true
+      }
+    ],
+    "indexes": [
+      {
+        "access_method": "btree",
+        "attribute_count": 3,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 3,
+        "keys": [
+          {
+            "collation": null,
+            "column": "tenant_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "contract_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "reservation_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "launch_quota_bindings_contract",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": false,
+        "ready": true,
+        "unique": false,
+        "valid": true
+      },
+      {
+        "access_method": "btree",
+        "attribute_count": 2,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 2,
+        "keys": [
+          {
+            "collation": null,
+            "column": "tenant_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "reservation_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "launch_quota_bindings_pkey",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": true,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      }
+    ]
+  },
+  "launch_resource_contracts": {
+    "columns": [
+      {
+        "default": "gen_random_uuid()",
+        "generated": "",
+        "identity": "",
+        "name": "id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "tenant_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "project_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "instance_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "workspace_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "generation",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "launch_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "cluster_epoch",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "operation_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "cpu_millis",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "memory_mib",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": "'REQUESTED_COMPUTE_QUOTA'::text",
+        "generated": "",
+        "identity": "",
+        "name": "source",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": "clock_timestamp()",
+        "generated": "",
+        "identity": "",
+        "name": "recorded_at",
+        "not_null": true,
+        "type": "timestamp with time zone"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "cpu_millis",
+          "memory_mib"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "((((cpu_millis = 1000) AND (memory_mib = 2048)) OR ((cpu_millis = 2000) AND (memory_mib = 4096))) OR ((cpu_millis = 4000) AND (memory_mib = 8192)))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_resource_contracts_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "generation"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(generation > 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_resource_contracts_generation_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "p",
+        "local": true,
+        "match": " ",
+        "name": "launch_resource_contracts_pkey",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "source"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(source = 'REQUESTED_COMPUTE_QUOTA'::text)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_resource_contracts_source_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "u",
+        "local": true,
+        "match": " ",
+        "name": "launch_resource_contracts_tenant_id_id_key",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "instance_id",
+          "generation",
+          "launch_id",
+          "cluster_epoch"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "u",
+        "local": true,
+        "match": " ",
+        "name": "launch_resource_contracts_tenant_id_instance_id_generation__key",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "operation_id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "u",
+        "local": true,
+        "match": " ",
+        "name": "launch_resource_contracts_tenant_id_operation_id_key",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "project_id",
+          "instance_id",
+          "operation_id"
+        ],
+        "deferrable": true,
+        "delete_action": "a",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": true,
+        "kind": "f",
+        "local": true,
+        "match": "s",
+        "name": "launch_resource_contracts_tenant_id_project_id_instance_i_fkey1",
+        "no_inherit": true,
+        "referenced_columns": [
+          "tenant_id",
+          "project_id",
+          "instance_id",
+          "id"
+        ],
+        "referenced_table": "public.operations",
+        "update_action": "a",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "project_id",
+          "instance_id",
+          "workspace_id"
+        ],
+        "deferrable": false,
+        "delete_action": "a",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "f",
+        "local": true,
+        "match": "s",
+        "name": "launch_resource_contracts_tenant_id_project_id_instance_id_fkey",
+        "no_inherit": true,
+        "referenced_columns": [
+          "tenant_id",
+          "project_id",
+          "id",
+          "workspace_id"
+        ],
+        "referenced_table": "public.instances",
+        "update_action": "a",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "project_id",
+          "workspace_id",
+          "operation_id"
+        ],
+        "deferrable": true,
+        "delete_action": "a",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": true,
+        "kind": "f",
+        "local": true,
+        "match": "s",
+        "name": "launch_resource_contracts_tenant_id_project_id_workspace_i_fkey",
+        "no_inherit": true,
+        "referenced_columns": [
+          "tenant_id",
+          "project_id",
+          "workspace_id",
+          "id"
+        ],
+        "referenced_table": "public.operations",
+        "update_action": "a",
+        "validated": true
+      },
+      {
+        "columns": [],
+        "deferrable": true,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": true,
+        "kind": "t",
+        "local": true,
+        "match": " ",
+        "name": "launch_resource_quota_complete",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      }
+    ],
+    "indexes": [
+      {
+        "access_method": "btree",
+        "attribute_count": 1,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 1,
+        "keys": [
+          {
+            "collation": null,
+            "column": "id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "launch_resource_contracts_pkey",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": true,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      },
+      {
+        "access_method": "btree",
+        "attribute_count": 2,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 2,
+        "keys": [
+          {
+            "collation": null,
+            "column": "tenant_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "launch_resource_contracts_tenant_id_id_key",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": false,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      },
+      {
+        "access_method": "btree",
+        "attribute_count": 5,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 5,
+        "keys": [
+          {
+            "collation": null,
+            "column": "tenant_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "instance_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "generation",
+            "operator_class": "pg_catalog.int8_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "launch_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "cluster_epoch",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "launch_resource_contracts_tenant_id_instance_id_generation__key",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": false,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      },
+      {
+        "access_method": "btree",
+        "attribute_count": 2,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 2,
+        "keys": [
+          {
+            "collation": null,
+            "column": "tenant_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "operation_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "launch_resource_contracts_tenant_id_operation_id_key",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": false,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      }
+    ]
+  },
+  "quota_resource_legacy_baseline": {
+    "columns": [
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "reservation_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "tenant_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": "clock_timestamp()",
+        "generated": "",
+        "identity": "",
+        "name": "captured_at",
+        "not_null": true,
+        "type": "timestamp with time zone"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "reservation_id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "p",
+        "local": true,
+        "match": " ",
+        "name": "quota_resource_legacy_baseline_pkey",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "reservation_id"
+        ],
+        "deferrable": false,
+        "delete_action": "a",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "f",
+        "local": true,
+        "match": "s",
+        "name": "quota_resource_legacy_baseline_tenant_id_reservation_id_fkey",
+        "no_inherit": true,
+        "referenced_columns": [
+          "tenant_id",
+          "id"
+        ],
+        "referenced_table": "public.quota_reservations",
+        "update_action": "a",
+        "validated": true
+      }
+    ],
+    "indexes": [
+      {
+        "access_method": "btree",
+        "attribute_count": 1,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 1,
+        "keys": [
+          {
+            "collation": null,
+            "column": "reservation_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "quota_resource_legacy_baseline_pkey",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": true,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      }
+    ]
+  },
+  "quota_resource_receipts": {
+    "columns": [
+      {
+        "default": "gen_random_uuid()",
+        "generated": "",
+        "identity": "",
+        "name": "id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "tenant_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "project_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "reservation_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "quota_account_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "operation_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "resource_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "operation_kind",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "purpose",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "dimension",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "unit",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "account_scope",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "account_project_id",
+        "not_null": false,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "amount",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "limit_value",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "account_version",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "pending_value",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "allocated_value",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "previous_status",
+        "not_null": false,
+        "type": "text"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "status",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "history_start",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": "clock_timestamp()",
+        "generated": "",
+        "identity": "",
+        "name": "captured_at",
+        "not_null": true,
+        "type": "timestamp with time zone"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "account_scope"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(account_scope = ANY (ARRAY['TENANT'::text, 'PROJECT'::text]))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "quota_resource_receipts_account_scope_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "account_version"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(account_version > 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "quota_resource_receipts_account_version_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "allocated_value"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(allocated_value >= 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "quota_resource_receipts_allocated_value_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "amount"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(amount > 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "quota_resource_receipts_amount_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "account_scope",
+          "account_project_id",
+          "project_id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(((account_scope = 'TENANT'::text) AND (account_project_id IS NULL)) OR ((account_scope = 'PROJECT'::text) AND (account_project_id IS NOT NULL) AND (account_project_id = project_id)))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "quota_resource_receipts_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "unit",
+          "dimension"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(unit =\nCASE dimension\n    WHEN 'CPU_MILLIS'::text THEN 'MILLICORES'::text\n    WHEN 'MEMORY_MIB'::text THEN 'MIB'::text\n    WHEN 'FILE_TRANSFER_BYTES'::text THEN 'BYTES'::text\n    WHEN 'WORKSPACE_GIB'::text THEN 'GIB'::text\n    WHEN 'BACKUP_GIB'::text THEN 'GIB'::text\n    WHEN 'BACKUP_TEMP_GIB'::text THEN 'GIB'::text\n    ELSE 'COUNT'::text\nEND)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "quota_resource_receipts_check1",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "pending_value",
+          "allocated_value",
+          "limit_value"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(((pending_value)::numeric + (allocated_value)::numeric) <= (limit_value)::numeric)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "quota_resource_receipts_check2",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "status",
+          "previous_status",
+          "history_start"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(((status = 'PENDING'::text) AND (previous_status IS NULL) AND (history_start = 'CAPTURED'::text)) OR ((status = 'ALLOCATED'::text) AND (previous_status = 'PENDING'::text)) OR ((status = 'RELEASED'::text) AND (previous_status = ANY (ARRAY['PENDING'::text, 'ALLOCATED'::text]))))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "quota_resource_receipts_check3",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "dimension"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(dimension = ANY (ARRAY['INSTANCES'::text, 'CPU_MILLIS'::text, 'MEMORY_MIB'::text, 'WORKSPACE_GIB'::text, 'EXECUTIONS'::text, 'BACKUP_GIB'::text, 'BACKUP_TEMP_GIB'::text, 'FILE_TRANSFERS'::text, 'FILE_TRANSFER_BYTES'::text]))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "quota_resource_receipts_dimension_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "history_start"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(history_start = ANY (ARRAY['CAPTURED'::text, 'LEGACY_UNBOUND'::text]))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "quota_resource_receipts_history_start_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "limit_value"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(limit_value >= 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "quota_resource_receipts_limit_value_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "pending_value"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(pending_value >= 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "quota_resource_receipts_pending_value_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "p",
+        "local": true,
+        "match": " ",
+        "name": "quota_resource_receipts_pkey",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "previous_status"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(previous_status = ANY (ARRAY['PENDING'::text, 'ALLOCATED'::text]))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "quota_resource_receipts_previous_status_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "purpose"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(purpose = ANY (ARRAY['ORDINARY_COMPUTE'::text, 'INSTANCE_LIFETIME'::text, 'WORKSPACE_STORAGE'::text, 'EXECUTION'::text, 'FILE_PROCESS'::text, 'FILE_CONTENT'::text, 'BACKUP_ISOLATED_COMPUTE'::text, 'BACKUP_RETAINED_STORAGE'::text, 'BACKUP_TEMP_STORAGE'::text, 'RESTORE_ISOLATED_COMPUTE'::text, 'RESTORE_TEMP_STORAGE'::text, 'LEGACY_UNBOUND'::text]))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "quota_resource_receipts_purpose_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "status"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(status = ANY (ARRAY['PENDING'::text, 'ALLOCATED'::text, 'RELEASED'::text]))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "quota_resource_receipts_status_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "account_project_id"
+        ],
+        "deferrable": false,
+        "delete_action": "a",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "f",
+        "local": true,
+        "match": "s",
+        "name": "quota_resource_receipts_tenant_id_account_project_id_fkey",
+        "no_inherit": true,
+        "referenced_columns": [
+          "tenant_id",
+          "id"
+        ],
+        "referenced_table": "public.projects",
+        "update_action": "a",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "u",
+        "local": true,
+        "match": " ",
+        "name": "quota_resource_receipts_tenant_id_id_key",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "project_id",
+          "operation_id"
+        ],
+        "deferrable": false,
+        "delete_action": "a",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "f",
+        "local": true,
+        "match": "s",
+        "name": "quota_resource_receipts_tenant_id_project_id_operation_id_fkey",
+        "no_inherit": true,
+        "referenced_columns": [
+          "tenant_id",
+          "project_id",
+          "id"
+        ],
+        "referenced_table": "public.operations",
+        "update_action": "a",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "quota_account_id"
+        ],
+        "deferrable": false,
+        "delete_action": "a",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "f",
+        "local": true,
+        "match": "s",
+        "name": "quota_resource_receipts_tenant_id_quota_account_id_fkey",
+        "no_inherit": true,
+        "referenced_columns": [
+          "tenant_id",
+          "id"
+        ],
+        "referenced_table": "public.quota_accounts",
+        "update_action": "a",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "reservation_id"
+        ],
+        "deferrable": false,
+        "delete_action": "a",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "f",
+        "local": true,
+        "match": "s",
+        "name": "quota_resource_receipts_tenant_id_reservation_id_fkey",
+        "no_inherit": true,
+        "referenced_columns": [
+          "tenant_id",
+          "id"
+        ],
+        "referenced_table": "public.quota_reservations",
+        "update_action": "a",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "reservation_id",
+          "status"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "u",
+        "local": true,
+        "match": " ",
+        "name": "quota_resource_receipts_tenant_id_reservation_id_status_key",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "unit"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(unit = ANY (ARRAY['COUNT'::text, 'MILLICORES'::text, 'MIB'::text, 'GIB'::text, 'BYTES'::text]))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "quota_resource_receipts_unit_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      }
+    ],
+    "indexes": [
+      {
+        "access_method": "btree",
+        "attribute_count": 4,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 4,
+        "keys": [
+          {
+            "collation": null,
+            "column": "tenant_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "operation_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "reservation_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": "pg_catalog.default",
+            "column": "status",
+            "operator_class": "pg_catalog.text_ops",
+            "options": 0
+          }
+        ],
+        "name": "quota_resource_receipts_operation",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": false,
+        "ready": true,
+        "unique": false,
+        "valid": true
+      },
+      {
+        "access_method": "btree",
+        "attribute_count": 1,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 1,
+        "keys": [
+          {
+            "collation": null,
+            "column": "id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "quota_resource_receipts_pkey",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": true,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      },
+      {
+        "access_method": "btree",
+        "attribute_count": 5,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 5,
+        "keys": [
+          {
+            "collation": null,
+            "column": "tenant_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "project_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "resource_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "captured_at",
+            "operator_class": "pg_catalog.timestamptz_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "quota_resource_receipts_resource_page",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": false,
+        "ready": true,
+        "unique": false,
+        "valid": true
+      },
+      {
+        "access_method": "btree",
+        "attribute_count": 2,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 2,
+        "keys": [
+          {
+            "collation": null,
+            "column": "tenant_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "quota_resource_receipts_tenant_id_id_key",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": false,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      },
+      {
+        "access_method": "btree",
+        "attribute_count": 3,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 3,
+        "keys": [
+          {
+            "collation": null,
+            "column": "tenant_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "reservation_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": "pg_catalog.default",
+            "column": "status",
+            "operator_class": "pg_catalog.text_ops",
+            "options": 0
+          }
+        ],
+        "name": "quota_resource_receipts_tenant_id_reservation_id_status_key",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": false,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      }
+    ]
+  }
+}

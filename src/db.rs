@@ -156,7 +156,8 @@ impl Database {
         .fetch_all(&self.pool)
         .await?;
         verify_migration_ledger(&installed)?;
-        crate::workspace_restore::verify_component_schema(&self.pool).await
+        crate::workspace_restore::verify_component_schema(&self.pool).await?;
+        crate::resource_accounting_schema::verify(&self.pool).await
     }
 
     pub async fn resolve_actor(

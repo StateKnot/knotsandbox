@@ -145,6 +145,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/instances/{id}/resource-accounting": {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Tenant selection UUID; the verified principal must have current product grants. */
+                "X-Tenant-ID": components["parameters"]["TenantId"];
+            };
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Read immutable launch requests and actual quota state receipts
+         * @description Requires instances:read, checked before and after the database page query.
+         *     Request contracts describe admitted ordinary CPU compute, not Pod resource
+         *     observations, host capacity or utilization. pod_resource_evidence=NOT_CAPTURED
+         *     explicitly identifies missing observations; HISTORY_START_NOT_CAPTURED never
+         *     reconstructs old requests from current flavor. Tenant and project scopes
+         *     must never be added together. State receipts are quota accounting facts.
+         *
+         *     Omit launch_id to select the current contract and all associated purposes
+         *     and history. Explicit launch_id selects only ordinary compute receipts bound
+         *     to that launch in the current installation epoch. Historical unbound rows
+         *     remain LEGACY_UNBOUND without a manufactured PENDING event.
+         *     Descending (captured_at,id) pagination uses a signed 24-hour cursor bound to
+         *     caller, tenant/project, instance, launch filter and limit. Repeat all filters.
+         *     A concurrent epoch/launch change rejects the page. All quantities, generations
+         *     and account versions are decimal strings, never JavaScript Numbers.
+         */
+        get: operations["getInstanceResourceAccounting"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/instances/{id}/metrics": {
         parameters: {
             query?: never;
@@ -2268,6 +2307,92 @@ export interface components {
             state: "AVAILABLE" | "NONE" | "REDACTED" | "UNKNOWN";
             resource: null | components["schemas"]["ActiveExecutionMetadata"];
         };
+        /** @description Canonical nonnegative decimal integer <= 9223372036854775807. Retain as string or BigInt; never convert to JavaScript Number. */
+        ResourceDecimal: string;
+        LaunchResourceContract: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            instance_id: string;
+            /** Format: uuid */
+            workspace_id: string;
+            generation: components["schemas"]["ResourceDecimal"];
+            /** Format: uuid */
+            launch_id: string;
+            /** Format: uuid */
+            cluster_epoch: string;
+            /** Format: uuid */
+            operation_id: string;
+            cpu_millis: components["schemas"]["ResourceDecimal"];
+            memory_mib: components["schemas"]["ResourceDecimal"];
+            /** @enum {string} */
+            source: "REQUESTED_COMPUTE_QUOTA";
+            /** Format: date-time */
+            recorded_at: string;
+        };
+        QuotaResourceReceipt: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            reservation_id: string;
+            /** Format: uuid */
+            quota_account_id: string;
+            /** Format: uuid */
+            operation_id: string;
+            /** Format: uuid */
+            resource_id: string;
+            operation_kind: string;
+            /** @enum {string} */
+            purpose: "ORDINARY_COMPUTE" | "INSTANCE_LIFETIME" | "WORKSPACE_STORAGE" | "EXECUTION" | "FILE_PROCESS" | "FILE_CONTENT" | "BACKUP_ISOLATED_COMPUTE" | "BACKUP_RETAINED_STORAGE" | "BACKUP_TEMP_STORAGE" | "RESTORE_ISOLATED_COMPUTE" | "RESTORE_TEMP_STORAGE" | "LEGACY_UNBOUND";
+            /** @enum {string} */
+            dimension: "INSTANCES" | "CPU_MILLIS" | "MEMORY_MIB" | "WORKSPACE_GIB" | "EXECUTIONS" | "BACKUP_GIB" | "BACKUP_TEMP_GIB" | "FILE_TRANSFERS" | "FILE_TRANSFER_BYTES";
+            /** @enum {string} */
+            unit: "COUNT" | "MILLICORES" | "MIB" | "GIB" | "BYTES";
+            /** @enum {string} */
+            account_scope: "TENANT" | "PROJECT";
+            /** Format: uuid */
+            account_project_id: string | null;
+            amount: components["schemas"]["ResourceDecimal"];
+            limit_value: components["schemas"]["ResourceDecimal"];
+            account_version: components["schemas"]["ResourceDecimal"];
+            pending_value: components["schemas"]["ResourceDecimal"];
+            allocated_value: components["schemas"]["ResourceDecimal"];
+            /** @enum {string|null} */
+            previous_status: "PENDING" | "ALLOCATED" | null;
+            /** @enum {string} */
+            status: "PENDING" | "ALLOCATED" | "RELEASED";
+            /** @enum {string} */
+            history_start: "CAPTURED" | "LEGACY_UNBOUND";
+            /** Format: date-time */
+            captured_at: string;
+            /** Format: uuid */
+            contract_id: string | null;
+            generation: components["schemas"]["ResourceDecimal"] | null;
+            /** Format: uuid */
+            launch_id: string | null;
+            /** Format: uuid */
+            cluster_epoch: string | null;
+        };
+        QuotaResourceReceiptPage: {
+            items: components["schemas"]["QuotaResourceReceipt"][];
+            next_cursor: string | null;
+            /** Format: date-time */
+            cutoff: string;
+        };
+        ResourceAccounting: {
+            /** Format: uuid */
+            instance_id: string;
+            /** Format: uuid */
+            selected_launch_id: string;
+            /** Format: uuid */
+            cluster_epoch: string;
+            /** @enum {string} */
+            request_evidence: "CAPTURED" | "HISTORY_START_NOT_CAPTURED";
+            /** @enum {string} */
+            pod_resource_evidence: "NOT_CAPTURED";
+            contract: components["schemas"]["LaunchResourceContract"] | null;
+            receipts: components["schemas"]["QuotaResourceReceiptPage"];
+        };
         InstanceDetails: {
             instance: components["schemas"]["Instance"];
             /** Format: date-time */
@@ -3361,6 +3486,52 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    getInstanceResourceAccounting: {
+        parameters: {
+            query?: {
+                launch_id?: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header: {
+                /** @description Tenant selection UUID; the verified principal must have current product grants. */
+                "X-Tenant-ID": components["parameters"]["TenantId"];
+            };
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Requested launch evidence and a bounded page of quota state facts */
+            200: {
+                headers: {
+                    "X-Request-ID": components["headers"]["RequestId"];
+                    "Cache-Control": components["headers"]["NoStore"];
+                    "X-Content-Type-Options": components["headers"]["NoSniff"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResourceAccounting"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            404: components["responses"]["NotFound"];
+            /** @description RESOURCE_ACCOUNTING_EPOCH_CHANGED or RESOURCE_ACCOUNTING_BINDING_CHANGED; select the launch again */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             503: components["responses"]["Unavailable"];
             default: components["responses"]["Problem"];
         };
