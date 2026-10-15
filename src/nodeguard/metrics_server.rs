@@ -1,6 +1,9 @@
 //! Dedicated read-only scrape surface. Serve only with its own scraper-client
 //! CA, never the controller CA and never on the CRI control router.
-use super::{GuardError, cri::CriProxy, image_observation::ImageObserver, metrics::CgroupCounters};
+use super::{
+    GuardError, cri::CriProxy, image_metrics::encode_node_image_metrics,
+    image_observation::ImageObserver, metrics::CgroupCounters,
+};
 use crate::metrics::{RuntimeMetric, RuntimeMetricBinding};
 use axum::{
     Router,
@@ -39,7 +42,9 @@ pub fn router(
     }
     let mut router = Router::new().route("/metrics", get(scrape));
     if images.is_some() {
-        router = router.route("/v1/node-image-status", get(image_status));
+        router = router
+            .route("/v1/node-image-status", get(image_status))
+            .route("/metrics/node-images", get(image_metrics));
     }
     Ok(router.with_state(MetricsState {
         proxy,
@@ -58,6 +63,30 @@ async fn image_status(State(state): State<MetricsState>) -> Response {
             ([("cache-control", "no-store")], axum::Json(images.status())).into_response()
         }
         None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+// This route never obtains the VM semaphore, reads the journal database or
+// starts backend work. status() applies cycle and original runtime FS freshness
+// independently; serialize that one cache snapshot against the enrolled node.
+async fn image_metrics(State(state): State<MetricsState>) -> Response {
+    let Some(images) = state.images else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    match encode_node_image_metrics(
+        &images.status(),
+        state.proxy.journal.node(),
+        &state.deployment,
+    ) {
+        Ok(output) => (
+            [
+                ("content-type", "text/plain; version=0.0.4; charset=utf-8"),
+                ("cache-control", "no-store"),
+            ],
+            output,
+        )
+            .into_response(),
+        Err(_) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
     }
 }
 
@@ -436,6 +465,15 @@ mod tests {
                     .status(),
                 404,
                 "image observation has no route when the certified feature is disabled"
+            );
+            assert_eq!(
+                scraper
+                    .get(format!("{metrics}/metrics/node-images"))
+                    .send()
+                    .await?
+                    .status(),
+                404,
+                "node image metrics have no route when the certified feature is disabled"
             );
             let response = scraper.get(format!("{metrics}/metrics")).send().await?;
             assert_eq!(response.status(), 200);

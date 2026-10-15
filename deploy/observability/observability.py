@@ -2,6 +2,7 @@
 """Render two fixed Prometheus agents and retained encrypted WALs; never applies resources."""
 from __future__ import annotations
 import argparse
+import copy
 import ipaddress
 import json
 import os
@@ -38,6 +39,22 @@ RAW = '|'.join(re.escape(name) for name in RAW_METRICS)
 MAX_LAUNCHES_PER_TARGET = 256
 NODE_SAMPLE_LIMIT = MAX_LAUNCHES_PER_TARGET * len(RAW_METRICS)
 LABELS = ['__name__', 'deployment', 'cluster_epoch', 'node_uid', 'host_boot_id', 'tenant_id', 'project_id', 'instance_id', 'launch_id', 'generation', 'collector_replica', 'job', 'instance']
+NODE_IMAGE_SCALARS = (
+    'sandbox_node_image_inventory_observation_success',
+    'sandbox_node_image_filesystem_observation_success',
+    'sandbox_node_image_observed_at_seconds',
+    'sandbox_node_image_inventory_count',
+    'sandbox_node_image_compressed_logical_bytes',
+)
+NODE_IMAGE_FILESYSTEM_METRICS = (
+    'sandbox_node_image_filesystem_reported_at_seconds',
+    'sandbox_node_image_filesystem_used_bytes',
+    'sandbox_node_image_filesystem_inodes_used',
+)
+NODE_IMAGE_RAW = '|'.join(NODE_IMAGE_SCALARS + NODE_IMAGE_FILESYSTEM_METRICS)
+NODE_IMAGE_LABELS = ['__name__', 'deployment', 'cluster_epoch', 'node_uid', 'host_boot_id', 'profile_sha256', 'source', 'completeness', 'filesystem_id', 'collector_replica', 'job', 'instance']
+NODE_IMAGE_MAX_FILESYSTEMS = 16
+NODE_IMAGE_SAMPLE_LIMIT = len(NODE_IMAGE_SCALARS) + len(NODE_IMAGE_FILESYSTEM_METRICS) * NODE_IMAGE_MAX_FILESYSTEMS
 # Pinned 3.13.4 agent registry. A single remote-write queue makes dropping its
 # url/remote_name labels unambiguous; the WAL/corruption metrics have no labels.
 SELF_METRICS = (
@@ -54,7 +71,7 @@ SELF_METRICS = (
 SELF_RAW = '|'.join(SELF_METRICS)
 SELF_SAMPLE_LIMIT = 64
 SCRAPE_REPORT_SAMPLES = 5
-WRITE_LABELS = LABELS + ['scrape_node_uid', 'scrape_host_boot_id']
+WRITE_LABELS = LABELS + [label for label in NODE_IMAGE_LABELS if label not in LABELS] + ['scrape_node_uid', 'scrape_host_boot_id', 'scrape_profile_sha256']
 SECRET_WRITER = 'sandbox-metrics-writer'
 SECRET_SCRAPER = 'sandbox-metrics-scraper'
 
@@ -118,7 +135,9 @@ def validate(settings, terraform, remote_url):
     require(len(platform_zones) >= 2, 'PLATFORM_ZONES')
     seen_ip, seen_uid, seen_boot = set(), set(), set()
     for node in settings['nodes']:
-        require(isinstance(node, dict) and set(node) == {'name', 'node_uid', 'private_ip', 'host_boot_id'}, 'NODE_FIELDS')
+        require(isinstance(node, dict) and set(node) in ({'name', 'node_uid', 'private_ip', 'host_boot_id'}, {'name', 'node_uid', 'private_ip', 'host_boot_id', 'image_profile_sha256'}), 'NODE_FIELDS')
+        if 'image_profile_sha256' in node:
+            require(isinstance(node['image_profile_sha256'], str) and re.fullmatch(r'[0-9a-f]{64}', node['image_profile_sha256']), 'IMAGE_PROFILE_SHA256')
         require(re.fullmatch(r'[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?', node['name']) is not None, 'NODE_NAME')
         canonical_uuid(node['node_uid']); canonical_uuid(node['host_boot_id'])
         ip = ipaddress.ip_address(node['private_ip'])
@@ -138,19 +157,39 @@ def validate(settings, terraform, remote_url):
 def capacity(settings):
     # Fourteen bounded raw metrics per launch; the 1 KiB allowance includes churn/
     # label records. It is a conservative planning model, not a storage SLA.
-    samples = len(settings['nodes']) * NODE_SAMPLE_LIMIT
+    vm_samples = len(settings['nodes']) * NODE_SAMPLE_LIMIT
+    # Optional image jobs reserve five scalars plus three metrics per bounded
+    # filesystem; neither their sample nor body allowance is borrowed from VMs.
+    image_targets = sum('image_profile_sha256' in node for node in settings['nodes'])
+    image_samples = image_targets * NODE_IMAGE_SAMPLE_LIMIT
+    samples = vm_samples + image_samples
     # Native scrape reports enter the WAL even when remote-write filters them.
     # Self metrics are bounded after relabeling by their own sample_limit.
-    reports = (len(settings['nodes']) + 1) * SCRAPE_REPORT_SAMPLES
+    targets = len(settings['nodes']) + image_targets + 1
+    reports = targets * SCRAPE_REPORT_SAMPLES
     total = samples + reports + SELF_SAMPLE_LIMIT
     budget = total * (6 * 3600 // 15) * 1024 * 2
-    return {'replicas': 2, 'targets_per_replica': len(settings['nodes']) + 1, 'max_launches_per_target': MAX_LAUNCHES_PER_TARGET,
+    return {'replicas': 2, 'targets_per_replica': targets, 'max_launches_per_target': MAX_LAUNCHES_PER_TARGET,
             'max_raw_metrics_per_launch': len(RAW_METRICS), 'max_raw_samples_per_node_scrape': NODE_SAMPLE_LIMIT,
             'nodeguard_targets_per_replica': len(settings['nodes']), 'self_scrape_targets_per_replica': 1,
+            'node_image_targets_per_replica': image_targets,
+            'max_node_image_filesystems_per_target': NODE_IMAGE_MAX_FILESYSTEMS,
+            'max_node_image_samples_per_target_scrape': NODE_IMAGE_SAMPLE_LIMIT,
+            'max_vm_samples_per_scrape_per_replica': vm_samples,
+            'max_node_image_samples_per_scrape_per_replica': image_samples,
             'max_raw_samples_per_scrape_per_replica': samples,
             'max_self_samples_per_scrape_per_replica': SELF_SAMPLE_LIMIT,
             'max_scrape_report_samples_per_scrape_per_replica': reports,
             'max_wal_samples_per_scrape_per_replica': total, 'max_samples_per_second_per_replica': total / 15,
+            # Body planning uses the original Rust VM 2MiB upper bound and
+            # self scrape; each image target reserves its own full 64KiB.
+            'max_scrape_body_bytes_per_round_per_replica': (len(settings['nodes']) + 1) * 2 * 1024**2 + image_targets * 64 * 1024,
+            # Of five native reports only up survives remote-write. This is a
+            # planning model excluding retries/transport overhead, not a hard
+            # network limit or a guaranteed compression/ingestion rate.
+            'max_remote_write_samples_per_round_per_replica': samples + SELF_SAMPLE_LIMIT + targets,
+            'planning_remote_write_samples_per_second_per_replica': (samples + SELF_SAMPLE_LIMIT + targets) / 15,
+            'planning_remote_write_bytes_per_second_without_retries': (samples + SELF_SAMPLE_LIMIT + targets) * 1024 / 15,
             'wal_gib_per_replica': settings['wal_gib'], 'wal_gib_total': settings['wal_gib'] * 2,
             'planning_bytes_per_sample_including_churn': 1024, 'checkpoint_reserve_multiplier': 2,
             'six_hour_budget_bytes_with_checkpoint_reserve': budget, 'disk_usage_budget_fraction': 0.7,
@@ -184,6 +223,26 @@ def prometheus(settings, replica, remote_url):
                      'static_configs': [{'targets': [node['private_ip'] + ':9445'],
                                          'labels': {'scrape_node_uid': node['node_uid'], 'scrape_host_boot_id': node['host_boot_id']}}],
                      'metric_relabel_configs': relabel})
+        if 'image_profile_sha256' in node:
+            # Reuse only the reviewed transport; image observations have their
+            # own path, budget and identity/label contract, independent of VMs.
+            image_job = copy.deepcopy(jobs[-1])
+            image_relabel = [{'source_labels': ['__name__'], 'regex': NODE_IMAGE_RAW, 'action': 'keep'},
+                             {'source_labels': ['__name__', 'filesystem_id'],
+                              'regex': '(' + '|'.join(NODE_IMAGE_SCALARS) + ');|(' + '|'.join(NODE_IMAGE_FILESYSTEM_METRICS) + ');[0-9a-f]{64}', 'action': 'keep'}]
+            for key, expected in [('deployment', settings['deployment']), ('cluster_epoch', settings['cluster_epoch']),
+                                  ('node_uid', node['node_uid']), ('host_boot_id', node['host_boot_id']),
+                                  ('profile_sha256', node['image_profile_sha256']), ('source', 'RUNTIME_REPORTED'), ('completeness', 'UNKNOWN')]:
+                image_relabel.append({'source_labels': [key], 'regex': re.escape(expected), 'action': 'keep'})
+            image_relabel += [{'target_label': 'collector_replica', 'replacement': replica, 'action': 'replace'},
+                              {'action': 'labelkeep', 'regex': '|'.join(NODE_IMAGE_LABELS)}]
+            image_job.update(job_name='node-images-' + node['node_uid'], metrics_path='/metrics/node-images',
+                             body_size_limit='64KiB', sample_limit=NODE_IMAGE_SAMPLE_LIMIT, label_limit=len(NODE_IMAGE_LABELS),
+                             extra_scrape_metrics=False,
+                             static_configs=[{'targets': [node['private_ip'] + ':9445'], 'labels': {
+                                 'scrape_node_uid': node['node_uid'], 'scrape_host_boot_id': node['host_boot_id'],
+                                 'scrape_profile_sha256': node['image_profile_sha256']}}], metric_relabel_configs=image_relabel)
+            jobs.append(image_job)
     # Local self-scrape uses no mTLS identity and grants no additional network access.
     # URL/remote_name and all other registry labels are removed before limits/WAL.
     jobs.append({'job_name': 'sandbox-agent', 'scheme': 'http', 'metrics_path': '/metrics',
@@ -202,7 +261,7 @@ def prometheus(settings, replica, remote_url):
                               'follow_redirects': False, 'enable_http2': False,
                               'basic_auth': {'username_file': '/etc/writer/username', 'password_file': '/etc/writer/password'},
                               'tls_config': {'insecure_skip_verify': False, 'min_version': 'TLS12'},
-                              'write_relabel_configs': [{'source_labels': ['__name__'], 'regex': RAW + '|up|' + SELF_RAW, 'action': 'keep'}, {'action': 'labelkeep', 'regex': '|'.join(WRITE_LABELS)}],
+                              'write_relabel_configs': [{'source_labels': ['__name__'], 'regex': RAW + '|' + NODE_IMAGE_RAW + '|up|' + SELF_RAW, 'action': 'keep'}, {'action': 'labelkeep', 'regex': '|'.join(WRITE_LABELS)}],
                               'queue_config': {'capacity': 10000, 'min_shards': 1, 'max_shards': 4, 'max_samples_per_send': 2000,
                                                'batch_send_deadline': '5s', 'min_backoff': '1s', 'max_backoff': '30s', 'retry_on_http_429': True, 'sample_age_limit': '0s'},
                               'metadata_config': {'send': False}}]}

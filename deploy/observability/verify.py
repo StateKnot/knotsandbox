@@ -4,13 +4,15 @@ import argparse
 import hashlib
 import http.client
 import json
+import math
+import re
 from pathlib import Path
 import socket
 import ssl
 import subprocess
 import sys
 from datetime import datetime, timezone
-from observability import decode, load, validate, require, write_private
+from observability import decode, load, validate, require, write_private, NODE_IMAGE_SCALARS, NODE_IMAGE_FILESYSTEM_METRICS, NODE_IMAGE_SAMPLE_LIMIT, NODE_IMAGE_MAX_FILESYSTEMS
 
 
 def kube(context, *args):
@@ -44,21 +46,86 @@ def check_nodes(settings, tf, nodes, csinodes, cilium):
     require(len(platform_zones)>=2,'PLATFORM_ZONES')
 
 
-def scrape(settings,node,ca,cert,key):
+def check_image_status(settings, node, body):
+    expected = {'node_name': node['name'], 'node_uid': node['node_uid'],
+                'boot_id': node['host_boot_id'], 'cluster_epoch': settings['cluster_epoch'],
+                'profile_sha256': node['image_profile_sha256']}
+    require(isinstance(body, dict) and body.get('enabled') is True
+            and body.get('node') == expected and body.get('source') == 'RUNTIME_REPORTED'
+            and body.get('completeness') == 'UNKNOWN', 'NODE_IMAGE_PREREQUISITE_IDENTITY')
+
+
+def check_image_metrics(settings, node, text):
+    """Validate this product's closed exposition, not arbitrary Prometheus text."""
+    code='NODE_IMAGE_PREREQUISITE_SERIES'
+    expected={'deployment':settings['deployment'],'cluster_epoch':settings['cluster_epoch'],
+              'node_uid':node['node_uid'],'host_boot_id':node['host_boot_id'],
+              'profile_sha256':node['image_profile_sha256'],'source':'RUNTIME_REPORTED','completeness':'UNKNOWN'}
+    require(isinstance(text,str) and text.isascii() and len(text)<=64*1024,code)
+    samples={}; filesystems=set()
+    for line in text.splitlines():
+        if not line or line.startswith('#'):continue
+        match=re.fullmatch(r'([a-zA-Z_:][a-zA-Z0-9_:]*)\{([^{}]*)\} ([0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)',line)
+        require(match is not None,code)
+        name, encoded, number=match.groups()
+        require(name in (*NODE_IMAGE_SCALARS,*NODE_IMAGE_FILESYSTEM_METRICS),code)
+        labels={}
+        for field in encoded.split(','):
+            # All current exporter labels have bounded alphabets without quotes,
+            # backslashes or commas. Reject unsupported encodings and duplicates.
+            pair=re.fullmatch(r'([a-zA-Z_][a-zA-Z0-9_]*)="([^"\\]*)"',field)
+            require(pair is not None,code)
+            key,value=pair.groups();require(key not in labels,code);labels[key]=value
+        filesystem=None
+        if name in NODE_IMAGE_FILESYSTEM_METRICS:
+            filesystem=labels.pop('filesystem_id',None)
+            require(isinstance(filesystem,str) and re.fullmatch(r'[0-9a-f]{64}',filesystem),code)
+            filesystems.add(filesystem)
+        require(labels==expected,code)
+        identity=(name,filesystem)
+        require(identity not in samples and math.isfinite(float(number)),code)
+        samples[identity]=float(number)
+    require(len(samples)<=NODE_IMAGE_SAMPLE_LIMIT and len(filesystems)<=NODE_IMAGE_MAX_FILESYSTEMS,code)
+    inventory=samples.get((NODE_IMAGE_SCALARS[0],None))
+    filesystem=samples.get((NODE_IMAGE_SCALARS[1],None))
+    require(inventory in (0,1) and filesystem in (0,1),code)
+    for name in NODE_IMAGE_SCALARS[3:]:
+        require(((name,None) in samples)==bool(inventory),code)
+    observed=samples.get((NODE_IMAGE_SCALARS[2],None))
+    require((observed is not None)==bool(inventory or filesystem),code)
+    require(observed is None or observed>0,code)
+    require(not filesystems or filesystem==1,code)
+    for identity in filesystems:
+        require(samples.get((NODE_IMAGE_FILESYSTEM_METRICS[0],identity),0)>0,code)
+
+
+def node_get(node, ca, cert, key, path, limit):
     context=ssl.create_default_context(cafile=str(ca));context.minimum_version=ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(str(cert),str(key))
     connection=http.client.HTTPConnection(node['private_ip'],9445,timeout=5)
-    connection.sock=context.wrap_socket(socket.create_connection((node['private_ip'],9445),timeout=5),server_hostname=node['node_uid']+'.nodeguard.sandbox.internal')
     try:
-        connection.request('GET','/metrics',headers={'Host':node['node_uid']+'.nodeguard.sandbox.internal'})
-        response=connection.getresponse();body=response.read(2*1024*1024+1)
-        require(response.status==200 and len(body)<=2*1024*1024,'METRICS_SCRAPE_FAILED')
-        text=body.decode('ascii')
+        connection.sock=context.wrap_socket(socket.create_connection((node['private_ip'],9445),timeout=5),server_hostname=node['node_uid']+'.nodeguard.sandbox.internal')
+        connection.request('GET',path,headers={'Host':node['node_uid']+'.nodeguard.sandbox.internal'})
+        response=connection.getresponse();body=response.read(limit+1)
+        require(response.status==200 and len(body)<=limit,'METRICS_SCRAPE_FAILED')
+        return body
+    finally:connection.close()
+
+
+def scrape(settings,node,ca,cert,key):
+    def identity(text, expected):
         for line in text.splitlines():
             if not line or line.startswith('#'):continue
-            for k,v in [('deployment',settings['deployment']),('cluster_epoch',settings['cluster_epoch']),('node_uid',node['node_uid']),('host_boot_id',node['host_boot_id'])]:
+            for k,v in expected:
                 require(f'{k}="{v}"' in line,'METRICS_IDENTITY')
-    finally:connection.close()
+    expected = [('deployment',settings['deployment']),('cluster_epoch',settings['cluster_epoch']),
+                ('node_uid',node['node_uid']),('host_boot_id',node['host_boot_id'])]
+    identity(node_get(node,ca,cert,key,'/metrics',2*1024*1024).decode('ascii'), expected)
+    if 'image_profile_sha256' in node:
+        status=decode(node_get(node,ca,cert,key,'/v1/node-image-status',64*1024))
+        check_image_status(settings,node,status)
+        text=node_get(node,ca,cert,key,'/metrics/node-images',64*1024).decode('ascii')
+        check_image_metrics(settings,node,text)
 
 
 def main():
@@ -74,7 +141,7 @@ def main():
     # No outbound cloud operation: only enrolled private nodeguard endpoints.
     load(a.client_key,True)
     for node in settings['nodes']:scrape(settings,node,a.server_ca,a.client_cert,a.client_key)
-    result={'kind':'observability-private-prerequisites/v1','observed_at':datetime.now(timezone.utc).isoformat(),'settings_sha256':hashlib.sha256(json.dumps(settings,sort_keys=True,separators=(',',':')).encode()).hexdigest(),'node_count':len(settings['nodes']),'private_scrape_verified':True,'managed_remote_write_verified':False,'persistent_csi_wal_verified':False,'production_acceptance':False}
+    result={'kind':'observability-private-prerequisites/v1','observed_at':datetime.now(timezone.utc).isoformat(),'settings_sha256':hashlib.sha256(json.dumps(settings,sort_keys=True,separators=(',',':')).encode()).hexdigest(),'node_count':len(settings['nodes']),'private_scrape_verified':True,'node_image_opt_in_count':sum('image_profile_sha256' in n for n in settings['nodes']),'managed_remote_write_verified':False,'persistent_csi_wal_verified':False,'production_acceptance':False}
     write_private(a.output,json.dumps(result,indent=2).encode())
     print('Read-only private prerequisites verified; Managed Prometheus writes and CSI WAL acceptance remain separate.')
 

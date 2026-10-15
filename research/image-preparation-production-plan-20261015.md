@@ -1,6 +1,6 @@
 # 批准OCI镜像的节点预准备：生产实施计划
 
-状态：**P0a宿主只读adapter与scraper诊断已实现并完成本地验收；P0整体未完成，P0b/P0c及P1—P6仍为未实现／未认证方案。** 本文件承接[开发表12.7](rust-sandbox-development-workbreakdown.md#127-可信启动资源观察与原子登记2026-10-15)的可信资源账本；已发布ff16330的精确CI已通过，当前按以下依赖推进；新源码CI单独核对。
+状态：**P0a/P0b节点只读指标、预算及告警已实现并完成本地验收；P0整体未完成，P0c及P1—P6仍为未实现／未认证方案。** 本文件承接[开发表12.7](rust-sandbox-development-workbreakdown.md#127-可信启动资源观察与原子登记2026-10-15)的可信资源账本；已发布18ad317的精确CI 5 job/62 step已通过，当前按以下依赖推进；新源码CI单独核对。
 范围仅为批准OCI镜像在准确节点／运行时中的有预算准备，不创建CPU／GPU VM池，不产生用户进程、工作区或普通launch许可。
 每90分钟是触发间隔，不是开发或验证超时；先接续已有在途工作，再持续完成选中的可验证切片，不因下一次触发重复启动。
 失败保存原现场并继续闭合该切片，不能因触发次数或时间到而标记通过，也不能跳过前置门开放拉取。
@@ -8,7 +8,7 @@
 ## 当前事实与来源门
 
 当前nodeguard已有独立scraper-client CA保护的`/metrics`及固定containerd UDS配置，原有VM指标从可信journal绑定launch。
-现有Prometheus指标重标记要求tenant／instance／generation，直接增加节点样本会被丢弃；不能给每台VM复制同一份节点镜像占用。
+原VM job的Prometheus重标记要求tenant／instance／generation，节点样本须走已新增的独立job；不能给每台VM复制同一份节点镜像占用。
 模板审批保存repository与SHA-256 digest，但尚无完整index→平台manifest选择、准备租约、物理存储预算或回收账本。
 相关真实源码为[`metrics_server.rs`](../src/nodeguard/metrics_server.rs)、[`CRI模块`](../src/nodeguard/cri.rs)、[`观测部署`](../deploy/observability/observability.py)、[`模板入口`](../src/admin.rs)和[`版本锁`](../deploy/cluster/versions.lock.json)。
 
@@ -19,7 +19,7 @@
 基线只输出明确标注runtime-reported的聚合值及不透明FS身份，完整性、cache total、capacity、available、reclaimable和实际释放量保持UNKNOWN。
 接口来源固定为`RUNTIME_REPORTED`，并单独注明snapshotter报告范围和完整性UNKNOWN，不与普通launch的`KUBERNETES_API_READBACK`配置证据混用。
 `observation_success`仅表示RPC／形状／绑定身份校验成功，不能解释为存储全量采样成功，更不能直接用作硬预算准入。
-固定版本的官方来源与待核实项见[原生镜像来源调查](image-preparation-native-sources-20261015.md)；本文P0b/P0c及后续拟新增接口不是现有能力声明。
+固定版本的官方来源与待核实项见[原生镜像来源调查](image-preparation-native-sources-20261015.md)；本文P0c及后续拟新增接口不是现有能力声明。
 目标版本取仓库锁定的containerd／Kubernetes／snapshotter组合；锁版本、实际backend配置及官方来源三者不符时停止，不猜测某个RPC或插件支持。
 
 ## 端到端接口与身份
@@ -65,8 +65,8 @@ operator读／管理权限分开，授权变更可审计且每次读取前后重
 
 | 顺序／依赖 | 开发文件与接口 | 必须验收 | 退出门 |
 | --- | --- | --- | --- |
-| P0a宿主子项已本地验收；完整P0仍待P0b/P0c | `src/nodeguard/image_observation.rs`；接`metrics_server.rs`／固定UDS，只读有界collector及scraper mTLS诊断；见[本批交付](node-image-observation-delivery-20261015.md) | 正常／空镜像／无VM、超大响应、超时、取消、身份／mount切换、部分缺测；真实containerd与FS观察 | RPC／形状成功与统计完整性UNKNOWN分开，逻辑数不冒充容量；无写RPC或任意socket入口 |
-| P0b，依赖P0a | `deploy/observability/observability.py`、对应verify／pipeline／tests；独立node allowlist、同Prom双Agent预算 | 实际抓取／remote-write、节点样本不被tenant过滤丢弃、旧VM样本保持、HA不累加、恶意label被剥离、WAL与样本上界 | 新旧两类样本在真实管线闭合；没有每VM复制节点缓存 |
+| P0a宿主子项已本地验收；完整P0仍待P0c及原生整链 | `src/nodeguard/image_observation.rs`；接`metrics_server.rs`／固定UDS，只读有界collector及scraper mTLS诊断；见[本批交付](node-image-observation-delivery-20261015.md) | 正常／空镜像／无VM、超大响应、超时、取消、身份／mount切换、部分缺测；真实containerd与FS观察 | RPC／形状成功与统计完整性UNKNOWN分开，逻辑数不冒充容量；无写RPC或任意socket入口 |
+| P0b已完成本地验收，依赖P0a | `deploy/observability/observability.py`、对应verify／pipeline／tests；独立node allowlist、同Prom双Agent预算 | 实际抓取／remote-write、节点样本不被tenant过滤丢弃、旧VM样本保持、HA不累加、恶意label被剥离、WAL与样本上界 | 新旧两类样本在真实协议管线闭合；原生containerd另验，尚非同一原生整链；见[本批交付](node-image-pipeline-delivery-20261016.md) |
 | P0c，依赖P0a/P0b | `src/node_image_status.rs`、受限operator授权／查询及admin消费者；按实际模型另立正常迁移／最小读权限 | 真实OIDC/JWT、普通DB角色、固定selector、安装scope撤权、失效／boot变化清旧，无VM读基线 | 安装级授权与消费者完整；本批只读slice才可记完成 |
 | P1，依赖P0 | `research/image-preparation-native-sources-20261015.md`、profile／部署合同 | 固定版本原生lease／content／snapshot引用、namespace／snapshotter、CRI GC交互、存储／内存／FD／专用网络槽的硬限与临时目录逐项源码及实测 | 官方来源＋真实backend证据确定一套受支持组合；共享daemon不能隔离准备开销时不开放该组合 |
 | P2，依赖P1 | `src/image_preparation.rs`、`src/image_preparation_budget.rs`、正常新迁移／角色／preflight | 并发预算预留／拒绝、跨租户归因、同键重放、撤权／epoch／节点换代、schema／列授权漂移 | PG意图／预算／身份持久且不可伪造，未派发任务也可安全关闭；没有直接runtime表写权 |

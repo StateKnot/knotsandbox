@@ -7,6 +7,7 @@ are scenario declarations; rule expressions are not evaluated by Python.
 from __future__ import annotations
 
 import json
+import copy
 
 from alerts import SELF_METRICS, rules
 
@@ -205,4 +206,140 @@ def cases(settings, rule_file='alerts.rules.yaml'):
     add('native metrics without stale markers expire at exactly sixty seconds', 3,
         lambda v, m: v.update({series_name(SELF_METRICS[0], 'a'): '0 _ _ _'}),
         [expected('SandboxMetricsAgentTelemetryIncomplete', 'a')])
+    return {'rule_files': [rule_file], 'evaluation_interval': '15s', 'tests': tests}
+
+
+def node_image_cases(settings, rule_file='alerts.rules.yaml'):
+    """Replay optional node reports independently of the unchanged VM cases."""
+    clean = copy.deepcopy(settings)
+    for node in clean['nodes']:
+        node.pop('image_profile_sha256', None)
+    baseline = cases(clean)['tests'][0]['input_series']
+    node = next(n for n in settings['nodes'] if 'image_profile_sha256' in n)
+    prefix = 'sandbox_node_image_'
+    names = ('SandboxNodeImageCollectorsUnavailable', 'SandboxNodeImageCollectorReplicaUnavailable',
+             'SandboxNodeImageReportUnavailable', 'SandboxNodeImageReportReplicaUnavailable')
+    tests = []
+
+    def series(metric, replica, **overrides):
+        labels = {'deployment': settings['deployment'], 'cluster_epoch': settings['cluster_epoch'],
+                  'collector_replica': replica, 'job': 'node-images-' + node['node_uid'], 'instance': 'fixture-' + replica}
+        if metric == 'up':
+            labels.update(scrape_node_uid=node['node_uid'], scrape_host_boot_id=node['host_boot_id'],
+                          scrape_profile_sha256=node['image_profile_sha256'])
+        else:
+            labels.update(node_uid=node['node_uid'], host_boot_id=node['host_boot_id'], profile_sha256=node['image_profile_sha256'],
+                          source='RUNTIME_REPORTED', completeness='UNKNOWN')
+        labels.update(overrides)
+        return metric + '{' + ','.join(key + '=' + json.dumps(value) for key, value in labels.items()) + '}'
+
+    def expected(name, replica=None, component='node-image-scrape'):
+        identity = {'deployment': settings['deployment'], 'cluster_epoch': settings['cluster_epoch'],
+                    'component': component, 'owner': 'platform', 'severity': 'warning' if replica else 'critical',
+                    'scrape_node_uid': node['node_uid'], 'scrape_host_boot_id': node['host_boot_id'],
+                    'scrape_profile_sha256': node['image_profile_sha256']}
+        if replica:
+            identity['collector_replica'] = replica
+        summary = {'SandboxNodeImageCollectorsUnavailable': '该固定节点镜像端点两个采集副本均无新鲜成功抓取。',
+                   'SandboxNodeImageCollectorReplicaUnavailable': '该固定节点镜像端点一个采集副本抓取失败或陈旧，另一副本仍健康。',
+                   'SandboxNodeImageReportUnavailable': '该固定节点镜像组件没有新鲜成功报告；UNKNOWN 不能当作零值。',
+                   'SandboxNodeImageReportReplicaUnavailable': '该固定节点镜像组件一个副本没有新鲜成功报告，另一副本仍健康。'}[name]
+        return name, {'exp_labels': identity, 'exp_annotations': {'summary': summary,
+                      'runbook': 'deploy/observability/README.md#监控采集链告警'}}
+
+    def add(description, mutate=None, checks=(), minutes=5, interval_seconds=60):
+        values = {row['series']: row['values'] for row in baseline}
+        points = minutes * 60 // interval_seconds
+        for replica in ('a', 'b'):
+            values[series('up', replica)] = '1+0x' + str(points)
+            for component in ('inventory', 'filesystem'):
+                values[series(prefix + component + '_observation_success', replica)] = '1+0x' + str(points)
+            values[series(prefix + 'observed_at_seconds', replica)] = '1+' + str(interval_seconds) + 'x' + str(points)
+        if mutate:
+            mutate(values, points)
+        expected_by_name = {name: [] for name in names}
+        for name, value in checks:
+            expected_by_name[name].append(value)
+        tests.append({'name': description, 'interval': str(interval_seconds) + 's',
+                      'input_series': [{'series': key, 'values': value} for key, value in values.items()],
+                      'alert_rule_test': [{'eval_time': str(minutes) + 'm', 'alertname': name,
+                                           'exp_alerts': expected_by_name[name]} for name in names]})
+
+    def set_value(values, minutes, metric, replica, value, **overrides):
+        values[series(metric, replica, **overrides)] = str(value) + '+0x' + str(minutes)
+
+    add('node images healthy with successful empty filesystem report')
+    add('node image endpoint one-side 503 leaves VM and self healthy',
+        lambda v, m: set_value(v, m, 'up', 'a', 0), [expected(names[1], 'a')])
+    add('node image endpoints both 503 leave VM and self healthy',
+        lambda v, m: [set_value(v, m, 'up', r, 0) for r in ('a', 'b')], [expected(names[0])])
+    for component in ('inventory', 'filesystem'):
+        metric = prefix + component + '_observation_success'
+        label = 'node-image-' + component
+        add(component + ' UNKNOWN on one replica with HTTP 200',
+            lambda v, m, metric=metric: set_value(v, m, metric, 'a', 0), [expected(names[3], 'a', label)])
+        add(component + ' UNKNOWN on both replicas with HTTP 200',
+            lambda v, m, metric=metric: [set_value(v, m, metric, r, 0) for r in ('a', 'b')], [expected(names[2], component=label)])
+        add(component + ' report success marker missing on one replica',
+            lambda v, m, metric=metric: v.pop(series(metric, 'a')), [expected(names[3], 'a', label)])
+    critical_reports = [expected(names[2], component='node-image-' + c) for c in ('inventory', 'filesystem')]
+    add('node image endpoints absent with VM still healthy',
+        lambda v, m: [v.pop(series('up', r)) for r in ('a', 'b')], [expected(names[0])])
+    add('node image endpoint samples expire at exactly sixty seconds',
+        lambda v, m: [v.update({series('up', r): '1 _ _ _'}) for r in ('a', 'b')], [expected(names[0])], minutes=3)
+    add('brief image endpoint loss does not bypass two minute for',
+        lambda v, m: [set_value(v, m, 'up', r, 0) for r in ('a', 'b')], minutes=1)
+    for field in ('scrape_profile_sha256', 'scrape_host_boot_id', 'cluster_epoch'):
+        def wrong_target(values, minutes, field=field):
+            for replica in ('a', 'b'):
+                values.pop(series('up', replica))
+                value = 'b' * 64 if field == 'scrape_profile_sha256' else '00000000-0000-0000-0000-000000000fff'
+                set_value(values, minutes, 'up', replica, 1, **{field: value})
+        add('foreign image target ' + field + ' is not healthy', wrong_target, [expected(names[0])])
+    for original, checks, description in [('0+60x5', [], 'current report'),
+                                          ('-59.999+60x5', [], 'report just inside sixty seconds'),
+                                          ('-60+60x5', critical_reports, 'report exactly sixty seconds old'),
+                                          ('5+60x5', [], 'report exactly five seconds in future'),
+                                          ('5.001+60x5', critical_reports, 'report beyond five seconds in future'),
+                                          ('NaN+0x5', critical_reports, 'report NaN is not fresh')]:
+        original = original.replace('+60x5', '+15x20').replace('+0x5', '+0x20')
+        add(description, lambda v, m, original=original: [v.update({series(prefix + 'observed_at_seconds', r): original}) for r in ('a', 'b')], checks, interval_seconds=15)
+    add('original collector time missing on both replicas',
+        lambda v, m: [v.pop(series(prefix + 'observed_at_seconds', r)) for r in ('a', 'b')], critical_reports)
+    add('original collector metric samples also expire at sixty seconds',
+        lambda v, m: [v.update({series(prefix + 'observed_at_seconds', r): '1 _ _ _'}) for r in ('a', 'b')], critical_reports, minutes=3)
+    for field in ('profile_sha256', 'host_boot_id', 'cluster_epoch', 'source', 'completeness'):
+        def wrong_report(values, minutes, field=field):
+            for replica in ('a', 'b'):
+                for metric in (prefix + 'observed_at_seconds', prefix + 'inventory_observation_success', prefix + 'filesystem_observation_success'):
+                    values.pop(series(metric, replica))
+                    foreign = 'b' * 64 if field == 'profile_sha256' else 'FOREIGN' if field in ('source', 'completeness') else '00000000-0000-0000-0000-000000000fff'
+                    values[series(metric, replica, **{field: foreign})] = ('1+60x' if metric.endswith('observed_at_seconds') else '1+0x') + str(minutes)
+        add('foreign raw image ' + field + ' cannot authorize a report', wrong_report, critical_reports)
+    for original, bad, description in [('-59.999+60x5', False, 'FS original time just inside sixty seconds'),
+                                        ('-60+60x5', True, 'FS original time exactly sixty seconds old'),
+                                        ('5+60x5', False, 'FS original time exactly five seconds in future'),
+                                        ('5.001+60x5', True, 'FS original time beyond five seconds in future')]:
+        original = original.replace('+60x5', '+15x20')
+        add(description, lambda v, m, original=original: [v.update({series(prefix + 'filesystem_reported_at_seconds', r, filesystem_id='c' * 64): original}) for r in ('a', 'b')],
+            [expected(names[2], component='node-image-filesystem')] if bad else [], interval_seconds=15)
+    add('FS value without same identity original runtime time is missing',
+        lambda v, m: [set_value(v, m, prefix + 'filesystem_used_bytes', r, 0, filesystem_id='c' * 64) for r in ('a', 'b')],
+        [expected(names[2], component='node-image-filesystem')])
+    add('one FS original timestamp is stale while other replica is healthy',
+        lambda v, m: v.update({series(prefix + 'filesystem_reported_at_seconds', 'a', filesystem_id='c' * 64): '-60+60x5'}),
+        [expected(names[3], 'a', 'node-image-filesystem')])
+    add('one endpoint unavailable and remaining inventory UNKNOWN are not healthy redundancy',
+        lambda v, m: [set_value(v, m, 'up', 'a', 0), set_value(v, m, prefix + 'inventory_observation_success', 'b', 0)],
+        [expected(names[1], 'a'), expected(names[2], component='node-image-inventory')])
+    add('whole collector outage suppresses all optional node alerts',
+        lambda v, m: [v.update({key: '0+0x' + str(m)}) for key in v if key.startswith('up{')])
+    add('image endpoint recovers under identical alert identity',
+        lambda v, m: [v.update({series('up', r): '0+0x2 1+0x3'}) for r in ('a', 'b')], minutes=6)
+    name, fired = expected(names[0])
+    tests[-1]['alert_rule_test'].append({'eval_time': '2m', 'alertname': name, 'exp_alerts': [fired]})
+    add('inventory UNKNOWN clears after same identity recovery',
+        lambda v, m: [v.update({series(prefix + 'inventory_observation_success', r): '0+0x2 1+0x3'}) for r in ('a', 'b')], minutes=6)
+    name, fired = expected(names[2], component='node-image-inventory')
+    tests[-1]['alert_rule_test'].append({'eval_time': '2m', 'alertname': name, 'exp_alerts': [fired]})
     return {'rule_files': [rule_file], 'evaluation_interval': '15s', 'tests': tests}

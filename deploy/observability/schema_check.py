@@ -20,6 +20,11 @@ assert hashlib.sha256(cnp.read_bytes()).hexdigest()==lock['cnp_schema']['sha256'
 ccnp=cache/'cilium-policy-crd.yaml'
 cluster_lock=json.loads((ROOT.parent/'cluster/versions.lock.json').read_text())
 assert hashlib.sha256(ccnp.read_bytes()).hexdigest()==cluster_lock['artifacts']['cilium-policy-crd']['sha256']
-s,tf,u=fixture(); objects=[yaml.safe_load(cnp.read_text()),yaml.safe_load(ccnp.read_text())]+resources(s,validate(s,tf,u),u)
-validate_schema(objects,cache)
-print(f'PASS: {len(objects)} generated objects against fixed official Kubernetes/Cilium schemas; no cluster installation performed.')
+total=0
+for image_opt_in in (False, True):
+    s,tf,u=fixture()
+    if image_opt_in:
+        for node in s['nodes']:node['image_profile_sha256']='a'*64
+    objects=[yaml.safe_load(cnp.read_text()),yaml.safe_load(ccnp.read_text())]+resources(s,validate(s,tf,u),u)
+    validate_schema(objects,cache); total+=len(objects)
+print(f'PASS: {total} generated objects in default/explicit-image-opt-in modes against fixed official Kubernetes/Cilium schemas; no cluster installation performed.')

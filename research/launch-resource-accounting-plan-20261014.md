@@ -1,6 +1,6 @@
 # 逐次启动资源账本：下一完整交付方案
 
-状态：**第4步普通CPU可信观察已完成本地验收；37组201项按最终制品分两批通过，待同步及新提交CI。** 当前对外支持可信 `KUBERNETES_API_READBACK` 加非空观察，缺证据保持 `NOT_CAPTURED` 加null。普通原生461项、SDK77项、资源账本Chrome8项、新DB8项＋HTTP组合1项、实际维护及生产镜像各自通过；分批结果不称单轮全跑，也不等于生产上线认证。前轮0045账本单轮27组164项、第3步35组192项分批记录均保留其原范围；恢复草稿仍未计验收。当前实现与最终本地验收范围见[可信观察交付](trusted-launch-resource-observation-20261015.md)，原回读及账本记录分别见[第3步](runtime-class-resource-readback-20261015.md)与[第2/5步](launch-resource-accounting-delivery-20261015.md)。利用率、自动调档、预热和GPU仍未完成。
+状态：**第4步普通CPU可信观察已完成本地验收；37组201项按最终制品分两批通过，已公开；基线18ad317的CI 5 job/62 step已通过。** 当前对外支持可信 `KUBERNETES_API_READBACK` 加非空观察，缺证据保持 `NOT_CAPTURED` 加null。普通原生461项、SDK77项、资源账本Chrome8项、新DB8项＋HTTP组合1项、实际维护及生产镜像各自通过；分批结果不称单轮全跑，也不等于生产上线认证。前轮0045账本单轮27组164项、第3步35组192项分批记录均保留其原范围；恢复草稿仍未计验收。当前实现与最终本地验收范围见[可信观察交付](trusted-launch-resource-observation-20261015.md)，原回读及账本记录分别见[第3步](runtime-class-resource-readback-20261015.md)与[第2/5步](launch-resource-accounting-delivery-20261015.md)。利用率、自动调档、预热和GPU仍未完成。
 
 ## 数据与身份合同
 

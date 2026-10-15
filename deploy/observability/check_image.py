@@ -39,9 +39,11 @@ def main():
             (path/target).write_bytes((path/name).read_bytes());(path/target).chmod(0o444)
         s,tf,u=fixture()
         for r in ('a','b'):(path/f'{r}.yaml').write_text(yaml.safe_dump(prometheus(s,r,u)))
+        for node in s['nodes']:node['image_profile_sha256']='a'*64
+        for r in ('a','b'):(path/f'image-{r}.yaml').write_text(yaml.safe_dump(prometheus(s,r,u)))
         base=['docker','run','--rm','--pull=never','--network=none','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges']
         binds=['--mount',f'type=bind,src={path},dst=/test,readonly','--mount',f'type=bind,src={path}/writer,dst=/etc/writer,readonly','--mount',f'type=bind,src={path}/scraper,dst=/etc/scraper,readonly']
-        run(base+binds+['--entrypoint=/bin/promtool',LOCK['prometheus_image'],'check','config','--agent','/test/a.yaml','/test/b.yaml'])
+        run(base+binds+['--entrypoint=/bin/promtool',LOCK['prometheus_image'],'check','config','--agent','/test/a.yaml','/test/b.yaml','/test/image-a.yaml','/test/image-b.yaml'])
         # First start uses the unmodified production-shaped TLS config and an
         # on-disk bind WAL. No mock collector/remote write can be reached.
         def start(config, wal, extra=()):
@@ -71,6 +73,7 @@ def main():
                 subprocess.run(['docker','stop','--time=5',name],stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=15)
                 subprocess.run(['docker','rm','-f',name],stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=10)
         start('a.yaml','wal')
+        start('image-a.yaml','wal')
         require(any((path/'wal'/'wal').glob('[0-9]*')),'WAL_NOT_PERSISTED')
         # A separate local-only protocol fixture scrapes this agent's own HTTP
         # counters. It proves sample WAL survives restart, not real node TLS.

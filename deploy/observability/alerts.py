@@ -117,4 +117,71 @@ def rules(settings):
             '2m', 'warning', '采集副本健康样本存在，但固定自身指标缺失或陈旧；核验白名单与固定镜像。', replica)
     add('SandboxMetricsDeliveryRetentionRisk', '(' + lag('a', 14400) + ') and (' + lag('b', 14400) + ')',
         '5m', 'critical', '两副本都有真实积压且已送达落后四小时；立即排查六小时强制 WAL 截断风险。')
+
+    def image_selector(metric, node, replica=None, report=False):
+        identity = {'deployment': deployment, 'cluster_epoch': epoch, 'job': 'node-images-' + node['node_uid']}
+        if report:
+            identity.update(node_uid=node['node_uid'], host_boot_id=node['host_boot_id'],
+                            profile_sha256=node['image_profile_sha256'], source='RUNTIME_REPORTED', completeness='UNKNOWN')
+        else:
+            identity.update(scrape_node_uid=node['node_uid'], scrape_host_boot_id=node['host_boot_id'],
+                            scrape_profile_sha256=node['image_profile_sha256'])
+        text = ','.join(key + '=' + json.dumps(value) for key, value in identity.items())
+        text += ',collector_replica' + ('=' + json.dumps(replica) if replica else '=~"a|b"')
+        return metric + '{' + text + '}'
+
+    def image_fresh(metric, node, replica=None, report=False):
+        value = image_selector(metric, node, replica, report)
+        return '(' + value + ' and (timestamp(' + value + ') > time() - 60))'
+
+    def image_healthy(node, replica=None):
+        return 'sum(' + image_fresh('up', node, replica) + ' == 1) > 0'
+
+    def image_missing(node, replica=None):
+        return 'sum(absent(' + image_fresh('up', node, replica) + ' == 1)) > 0'
+
+    def report_healthy(node, component, replica):
+        prefix = 'sandbox_node_image_'
+        success = image_fresh(prefix + component + '_observation_success', node, replica, True)
+        observed = image_fresh(prefix + 'observed_at_seconds', node, replica, True)
+        result = '(sum((' + success + ' == 1) and (' + observed + ' > time() - 60) and (' + observed + ' <= time() + 5)) > 0)'
+        if component == 'filesystem':
+            reported = image_fresh(prefix + 'filesystem_reported_at_seconds', node, replica, True)
+            valid = '(' + reported + ' > time() - 60) and (' + reported + ' <= time() + 5)'
+            any_entry = ' or '.join(image_selector(prefix + 'filesystem_' + field, node, replica, True)
+                                    for field in ('reported_at_seconds', 'used_bytes', 'inodes_used'))
+            # Empty successful FS reports are valid. Every present FS identity
+            # still needs its own fresh original runtime timestamp.
+            result += ' and (sum(absent((' + any_entry + ') unless on(filesystem_id) (' + valid + '))) > 0)'
+        return '(' + result + ') and (' + image_healthy(node, replica) + ')'
+
+    def image_add(name, expr, node, component, severity, summary, replica=None):
+        identity = dict(labels, component=component, severity=severity,
+                        scrape_node_uid=node['node_uid'], scrape_host_boot_id=node['host_boot_id'],
+                        scrape_profile_sha256=node['image_profile_sha256'])
+        if replica:
+            identity['collector_replica'] = replica
+        output.append({'alert': name, 'expr': '(' + expr + ') and (' + healthy() + ')', 'for': '2m',
+                       'labels': identity, 'annotations': {'summary': summary,
+                       'runbook': 'deploy/observability/README.md#监控采集链告警'}})
+
+    for node in sorted(settings['nodes'], key=lambda item: item['node_uid']):
+        if 'image_profile_sha256' not in node:
+            continue
+        image_add('SandboxNodeImageCollectorsUnavailable', image_missing(node), node, 'node-image-scrape', 'critical',
+                  '该固定节点镜像端点两个采集副本均无新鲜成功抓取。')
+        for replica, other in [('a', 'b'), ('b', 'a')]:
+            image_add('SandboxNodeImageCollectorReplicaUnavailable',
+                      '(' + image_missing(node, replica) + ') and (' + image_healthy(node, other) + ')',
+                      node, 'node-image-scrape', 'warning', '该固定节点镜像端点一个采集副本抓取失败或陈旧，另一副本仍健康。', replica)
+        for component in ('inventory', 'filesystem'):
+            reports = {replica: report_healthy(node, component, replica) for replica in ('a', 'b')}
+            unavailable = {replica: 'sum(absent(' + reports[replica] + ')) > 0' for replica in ('a', 'b')}
+            image_add('SandboxNodeImageReportUnavailable',
+                      '(' + unavailable['a'] + ') and (' + unavailable['b'] + ') and (' + image_healthy(node) + ')',
+                      node, 'node-image-' + component, 'critical', '该固定节点镜像组件没有新鲜成功报告；UNKNOWN 不能当作零值。')
+            for replica, other in [('a', 'b'), ('b', 'a')]:
+                image_add('SandboxNodeImageReportReplicaUnavailable',
+                          '(' + unavailable[replica] + ') and (' + reports[other] + ') and (' + image_healthy(node, replica) + ')',
+                          node, 'node-image-' + component, 'warning', '该固定节点镜像组件一个副本没有新鲜成功报告，另一副本仍健康。', replica)
     return {'groups': [{'name': 'sandbox-metrics-collection-' + epoch, 'interval': '15s', 'rules': output}]}

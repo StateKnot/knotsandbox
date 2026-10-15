@@ -44,6 +44,38 @@ def fixture():
 
 
 class ObservabilityTest(unittest.TestCase):
+    def test_node_image_scrape_requires_explicit_profile_and_preserves_vm_targets(self):
+        s, tf, u = fixture()
+        original = prometheus(s, 'a', u)
+        self.assertFalse(any(j['metrics_path'] == '/metrics/node-images' for j in original['scrape_configs']))
+        s['nodes'][0]['image_profile_sha256'] = 'a' * 64
+        validate(s, tf, u)
+        for replica in ('a', 'b'):
+            p = prometheus(s, replica, u)
+            images = [j for j in p['scrape_configs'] if j['job_name'].startswith('node-images-')]
+            self.assertEqual(len(images), 1)
+            job = images[0]; node = s['nodes'][0]
+            self.assertEqual(job['job_name'], 'node-images-' + node['node_uid'])
+            self.assertEqual((job['metrics_path'], job['scrape_interval'], job['scrape_timeout']), ('/metrics/node-images', '15s', '5s'))
+            self.assertEqual((job['body_size_limit'], job['sample_limit'], job['label_limit'], job['target_limit']), ('64KiB', 53, 12, 1))
+            self.assertEqual((job['label_name_length_limit'], job['label_value_length_limit']), (64, 128))
+            self.assertIs(job['extra_scrape_metrics'], False)
+            self.assertEqual(job['static_configs'], [{'targets': [node['private_ip'] + ':9445'], 'labels': {
+                'scrape_node_uid': node['node_uid'], 'scrape_host_boot_id': node['host_boot_id'], 'scrape_profile_sha256': 'a' * 64}}])
+            vm_jobs = [j for j in p['scrape_configs'] if j['job_name'].startswith('nodeguard-')]
+            previous_vm_jobs = [j for j in prometheus(fixture()[0], replica, u)['scrape_configs'] if j['job_name'].startswith('nodeguard-')]
+            self.assertEqual(vm_jobs, previous_vm_jobs)
+            for field in ['honor_labels', 'honor_timestamps', 'follow_redirects', 'enable_http2']:
+                self.assertFalse(job[field])
+            self.assertEqual(job['tls_config'], vm_jobs[0]['tls_config'])
+        for profile in [None, '', 'a' * 63, 'a' * 65, 'A' * 64, 'g' * 64, 1, True]:
+            with self.subTest(profile=profile), self.assertRaisesRegex(ValueError, '^IMAGE_PROFILE_SHA256$'):
+                bad = copy.deepcopy(s); bad['nodes'][0]['image_profile_sha256'] = profile
+                validate(bad, tf, u)
+        bad = copy.deepcopy(s); bad['nodes'][0]['unreviewed'] = True
+        with self.assertRaisesRegex(ValueError, '^NODE_FIELDS$'):
+            validate(bad, tf, u)
+
     def test_two_agents_use_separate_retained_persistent_encrypted_wals(self):
         s, tf, u = fixture(); outputs = validate(s, tf, u); values = resources(s, outputs, u)
         sets = [v for v in values if v['kind'] == 'StatefulSet']
@@ -61,6 +93,53 @@ class ObservabilityTest(unittest.TestCase):
         sc = next(v for v in values if v['kind'] == 'StorageClass')
         self.assertEqual((sc['reclaimPolicy'], sc['volumeBindingMode'], sc['parameters']['encrypted']), ('Retain','WaitForFirstConsumer','true'))
         self.assertFalse(any(v['kind'] in ('Role', 'ClusterRole', 'RoleBinding', 'ClusterRoleBinding') for v in values))
+
+    def test_node_image_wire_filters_pin_identity_and_separate_scalar_filesystem_and_vm_labels(self):
+        scalars = ('sandbox_node_image_inventory_observation_success', 'sandbox_node_image_filesystem_observation_success',
+                   'sandbox_node_image_observed_at_seconds', 'sandbox_node_image_inventory_count', 'sandbox_node_image_compressed_logical_bytes')
+        filesystems = ('sandbox_node_image_filesystem_reported_at_seconds', 'sandbox_node_image_filesystem_used_bytes', 'sandbox_node_image_filesystem_inodes_used')
+        expected_labels = {'__name__', 'deployment', 'cluster_epoch', 'node_uid', 'host_boot_id', 'profile_sha256',
+                           'source', 'completeness', 'collector_replica', 'job', 'instance'}
+        s, tf, u = fixture(); node = s['nodes'][0]; node['image_profile_sha256'] = 'a' * 64
+        for replica in ('a', 'b'):
+            p = prometheus(s, replica, u)
+            job = next(j for j in p['scrape_configs'] if j['job_name'].startswith('node-images-'))
+            writer = p['remote_write'][0]['write_relabel_configs']
+            target = {'job': job['job_name'], 'instance': node['private_ip'] + ':9445', **job['static_configs'][0]['labels']}
+            source = {**target, 'deployment': s['deployment'], 'cluster_epoch': s['cluster_epoch'], 'node_uid': node['node_uid'],
+                      'host_boot_id': node['host_boot_id'], 'profile_sha256': node['image_profile_sha256'],
+                      'source': 'RUNTIME_REPORTED', 'completeness': 'UNKNOWN', 'collector_replica': 'rogue',
+                      'tenant_id': str(uuid.UUID(int=101)), 'project_id': str(uuid.UUID(int=102)), 'instance_id': str(uuid.UUID(int=103)),
+                      'launch_id': str(uuid.UUID(int=104)), 'generation': '1', 'secret_label': 'PRIVATE',
+                      'exported_profile_sha256': 'b' * 64, 'exported_collector_replica': 'rogue'}
+            for name in scalars + filesystems:
+                with self.subTest(replica=replica, metric=name):
+                    raw = {**source, '__name__': name, **({'filesystem_id': 'c' * 64} if name in filesystems else {})}
+                    accepted = relabel(raw, job['metric_relabel_configs'])
+                    self.assertEqual(set(accepted), expected_labels | ({'filesystem_id'} if name in filesystems else set()))
+                    self.assertEqual(accepted['collector_replica'], replica)
+                    self.assertEqual(relabel(accepted, writer), accepted)
+                    for key, value in [('deployment', 'foreign'), ('cluster_epoch', str(uuid.UUID(int=999))),
+                                       ('node_uid', str(uuid.UUID(int=999))), ('host_boot_id', str(uuid.UUID(int=999))),
+                                       ('profile_sha256', 'b' * 64), ('source', 'GUEST_REPORTED'), ('completeness', 'COMPLETE')]:
+                        self.assertIsNone(relabel({**raw, key: value}, job['metric_relabel_configs']))
+                    if name in scalars:
+                        self.assertIsNone(relabel({**raw, 'filesystem_id': 'c' * 64}, job['metric_relabel_configs']))
+                    else:
+                        for filesystem in ['', 'c' * 63, 'C' * 64, '/var/lib/containerd', 'c' * 65]:
+                            self.assertIsNone(relabel({**raw, 'filesystem_id': filesystem}, job['metric_relabel_configs']))
+                        missing = dict(raw); missing.pop('filesystem_id')
+                        self.assertIsNone(relabel(missing, job['metric_relabel_configs']))
+            for name in ['sandbox_node_image_inventory_count_extra', 'prefix_sandbox_node_image_inventory_count',
+                         'sandbox_node_image_capacity_bytes', 'sandbox_vm_memory_bytes', 'up', SELF_METRICS[0]]:
+                self.assertIsNone(relabel({**source, '__name__': name}, job['metric_relabel_configs']))
+            native = {'__name__': 'up', **target, **p['global']['external_labels']}
+            self.assertEqual(relabel(native, writer), native)
+            vm = next(j for j in p['scrape_configs'] if j['job_name'].startswith('nodeguard-'))
+            for name in scalars + filesystems:
+                self.assertIsNone(relabel({**source, '__name__': name}, vm['metric_relabel_configs']))
+            accepted_vm = relabel({**source, '__name__': 'sandbox_vm_memory_bytes', 'filesystem_id': 'c' * 64}, vm['metric_relabel_configs'])
+            self.assertEqual(set(accepted_vm), set(LABELS))
 
     def test_exact_san_raw_metric_scope_and_separate_ha_series(self):
         s, tf, u = fixture()
@@ -212,6 +291,50 @@ class ObservabilityTest(unittest.TestCase):
         self.assertLessEqual(16 * 256 * 14 * 1440 * 1024 * 2, int(225 * 1024 ** 3 * 0.7))
         with self.assertRaisesRegex(ValueError, '^WAL_CAPACITY$'):
             validate(s, tf, u)
+
+    def test_opted_in_node_images_add_an_independent_budget_without_borrowing_vm_capacity(self):
+        s, tf, u = fixture()
+        self.assertEqual(capacity(s)['max_wal_samples_per_scrape_per_replica'], 7247)
+        s['nodes'][0]['image_profile_sha256'] = 'a' * 64
+        c = capacity(s)
+        self.assertEqual(c['node_image_targets_per_replica'], 1)
+        self.assertEqual(c['max_node_image_filesystems_per_target'], 16)
+        self.assertEqual(c['max_node_image_samples_per_target_scrape'], 53)
+        self.assertEqual(c['max_vm_samples_per_scrape_per_replica'], 7168)
+        self.assertEqual(c['max_node_image_samples_per_scrape_per_replica'], 53)
+        self.assertEqual(c['max_raw_samples_per_scrape_per_replica'], 7221)
+        self.assertEqual(c['targets_per_replica'], 4)
+        self.assertEqual(c['max_scrape_report_samples_per_scrape_per_replica'], 20)
+        self.assertEqual(c['max_wal_samples_per_scrape_per_replica'], 7305)
+        self.assertEqual(c['six_hour_budget_bytes_with_checkpoint_reserve'], 21543321600)
+        self.assertEqual(c['disk_usage_budget_fraction'], 0.7)
+        self.assertEqual((c['queue_max_shards'], c['queue_capacity_per_shard'], c['queue_max_samples_per_send']), (4, 10000, 2000))
+        validate(s, tf, u)
+        # A three-node 43 GiB WAL fits the existing jobs; enabling image
+        # observations on those nodes must still respect the original margin.
+        s['nodes'][0].pop('image_profile_sha256')
+        s['nodes'].append({'name': 'kata-2', 'node_uid': str(uuid.UUID(int=3)),
+                           'host_boot_id': str(uuid.UUID(int=13)), 'private_ip': '10.80.40.12'})
+        tf['node_inventory']['value']['kata-2'] = {'id': 'i-test-2', 'private_ip': '10.80.40.12', 'role': 'kata', 'zone': 'cn-hangzhou-h'}
+        s['wal_gib'] = 43
+        validate(s, tf, u)
+        for node in s['nodes']:
+            node['image_profile_sha256'] = 'a' * 64
+        with self.assertRaisesRegex(ValueError, '^WAL_CAPACITY$'):
+            validate(s, tf, u)
+
+    def test_image_budget_reports_scrape_bytes_and_remote_write_separately_from_wal(self):
+        settings, _, _=fixture()
+        settings['nodes'][0]['image_profile_sha256']='a'*64
+        report=capacity(settings)
+        # Two VM targets, one opted-in image target, one self target. Remote
+        # writing keeps only up from the five native reports per target.
+        self.assertEqual(report['max_scrape_body_bytes_per_round_per_replica'],6356992)
+        self.assertEqual(report['max_remote_write_samples_per_round_per_replica'],7289)
+        self.assertEqual(report['max_wal_samples_per_scrape_per_replica'],7305)
+        self.assertEqual(report['planning_remote_write_samples_per_second_per_replica'],7289/15)
+        self.assertEqual(report['planning_remote_write_bytes_per_second_without_retries'],7289*1024/15)
+        self.assertFalse(report['certified_capacity'])
 
     def test_url_credentials_redirect_hosts_and_http_are_not_accepted(self):
         for u in ['http://ts-x.hitsdb.rds.aliyuncs.com:3242/api/prom_write', 'https://ts-x.hitsdb.rds.aliyuncs.com:3242/api/prom_write?token=secret', 'https://user:password@ts-x.hitsdb.rds.aliyuncs.com:3242/api/prom_write', 'https://cn-hangzhou.arms.aliyuncs.com/prometheus/secret/region/api/v3/write', 'https://ts-x.hitsdb.rds.aliyuncs.com.attacker.invalid/api/prom_write', 'https://127.0.0.1/api/prom_write', 'https://ts-x.hitsdb.rds.aliyuncs.com/api%2Fprom_write', 'https://ts-x.hitsdb.rds.aliyuncs.com:8443/api/prom_write', 'https://ts-x.hitsdb.rds.aliyuncs.com/api/prom_write#fragment']:

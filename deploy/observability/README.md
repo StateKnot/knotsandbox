@@ -122,3 +122,15 @@ OBSERVABILITY_PYTHON=.local/cluster-venv/bin/python bash deploy/observability/ch
 2026-10-12新增六项raw序列的实际双节点/双副本写入、真实零值、身份与私有标签过滤，以及失败/恢复验证；原35秒截止不变，历史结果见[资源观测交付](../../research/resource-observability-delivery-20261012.md)。本轮容量gauge扩展后的渲染、采样预算、写入与缺测合同须另行保留绑定当前源码的结果，不能用该历史记录代替本轮验收。真实Kata/QEMU、云端收数、跨区WAL/CSI和通知链仍需现场验收；GPU未纳入本采集部署。
 
 另以仅指向本机的 mTLS 夹具连接两个真实 agent 和一个真实 Prometheus 接收端，验证 BasicAuth、503重试、HA副本分离、错身份/额外标签过滤、忽略源端伪造时间戳、原生节点 `up` 的503失败/恢复、自身九项指标和 guest 同名伪造拒绝。故障和恢复共享原35秒截止；失败不产生零用量。该管线需要本机 TCP 监听和 Docker bridge，使用生成的测试证书/合成凭据，不连接外部网络目标。规则回放验证引擎语义，管线验证真实数据合同，两者未组成云端告警通知链。2026-10-09最终本地完整检查通过，输入与日志收据见 `.local/observability-alerts-20261009/final-2/record.json`。该本地协议证据不等于阿里云远程写入、Kata裸金属或 CSI 卷认证。官方配置/队列/agent保留语义见 [Prometheus配置](https://prometheus.io/docs/prometheus/3.13/configuration/configuration/)、[remote write调优](https://prometheus.io/docs/practices/remote_write/)、[Cilium节点策略](https://docs.cilium.io/en/stable/security/policy/layer3/)。
+
+## 节点镜像只读指标（P0b，显式启用）
+
+在已重新认证并开启image_observation的node上，可给该node的settings额外填写 `image_profile_sha256`（实际profile SHA-256的小写64hex）。缺字段保留原行为；不能用占位摘要、当前模板或今天的配置补造认证事实。宿主安装器不自动开启该功能，P0c安装级授权/API和目标宿主认证仍未完成，生产默认关闭。原独立scraper CA与9445网络范围保持，不向普通租户开放全节点指标。
+
+每个opt-in node增加独立 `node-images-<uid>` job，抓取 `/metrics/node-images`：53样本、64KiB、12标签、15秒间隔，精确匹配profile/node/boot/epoch、RUNTIME_REPORTED和UNKNOWN，scalar不能借FS标签，FS必须有受控不透明ID。标签过滤在入WAL前完成；原VM白名单和3584/2MB限额、自采、原队列均保持。
+
+设N为VM节点数、E为opt-in节点数、T=N+E+1：每副本raw上限 `3584N+53E`，加self64及每目标5条原生报告后，WAL每轮为 `3584N+53E+64+5T`；远写只保留原生up，样本规划为 `3584N+53E+64+T`。原六小时、每样本1KiB含churn、2倍checkpoint余量和70%磁盘门不放宽。正文保守规划每轮 `2MiB*(N+1)+64KiB*E`；远写每秒样本/字节模型按15秒一轮的平均准入量规划，不含重试、传输开销及故障后追赶突发，不是硬网络限额或实测压缩率。启用前重新核对capacity.json，预算不足应拒绝或经正常容量流程处理，不能自动扩容或侵占VM额度。
+
+原报告时间以gauge值保留，实际Prometheus样本时间仍由Agent生成。固定查询必须先按success、up、原收集/FS时间及其样本年龄筛选各副本，再去除collector_replica/job/instance取有效值；不要相加。逻辑压缩量和snapshot-store报告不等于物理缓存容量/可回收量；近似f64不能替代JSON精确整数，完整性始终UNKNOWN。接口与字段见[节点诊断合同](../../docs/node-image-observation.md)。
+
+节点镜像job使用独立失联告警；HTTP200但组件长期UNKNOWN或原观察时间超龄也会单独告警。规则仅为显式启用节点生成，绑定profile/boot/epoch和独立副本，整体collector失联时保留原抑制。规则仍需加载到真实后端并完成通知验收；Agent自身不执行规则。新的实际管线、原生containerd、规则回放分别有证据，不宣称三者已组成云端端到端链路。

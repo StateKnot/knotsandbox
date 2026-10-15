@@ -1,5 +1,9 @@
 # 开发进度与验收证据
 
+最新开发检查点（2026-10-16，P0b节点指标管线）：独立`/metrics/node-images`、每node显式profile绑定与双Agent白名单/预算、现场闭集身份核验、独立失联/UNKNOWN/陈旧告警已完成本地验收。默认不启用；原VM3584/2MB、抓取槽、队列、WAL70%、权限/期限/线程栈保持。原观察时间与FS时间先过滤，HA取有效副本不相加；来源RUNTIME_REPORTED、完整性UNKNOWN，近似f64不用于预算。
+
+最终Linux74项与实际nativecontainerd1项通过；Mac最终62制品SHA与已验472/0/279ignored完全相同复用。完整观测入口49.658秒PASS：Python27、固定schema28对象、真实Prom配置/WAL、原38+新38规则、双Agent协议/HA/失败恢复通过，16代码输入前后不变；两平台strict Clippy/fmt通过。独立审查发现告警缺口与现场label后缀假阳性均修复并收口；原失败保留。基线18ad317的CI 5 job/62 step已实际全绿；本轮新提交完整树和精确CI另记，不沿用基线成功。P0c安装级授权/API/admin与同一原生整链仍未完成，下一步先推进P0c；pre-pull、GPU及云/Kata/CSI/性能成本认证仍独立。见[本批交付](../research/node-image-pipeline-delivery-20261016.md)。
+
 最新开发检查点（2026-10-15，镜像诊断P0a）：固定containerd只读ImageService adapter、profile/boot/peer/同FD及mount身份验证、独立有界owner与scraper CA的`GET /v1/node-image-status`已实现并完成本地验收。默认关闭，不新增节点Prometheus样本，不借实例权限开放全节点数据；P0b管线与P0c安装级OIDC/授权/API仍未完成。库存逻辑大小与snapshot-store报告来源为RUNTIME_REPORTED、完整性UNKNOWN，未输出物理缓存容量/可释放量/命中率。
 
 原生62程序472通过／0失败／279环境ignored；最终仅Linux cfg lint变化后全部62二进制SHA相同复用。Linux70项、真实containerd→独立mTLS无VM专项1项、Python11项，以及两平台strict all-target Clippy/fmt通过，精确自有清理确认。两轴审查的启动依赖、原FS时间超龄、预检回执与晚中断假PASS问题均修复；失败现场保留。先核对基线ff16330的CI 5 job／61 step首次全绿，本轮新提交远端完整树及精确CI另行核对，不能沿用基线成功。下一项为P0b；pre-pull、冷暖收益、GPU和云/Kata/CSI仍单独开发认证。见[本批交付](../research/node-image-observation-delivery-20261015.md)与[接口合同](node-image-observation.md)。
