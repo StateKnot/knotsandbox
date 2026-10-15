@@ -1,0 +1,2701 @@
+{
+  "launch_permits": {
+    "columns": [
+      {
+        "default": "gen_random_uuid()",
+        "generated": "",
+        "identity": "",
+        "name": "id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "tenant_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "project_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "instance_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "workspace_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "operation_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "runtime_node_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "cluster_epoch",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "generation",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "launch_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "pod_uid",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "namespace",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "pod_name",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "pvc_uid",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "pv_uid",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "pv_name",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "csi_volume_handle",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": "clock_timestamp()",
+        "generated": "",
+        "identity": "",
+        "name": "created_at",
+        "not_null": true,
+        "type": "timestamp with time zone"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "expires_at",
+        "not_null": true,
+        "type": "timestamp with time zone"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "tenant_id",
+          "project_id",
+          "instance_id",
+          "workspace_id",
+          "generation",
+          "launch_id",
+          "cluster_epoch",
+          "pod_uid",
+          "runtime_node_id",
+          "id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "u",
+        "local": true,
+        "match": " ",
+        "name": "launch_permit_resource_identity",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "workspace_id",
+          "id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "u",
+        "local": true,
+        "match": " ",
+        "name": "launch_permit_workspace_identity",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "expires_at",
+          "created_at"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(expires_at > created_at)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_permits_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "pod_name",
+          "workspace_id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(pod_name = ('sbx-ws-'::text || (workspace_id)::text))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_permits_check1",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "generation"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(generation > 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_permits_generation_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "p",
+        "local": true,
+        "match": " ",
+        "name": "launch_permits_pkey",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "runtime_node_id"
+        ],
+        "deferrable": false,
+        "delete_action": "a",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "f",
+        "local": true,
+        "match": "s",
+        "name": "launch_permits_runtime_node_id_fkey",
+        "no_inherit": true,
+        "referenced_columns": [
+          "id"
+        ],
+        "referenced_table": "public.runtime_nodes",
+        "update_action": "a",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "u",
+        "local": true,
+        "match": " ",
+        "name": "launch_permits_tenant_id_id_key",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "instance_id",
+          "generation",
+          "launch_id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "u",
+        "local": true,
+        "match": " ",
+        "name": "launch_permits_tenant_id_instance_id_generation_launch_id_key",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "project_id",
+          "id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "u",
+        "local": true,
+        "match": " ",
+        "name": "launch_permits_tenant_id_project_id_id_key",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "project_id",
+          "instance_id",
+          "operation_id"
+        ],
+        "deferrable": false,
+        "delete_action": "a",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "f",
+        "local": true,
+        "match": "s",
+        "name": "launch_permits_tenant_id_project_id_instance_id_operation__fkey",
+        "no_inherit": true,
+        "referenced_columns": [
+          "tenant_id",
+          "project_id",
+          "instance_id",
+          "id"
+        ],
+        "referenced_table": "public.operations",
+        "update_action": "a",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "project_id",
+          "workspace_id"
+        ],
+        "deferrable": false,
+        "delete_action": "a",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "f",
+        "local": true,
+        "match": "s",
+        "name": "launch_permits_tenant_id_project_id_workspace_id_fkey",
+        "no_inherit": true,
+        "referenced_columns": [
+          "tenant_id",
+          "project_id",
+          "id"
+        ],
+        "referenced_table": "public.workspaces",
+        "update_action": "a",
+        "validated": true
+      }
+    ],
+    "indexes": [
+      {
+        "access_method": "btree",
+        "attribute_count": 10,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 10,
+        "keys": [
+          {
+            "collation": null,
+            "column": "tenant_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "project_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "instance_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "workspace_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "generation",
+            "operator_class": "pg_catalog.int8_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "launch_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "cluster_epoch",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "pod_uid",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "runtime_node_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "launch_permit_resource_identity",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": false,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      },
+      {
+        "access_method": "btree",
+        "attribute_count": 3,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 3,
+        "keys": [
+          {
+            "collation": null,
+            "column": "tenant_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "workspace_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "launch_permit_workspace_identity",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": false,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      },
+      {
+        "access_method": "btree",
+        "attribute_count": 1,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 1,
+        "keys": [
+          {
+            "collation": null,
+            "column": "id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "launch_permits_pkey",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": true,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      },
+      {
+        "access_method": "btree",
+        "attribute_count": 2,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 2,
+        "keys": [
+          {
+            "collation": null,
+            "column": "tenant_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "launch_permits_tenant_id_id_key",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": false,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      },
+      {
+        "access_method": "btree",
+        "attribute_count": 4,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 4,
+        "keys": [
+          {
+            "collation": null,
+            "column": "tenant_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "instance_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "generation",
+            "operator_class": "pg_catalog.int8_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "launch_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "launch_permits_tenant_id_instance_id_generation_launch_id_key",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": false,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      },
+      {
+        "access_method": "btree",
+        "attribute_count": 3,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 3,
+        "keys": [
+          {
+            "collation": null,
+            "column": "tenant_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "project_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "launch_permits_tenant_id_project_id_id_key",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": false,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      }
+    ]
+  },
+  "launch_pod_resource_observations": {
+    "columns": [
+      {
+        "default": "gen_random_uuid()",
+        "generated": "",
+        "identity": "",
+        "name": "id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "tenant_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "project_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "instance_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "workspace_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "generation",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "launch_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "cluster_epoch",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "base_permit_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "registration_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "registration_kind",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "runtime_node_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "node_uid",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "node_boot_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "pod_uid",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "pod_resource_version",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "class_uid",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "class_resource_version",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "class_config_sha256",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "class_overhead_cpu_millis",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "class_overhead_memory_bytes",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "workload_request_cpu_millis",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "workload_request_memory_bytes",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "workload_request_ephemeral_bytes",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "workload_limit_cpu_millis",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "workload_limit_memory_bytes",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "workload_limit_ephemeral_bytes",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "pod_overhead_cpu_millis",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "pod_overhead_memory_bytes",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "effective_request_cpu_millis",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "effective_request_memory_bytes",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "effective_request_ephemeral_bytes",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "effective_limit_cpu_millis",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "effective_limit_memory_bytes",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "effective_limit_ephemeral_bytes",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": "'KUBERNETES_API_READBACK'::text",
+        "generated": "",
+        "identity": "",
+        "name": "source",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "observed_at",
+        "not_null": true,
+        "type": "timestamp with time zone"
+      },
+      {
+        "default": "clock_timestamp()",
+        "generated": "",
+        "identity": "",
+        "name": "recorded_at",
+        "not_null": true,
+        "type": "timestamp with time zone"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "effective_limit_ephemeral_bytes"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(effective_limit_ephemeral_bytes > 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observat_effective_limit_ephemeral_by_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "effective_limit_memory_bytes"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(effective_limit_memory_bytes > 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observat_effective_limit_memory_bytes_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "effective_request_cpu_millis"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(effective_request_cpu_millis > 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observat_effective_request_cpu_millis_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "effective_request_ephemeral_bytes"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(effective_request_ephemeral_bytes > 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observat_effective_request_ephemeral__check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "effective_request_memory_bytes"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(effective_request_memory_bytes > 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observat_effective_request_memory_byt_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "workload_limit_ephemeral_bytes"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(workload_limit_ephemeral_bytes > 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observat_workload_limit_ephemeral_byt_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "workload_request_ephemeral_bytes"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(((workload_request_ephemeral_bytes >= 134217728) AND (workload_request_ephemeral_bytes <= '34359738368'::bigint)) AND ((workload_request_ephemeral_bytes % (1048576)::bigint) = 0))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observat_workload_request_ephemeral__check1",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "workload_request_ephemeral_bytes"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(workload_request_ephemeral_bytes > 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observat_workload_request_ephemeral_b_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "workload_request_memory_bytes"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(workload_request_memory_bytes > 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observat_workload_request_memory_byte_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "class_overhead_memory_bytes"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(class_overhead_memory_bytes >= 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observati_class_overhead_memory_bytes_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "runtime_node_id",
+          "cluster_epoch",
+          "node_uid",
+          "node_boot_id"
+        ],
+        "deferrable": false,
+        "delete_action": "a",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "f",
+        "local": true,
+        "match": "s",
+        "name": "launch_pod_resource_observati_runtime_node_id_cluster_epoc_fkey",
+        "no_inherit": true,
+        "referenced_columns": [
+          "id",
+          "cluster_epoch",
+          "node_uid",
+          "boot_id"
+        ],
+        "referenced_table": "public.runtime_nodes",
+        "update_action": "a",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "instance_id",
+          "generation",
+          "launch_id",
+          "cluster_epoch"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "u",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observati_tenant_id_instance_id_generat_key",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "project_id",
+          "instance_id",
+          "workspace_id",
+          "generation",
+          "launch_id",
+          "cluster_epoch",
+          "pod_uid",
+          "runtime_node_id",
+          "base_permit_id"
+        ],
+        "deferrable": false,
+        "delete_action": "a",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "f",
+        "local": true,
+        "match": "s",
+        "name": "launch_pod_resource_observati_tenant_id_project_id_instanc_fkey",
+        "no_inherit": true,
+        "referenced_columns": [
+          "tenant_id",
+          "project_id",
+          "instance_id",
+          "workspace_id",
+          "generation",
+          "launch_id",
+          "cluster_epoch",
+          "pod_uid",
+          "runtime_node_id",
+          "id"
+        ],
+        "referenced_table": "public.launch_permits",
+        "update_action": "a",
+        "validated": true
+      },
+      {
+        "columns": [
+          "workload_limit_memory_bytes"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(workload_limit_memory_bytes > 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observati_workload_limit_memory_bytes_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "workload_request_cpu_millis"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(workload_request_cpu_millis > 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observati_workload_request_cpu_millis_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "effective_limit_cpu_millis"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(effective_limit_cpu_millis > 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observatio_effective_limit_cpu_millis_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "class_overhead_cpu_millis"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(class_overhead_cpu_millis >= 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observation_class_overhead_cpu_millis_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "pod_overhead_memory_bytes"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(pod_overhead_memory_bytes >= 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observation_pod_overhead_memory_bytes_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "workload_limit_cpu_millis"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(workload_limit_cpu_millis > 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observation_workload_limit_cpu_millis_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "observed_at",
+          "recorded_at"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(observed_at <= (recorded_at + '00:00:02'::interval))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observations_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "class_overhead_cpu_millis",
+          "pod_overhead_cpu_millis",
+          "class_overhead_memory_bytes",
+          "pod_overhead_memory_bytes"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "((class_overhead_cpu_millis = pod_overhead_cpu_millis) AND (class_overhead_memory_bytes = pod_overhead_memory_bytes))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observations_check1",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "workload_request_cpu_millis",
+          "workload_limit_cpu_millis",
+          "workload_request_memory_bytes",
+          "workload_limit_memory_bytes",
+          "workload_request_ephemeral_bytes",
+          "workload_limit_ephemeral_bytes"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "((workload_request_cpu_millis = workload_limit_cpu_millis) AND (workload_request_memory_bytes = workload_limit_memory_bytes) AND (workload_request_ephemeral_bytes = workload_limit_ephemeral_bytes))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observations_check2",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "workload_request_cpu_millis",
+          "workload_request_memory_bytes"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "((((workload_request_cpu_millis = 1000) AND (workload_request_memory_bytes = '2147483648'::bigint)) OR ((workload_request_cpu_millis = 2000) AND (workload_request_memory_bytes = '4294967296'::bigint))) OR ((workload_request_cpu_millis = 4000) AND (workload_request_memory_bytes = '8589934592'::bigint)))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observations_check3",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "effective_request_cpu_millis",
+          "workload_request_cpu_millis",
+          "pod_overhead_cpu_millis",
+          "effective_limit_cpu_millis",
+          "workload_limit_cpu_millis",
+          "effective_request_memory_bytes",
+          "workload_request_memory_bytes",
+          "pod_overhead_memory_bytes",
+          "effective_limit_memory_bytes",
+          "workload_limit_memory_bytes",
+          "effective_request_ephemeral_bytes",
+          "workload_request_ephemeral_bytes",
+          "effective_limit_ephemeral_bytes",
+          "workload_limit_ephemeral_bytes"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(((effective_request_cpu_millis)::numeric = ((workload_request_cpu_millis)::numeric + (pod_overhead_cpu_millis)::numeric)) AND ((effective_limit_cpu_millis)::numeric = ((workload_limit_cpu_millis)::numeric + (pod_overhead_cpu_millis)::numeric)) AND ((effective_request_memory_bytes)::numeric = ((workload_request_memory_bytes)::numeric + (pod_overhead_memory_bytes)::numeric)) AND ((effective_limit_memory_bytes)::numeric = ((workload_limit_memory_bytes)::numeric + (pod_overhead_memory_bytes)::numeric)) AND (effective_request_ephemeral_bytes = workload_request_ephemeral_bytes) AND (effective_limit_ephemeral_bytes = workload_limit_ephemeral_bytes))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observations_check4",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "class_config_sha256"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(class_config_sha256 ~ '^[0-9a-f]{64}$'::text)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observations_class_config_sha256_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "class_resource_version"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(((octet_length(class_resource_version) >= 1) AND (octet_length(class_resource_version) <= 256)) AND (class_resource_version ~ '^[!-~]+$'::text))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observations_class_resource_version_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "class_uid"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(class_uid <> '00000000-0000-0000-0000-000000000000'::uuid)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observations_class_uid_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "generation"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(generation > 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observations_generation_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "p",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observations_pkey",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "pod_overhead_cpu_millis"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(pod_overhead_cpu_millis >= 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observations_pod_overhead_cpu_millis_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "pod_resource_version"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(((octet_length(pod_resource_version) >= 1) AND (octet_length(pod_resource_version) <= 256)) AND (pod_resource_version ~ '^[!-~]+$'::text))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observations_pod_resource_version_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "registration_kind"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(registration_kind = ANY (ARRAY['BASE'::text, 'EXTENSION'::text]))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observations_registration_kind_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "source"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(source = 'KUBERNETES_API_READBACK'::text)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observations_source_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "base_permit_id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "u",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observations_tenant_id_base_permit_id_key",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "u",
+        "local": true,
+        "match": " ",
+        "name": "launch_pod_resource_observations_tenant_id_id_key",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [],
+        "deferrable": true,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": true,
+        "kind": "t",
+        "local": true,
+        "match": " ",
+        "name": "launch_resource_observation_ack",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      }
+    ],
+    "indexes": [
+      {
+        "access_method": "btree",
+        "attribute_count": 5,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 5,
+        "keys": [
+          {
+            "collation": null,
+            "column": "tenant_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "instance_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "generation",
+            "operator_class": "pg_catalog.int8_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "launch_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "cluster_epoch",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "launch_pod_resource_observati_tenant_id_instance_id_generat_key",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": false,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      },
+      {
+        "access_method": "btree",
+        "attribute_count": 1,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 1,
+        "keys": [
+          {
+            "collation": null,
+            "column": "id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "launch_pod_resource_observations_pkey",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": true,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      },
+      {
+        "access_method": "btree",
+        "attribute_count": 6,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 6,
+        "keys": [
+          {
+            "collation": null,
+            "column": "tenant_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "project_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "instance_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "launch_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "cluster_epoch",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "launch_pod_resource_observations_read",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": false,
+        "ready": true,
+        "unique": false,
+        "valid": true
+      },
+      {
+        "access_method": "btree",
+        "attribute_count": 2,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 2,
+        "keys": [
+          {
+            "collation": null,
+            "column": "tenant_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "base_permit_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "launch_pod_resource_observations_tenant_id_base_permit_id_key",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": false,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      },
+      {
+        "access_method": "btree",
+        "attribute_count": 2,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 2,
+        "keys": [
+          {
+            "collation": null,
+            "column": "tenant_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "launch_pod_resource_observations_tenant_id_id_key",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": false,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      }
+    ]
+  },
+  "launch_registration_legacy_baseline": {
+    "columns": [
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "registration_kind",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "registration_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "tenant_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "project_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "instance_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "workspace_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "generation",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "launch_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "cluster_epoch",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "pod_uid",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "runtime_node_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "node_uid",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "node_boot_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "base_permit_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "journal_revision",
+        "not_null": true,
+        "type": "bigint"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "effective_expires_at",
+        "not_null": true,
+        "type": "timestamp with time zone"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "registered_at",
+        "not_null": true,
+        "type": "timestamp with time zone"
+      },
+      {
+        "default": "clock_timestamp()",
+        "generated": "",
+        "identity": "",
+        "name": "captured_at",
+        "not_null": true,
+        "type": "timestamp with time zone"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "runtime_node_id",
+          "cluster_epoch",
+          "node_uid",
+          "node_boot_id"
+        ],
+        "deferrable": false,
+        "delete_action": "a",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "f",
+        "local": true,
+        "match": "s",
+        "name": "launch_registration_legacy_ba_runtime_node_id_cluster_epoc_fkey",
+        "no_inherit": true,
+        "referenced_columns": [
+          "id",
+          "cluster_epoch",
+          "node_uid",
+          "boot_id"
+        ],
+        "referenced_table": "public.runtime_nodes",
+        "update_action": "a",
+        "validated": true
+      },
+      {
+        "columns": [
+          "tenant_id",
+          "project_id",
+          "instance_id",
+          "workspace_id",
+          "generation",
+          "launch_id",
+          "cluster_epoch",
+          "pod_uid",
+          "runtime_node_id",
+          "base_permit_id"
+        ],
+        "deferrable": false,
+        "delete_action": "a",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "f",
+        "local": true,
+        "match": "s",
+        "name": "launch_registration_legacy_ba_tenant_id_project_id_instanc_fkey",
+        "no_inherit": true,
+        "referenced_columns": [
+          "tenant_id",
+          "project_id",
+          "instance_id",
+          "workspace_id",
+          "generation",
+          "launch_id",
+          "cluster_epoch",
+          "pod_uid",
+          "runtime_node_id",
+          "id"
+        ],
+        "referenced_table": "public.launch_permits",
+        "update_action": "a",
+        "validated": true
+      },
+      {
+        "columns": [
+          "generation"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(generation > 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_registration_legacy_baseline_generation_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "journal_revision"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(journal_revision > 0)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_registration_legacy_baseline_journal_revision_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "registration_kind",
+          "registration_id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "p",
+        "local": true,
+        "match": " ",
+        "name": "launch_registration_legacy_baseline_pkey",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "registration_kind"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(registration_kind = ANY (ARRAY['BASE'::text, 'EXTENSION'::text]))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "launch_registration_legacy_baseline_registration_kind_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      }
+    ],
+    "indexes": [
+      {
+        "access_method": "btree",
+        "attribute_count": 2,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 2,
+        "keys": [
+          {
+            "collation": "pg_catalog.default",
+            "column": "registration_kind",
+            "operator_class": "pg_catalog.text_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "registration_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "launch_registration_legacy_baseline_pkey",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": true,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      }
+    ]
+  },
+  "runtime_nodes": {
+    "columns": [
+      {
+        "default": "gen_random_uuid()",
+        "generated": "",
+        "identity": "",
+        "name": "id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "cluster_epoch",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "node_uid",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "node_name",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "cloud_provider",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "cloud_account_id",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "region",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "cloud_instance_id",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "private_ip",
+        "not_null": true,
+        "type": "inet"
+      },
+      {
+        "default": "9444",
+        "generated": "",
+        "identity": "",
+        "name": "guard_port",
+        "not_null": true,
+        "type": "integer"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "profile_sha256",
+        "not_null": true,
+        "type": "text"
+      },
+      {
+        "default": null,
+        "generated": "",
+        "identity": "",
+        "name": "boot_id",
+        "not_null": true,
+        "type": "uuid"
+      },
+      {
+        "default": "false",
+        "generated": "",
+        "identity": "",
+        "name": "enabled",
+        "not_null": true,
+        "type": "boolean"
+      },
+      {
+        "default": "clock_timestamp()",
+        "generated": "",
+        "identity": "",
+        "name": "registered_at",
+        "not_null": true,
+        "type": "timestamp with time zone"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "id",
+          "cluster_epoch",
+          "node_uid",
+          "boot_id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "u",
+        "local": true,
+        "match": " ",
+        "name": "runtime_node_resource_identity",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "cloud_account_id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "((char_length(cloud_account_id) >= 1) AND (char_length(cloud_account_id) <= 128))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "runtime_nodes_cloud_account_id_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "cloud_instance_id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "((char_length(cloud_instance_id) >= 1) AND (char_length(cloud_instance_id) <= 128))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "runtime_nodes_cloud_instance_id_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "cloud_provider"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(cloud_provider = 'alicloud'::text)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "runtime_nodes_cloud_provider_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "cluster_epoch",
+          "node_uid",
+          "boot_id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "u",
+        "local": true,
+        "match": " ",
+        "name": "runtime_nodes_cluster_epoch_node_uid_boot_id_key",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "guard_port"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "((guard_port >= 1) AND (guard_port <= 65535))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "runtime_nodes_guard_port_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "node_name"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "((char_length(node_name) >= 1) AND (char_length(node_name) <= 253))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "runtime_nodes_node_name_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "id"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": null,
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "p",
+        "local": true,
+        "match": " ",
+        "name": "runtime_nodes_pkey",
+        "no_inherit": true,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "private_ip"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(masklen(private_ip) =\nCASE family(private_ip)\n    WHEN 4 THEN 32\n    ELSE 128\nEND)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "runtime_nodes_private_ip_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "profile_sha256"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "(profile_sha256 ~ '^[0-9a-f]{64}$'::text)",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "runtime_nodes_profile_sha256_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      },
+      {
+        "columns": [
+          "region"
+        ],
+        "deferrable": false,
+        "delete_action": " ",
+        "expression": "((char_length(region) >= 1) AND (char_length(region) <= 128))",
+        "inherited_count": 0,
+        "initially_deferred": false,
+        "kind": "c",
+        "local": true,
+        "match": " ",
+        "name": "runtime_nodes_region_check",
+        "no_inherit": false,
+        "referenced_columns": [],
+        "referenced_table": null,
+        "update_action": " ",
+        "validated": true
+      }
+    ],
+    "indexes": [
+      {
+        "access_method": "btree",
+        "attribute_count": 3,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 3,
+        "keys": [
+          {
+            "collation": "pg_catalog.default",
+            "column": "cloud_account_id",
+            "operator_class": "pg_catalog.text_ops",
+            "options": 0
+          },
+          {
+            "collation": "pg_catalog.default",
+            "column": "region",
+            "operator_class": "pg_catalog.text_ops",
+            "options": 0
+          },
+          {
+            "collation": "pg_catalog.default",
+            "column": "cloud_instance_id",
+            "operator_class": "pg_catalog.text_ops",
+            "options": 0
+          }
+        ],
+        "name": "runtime_node_one_active_instance",
+        "nulls_not_distinct": false,
+        "predicate": "enabled",
+        "primary": false,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      },
+      {
+        "access_method": "btree",
+        "attribute_count": 2,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 2,
+        "keys": [
+          {
+            "collation": null,
+            "column": "cluster_epoch",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "node_uid",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "runtime_node_one_active_uid",
+        "nulls_not_distinct": false,
+        "predicate": "enabled",
+        "primary": false,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      },
+      {
+        "access_method": "btree",
+        "attribute_count": 4,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 4,
+        "keys": [
+          {
+            "collation": null,
+            "column": "id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "cluster_epoch",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "node_uid",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "boot_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "runtime_node_resource_identity",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": false,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      },
+      {
+        "access_method": "btree",
+        "attribute_count": 3,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 3,
+        "keys": [
+          {
+            "collation": null,
+            "column": "cluster_epoch",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "node_uid",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          },
+          {
+            "collation": null,
+            "column": "boot_id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "runtime_nodes_cluster_epoch_node_uid_boot_id_key",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": false,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      },
+      {
+        "access_method": "btree",
+        "attribute_count": 1,
+        "expressions": null,
+        "immediate": true,
+        "key_count": 1,
+        "keys": [
+          {
+            "collation": null,
+            "column": "id",
+            "operator_class": "pg_catalog.uuid_ops",
+            "options": 0
+          }
+        ],
+        "name": "runtime_nodes_pkey",
+        "nulls_not_distinct": false,
+        "predicate": null,
+        "primary": true,
+        "ready": true,
+        "unique": true,
+        "valid": true
+      }
+    ]
+  }
+}

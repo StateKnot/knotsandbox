@@ -39,6 +39,23 @@ pub(crate) struct ManagedRuntimeClass {
 }
 
 impl ManagedRuntimeClass {
+    pub(crate) fn uid(&self) -> Uuid {
+        self.class_uid
+    }
+
+    pub(crate) fn resource_version(&self) -> &str {
+        // Construction already requires a bounded, nonempty opaque version.
+        self.class
+            .metadata
+            .resource_version
+            .as_deref()
+            .unwrap_or("")
+    }
+
+    pub(crate) fn config_sha256(&self) -> String {
+        hex::encode(self.content_sha256)
+    }
+
     pub(crate) fn same_configuration(&self, other: &Self) -> bool {
         self.class_uid == other.class_uid
             && self.policy_uid == other.policy_uid

@@ -312,6 +312,51 @@ impl Fixture {
         sqlx::raw_sql(include_str!("../scripts/sql/browser-role.sql"))
             .execute(&owner)
             .await?;
+        // This owned child database follows the normal migration entry point:
+        // install each already-provisioned component's reviewed narrow grants
+        // before the ordinary API startup verifies the complete schema.
+        for (role, grants) in [
+            (
+                "sandbox_worker",
+                include_str!("../scripts/sql/worker-role.sql"),
+            ),
+            (
+                "sandbox_gateway",
+                include_str!("../scripts/sql/gateway-role.sql"),
+            ),
+            (
+                "sandbox_admission",
+                include_str!("../scripts/sql/admission-role.sql"),
+            ),
+            (
+                "sandbox_termination",
+                include_str!("../scripts/sql/termination-role.sql"),
+            ),
+            (
+                "sandbox_fencing",
+                include_str!("../scripts/sql/fencing-role.sql"),
+            ),
+            (
+                "sandbox_volume_deleter",
+                include_str!("../scripts/sql/volume-deleter-role.sql"),
+            ),
+            (
+                "sandbox_backup",
+                include_str!("../scripts/sql/backup-role.sql"),
+            ),
+        ] {
+            let exists: bool =
+                sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname=$1)")
+                    .bind(role)
+                    .fetch_one(&owner)
+                    .await?;
+            if exists {
+                sqlx::raw_sql(grants).execute(&owner).await?;
+            }
+        }
+        sqlx::raw_sql(include_str!("../scripts/sql/automation-role.sql"))
+            .execute(&owner)
+            .await?;
         let tenant = Uuid::new_v4();
         let principal = Uuid::new_v4();
         let project = Uuid::new_v4();

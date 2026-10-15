@@ -198,7 +198,7 @@ pub(crate) async fn verify(pool: &PgPool) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn verify_trigger(
+pub(crate) async fn verify_trigger(
     pool: &PgPool,
     table: &str,
     name: &str,
@@ -235,7 +235,7 @@ async fn verify_trigger(
 // migration on the locked PostgreSQL 17 server. It contains names and structure,
 // never OIDs, storage identities, row data or timestamps. PostgreSQL-major
 // upgrades must review expression deparsing before changing this contract.
-const SCHEMA_SHAPE_SQL: &str = r#"
+pub(crate) const SCHEMA_SHAPE_SQL: &str = r#"
 SELECT jsonb_build_object(
   'columns',COALESCE((SELECT jsonb_agg(jsonb_build_object(
       'name',a.attname,'type',format_type(a.atttypid,a.atttypmod),
@@ -273,7 +273,7 @@ FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
 WHERE n.nspname='public' AND c.relname=$1 AND c.relkind='r'
 "#;
 
-async fn verify_table_structure(
+pub(crate) async fn verify_table_structure(
     pool: &PgPool,
     table: &str,
     expected: &serde_json::Value,

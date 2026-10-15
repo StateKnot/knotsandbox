@@ -12,7 +12,7 @@ use crate::{
     },
     runtime_manifest::RuntimeManifestContext,
     termination_client::{VerifiedLaunchRegistration, VerifiedLocalTermination},
-    termination_runtime::VerifiedPodCleanup,
+    termination_runtime::{VerifiedLaunchResources, VerifiedPodCleanup},
 };
 use chrono::{DateTime, Duration, Utc};
 use serde_json::{Value, json};
@@ -412,6 +412,7 @@ impl Database {
         &self,
         permit: &LaunchPermit,
         verified: &VerifiedLaunchRegistration,
+        resources: &VerifiedLaunchResources,
     ) -> Result<(), ApiError> {
         self.record_launch_authorization(
             &LaunchAuthorization {
@@ -420,6 +421,7 @@ impl Database {
                 lease_version: 0,
             },
             verified,
+            resources,
         )
         .await
     }
@@ -427,6 +429,7 @@ impl Database {
         &self,
         authorization: &LaunchAuthorization,
         verified: &VerifiedLaunchRegistration,
+        resources: &VerifiedLaunchResources,
     ) -> Result<(), ApiError> {
         let r = verified.response();
         let request = &authorization.request;
@@ -437,23 +440,85 @@ impl Database {
             || r.state != GateState::Open
             || r.journal_revision <= 0
             || r.effective_expires_at < request.expires_at
+            || resources.node() != &request.node
+            || resources.launch() != &request.launch
         {
             return Err(blocked("LAUNCH_REGISTRATION_MISMATCH"));
         }
         let tenant = request.launch.tenant_id;
         let mut tx = self.begin(tenant).await?;
+        require_fresh_resource_readback(&mut tx, resources).await?;
+        require_live_registration_deadlines(&mut tx, request.expires_at, r.effective_expires_at)
+            .await?;
+        // The immutable base permit, rather than caller input, chooses the
+        // operation whose workspace/instance locks fence this commit.
+        let operation: Uuid = sqlx::query_scalar(
+            "SELECT operation_id FROM launch_permits WHERE tenant_id=$1 AND id=$2",
+        )
+        .bind(tenant)
+        .bind(authorization.base_permit.request.permit_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        let s = lock_current_in(&mut tx, tenant, operation).await?;
         let stored =
             load_permit(&mut tx, tenant, authorization.base_permit.request.permit_id).await?;
         if stored.request.node != request.node
             || stored.request.launch != request.launch
             || !stored.node.enabled
+            || stored.request.protocol != authorization.base_permit.request.protocol
+            || stored.request.node != authorization.base_permit.request.node
+            || stored.request.launch != authorization.base_permit.request.launch
+            || stored.request.expires_at != authorization.base_permit.request.expires_at
+            || !s.compute()
+            || !s.matches(&request.launch)
+            || s.cluster_epoch != request.node.cluster_epoch
+            || request.expires_at > s.compute_lease_expires_at
         {
             return Err(blocked("LAUNCH_REGISTRATION_MISMATCH"));
+        }
+        authorize_compute(&mut tx, &s).await?;
+        // This SHARE lock conflicts with the operator's disabling/fencing
+        // transaction. That transaction never locks tenant resources, keeping
+        // the established workspace -> instance -> operation -> node order.
+        let node_allowed: bool =
+            sqlx::query_scalar("SELECT sandbox_lock_registration_boundary($1)")
+                .bind(stored.node.id)
+                .fetch_one(&mut *tx)
+                .await?;
+        if !node_allowed {
+            return Err(blocked("NODE_OR_EPOCH_UNTRUSTED"));
         }
         // A delayed ACK may legitimately report a newer, longer permit. It is
         // acceptable only while the latest operator certification covers it.
         require_certification(&mut tx, stored.node.id, Some(request.expires_at)).await?;
         require_certification(&mut tx, stored.node.id, Some(r.effective_expires_at)).await?;
+        let values = resources.record();
+        sqlx::query_scalar::<_, Option<Uuid>>("SELECT sandbox_record_launch_resource_observation($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)")
+            .bind(stored.request.permit_id)
+            .bind(request.permit_id)
+            .bind(if request.permit_id == stored.request.permit_id { "BASE" } else { "EXTENSION" })
+            .bind(&values.pod_resource_version)
+            .bind(values.runtime_class_uid)
+            .bind(&values.runtime_class_resource_version)
+            .bind(&values.runtime_class_config_sha256)
+            .bind(values.class_overhead_cpu_millis)
+            .bind(values.class_overhead_memory_bytes)
+            .bind(values.workload_request_cpu_millis)
+            .bind(values.workload_request_memory_bytes)
+            .bind(values.workload_request_ephemeral_bytes)
+            .bind(values.workload_limit_cpu_millis)
+            .bind(values.workload_limit_memory_bytes)
+            .bind(values.workload_limit_ephemeral_bytes)
+            .bind(values.pod_overhead_cpu_millis)
+            .bind(values.pod_overhead_memory_bytes)
+            .bind(values.effective_request_cpu_millis)
+            .bind(values.effective_request_memory_bytes)
+            .bind(values.effective_request_ephemeral_bytes)
+            .bind(values.effective_limit_cpu_millis)
+            .bind(values.effective_limit_memory_bytes)
+            .bind(values.effective_limit_ephemeral_bytes)
+            .bind(resources.observed_at())
+            .fetch_one(&mut *tx).await?;
         if request.permit_id == stored.request.permit_id {
             if request.expires_at != stored.request.expires_at {
                 return Err(blocked("LAUNCH_REGISTRATION_MISMATCH"));
@@ -480,6 +545,26 @@ impl Database {
         // A delayed older ACK cannot move the durable high water mark backwards.
         sqlx::query("INSERT INTO runtime_node_journal_highwater(runtime_node_id,max_revision) VALUES($1,$2) ON CONFLICT(runtime_node_id) DO UPDATE SET max_revision=GREATEST(runtime_node_journal_highwater.max_revision,EXCLUDED.max_revision),observed_at=clock_timestamp()")
             .bind(stored.node.id).bind(r.journal_revision).execute(&mut *tx).await?;
+        // A statement may have waited on the node/high-water locks. Re-read
+        // authority and live clocks after all potentially blocking writes.
+        let current = current(&mut tx, tenant, s.operation_id).await?;
+        if !current.matches(&request.launch)
+            || current.cluster_epoch != request.node.cluster_epoch
+            || request.expires_at > current.compute_lease_expires_at
+        {
+            return Err(blocked("LAUNCH_REGISTRATION_MISMATCH"));
+        }
+        authorize_compute(&mut tx, &current).await?;
+        require_certification(
+            &mut tx,
+            stored.node.id,
+            Some(current.compute_lease_expires_at),
+        )
+        .await?;
+        require_certification(&mut tx, stored.node.id, Some(r.effective_expires_at)).await?;
+        require_fresh_resource_readback(&mut tx, resources).await?;
+        require_live_registration_deadlines(&mut tx, request.expires_at, r.effective_expires_at)
+            .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -589,6 +674,38 @@ impl Database {
         tx.commit().await?;
         Ok(id)
     }
+}
+
+// Runtime GETs happen outside the database transaction. Bound their lifetime at
+// entry and again after every blocking write; an old opaque capability is not a
+// permanent authorization to register a future ACK or refresh historical facts.
+async fn require_fresh_resource_readback(
+    tx: &mut Transaction<'_, Postgres>,
+    resources: &VerifiedLaunchResources,
+) -> Result<(), ApiError> {
+    let now: DateTime<Utc> = sqlx::query_scalar("SELECT clock_timestamp()")
+        .fetch_one(&mut **tx)
+        .await?;
+    if resources.observed_at() < now - Duration::seconds(30)
+        || resources.observed_at() > now + Duration::seconds(2)
+    {
+        return Err(blocked("LAUNCH_RESOURCE_OBSERVATION_STALE"));
+    }
+    Ok(())
+}
+
+async fn require_live_registration_deadlines(
+    tx: &mut Transaction<'_, Postgres>,
+    requested: DateTime<Utc>,
+    effective: DateTime<Utc>,
+) -> Result<(), ApiError> {
+    let now: DateTime<Utc> = sqlx::query_scalar("SELECT clock_timestamp()")
+        .fetch_one(&mut **tx)
+        .await?;
+    if requested <= now || effective <= now {
+        return Err(blocked("LAUNCH_REGISTRATION_EXPIRED"));
+    }
+    Ok(())
 }
 
 impl Database {
@@ -880,32 +997,39 @@ async fn lock_current(
     op: Uuid,
 ) -> Result<(Transaction<'_, Postgres>, Current), ApiError> {
     let mut tx = db.begin(tenant).await?;
+    let s = lock_current_in(&mut tx, tenant, op).await?;
+    Ok((tx, s))
+}
+async fn lock_current_in(
+    tx: &mut Transaction<'_, Postgres>,
+    tenant: Uuid,
+    op: Uuid,
+) -> Result<Current, ApiError> {
     let ids: Option<(Uuid, Uuid)> = sqlx::query_as(
         "SELECT instance_id,workspace_id FROM operations WHERE tenant_id=$1 AND id=$2",
     )
     .bind(tenant)
     .bind(op)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await?;
     let (instance, workspace) = ids.ok_or_else(|| blocked("TERMINATION_OPERATION_CHANGED"))?;
     sqlx::query("SELECT id FROM workspaces WHERE tenant_id=$1 AND id=$2 FOR UPDATE")
         .bind(tenant)
         .bind(workspace)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await?;
     sqlx::query("SELECT id FROM instances WHERE tenant_id=$1 AND id=$2 FOR UPDATE")
         .bind(tenant)
         .bind(instance)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await?;
-    sqlx::query("SELECT id FROM executions WHERE tenant_id=$1 AND instance_id=$2 AND slot_held ORDER BY id FOR UPDATE").bind(tenant).bind(instance).fetch_all(&mut *tx).await?;
+    sqlx::query("SELECT id FROM executions WHERE tenant_id=$1 AND instance_id=$2 AND slot_held ORDER BY id FOR UPDATE").bind(tenant).bind(instance).fetch_all(&mut **tx).await?;
     sqlx::query("SELECT id FROM operations WHERE tenant_id=$1 AND id=$2 FOR UPDATE")
         .bind(tenant)
         .bind(op)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await?;
-    let s = current(&mut tx, tenant, op).await?;
-    Ok((tx, s))
+    current(tx, tenant, op).await
 }
 async fn authorize_compute(
     tx: &mut Transaction<'_, Postgres>,

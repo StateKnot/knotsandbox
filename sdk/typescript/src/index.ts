@@ -2,11 +2,13 @@ import createClient from "openapi-fetch";
 import type { components, paths } from "./schema.js";
 import { abortable, createSandboxFetch, delay, validatedBaseUrl } from "./transport.js";
 import type { TransportOptions } from "./transport.js";
+import { validatePodResourceEvidence } from "./resource-observation.js";
 
 export * from "./transport.js";
 export * from "./events.js";
 export * from "./output-stream.js";
 export * from "./files.js";
+export { validatePodResourceEvidence } from "./resource-observation.js";
 export type { components, paths } from "./schema.js";
 
 export function createSandboxClient(options: TransportOptions) {
@@ -31,6 +33,7 @@ export type TenantAuditRecord = components["schemas"]["TenantAuditRecord"];
 export type TenantAuditRecordPage = components["schemas"]["TenantAuditRecordPage"];
 export type ResourceAccounting = components["schemas"]["ResourceAccounting"];
 export type QuotaResourceReceipt = components["schemas"]["QuotaResourceReceipt"];
+export type LaunchPodResourceObservation = components["schemas"]["LaunchPodResourceObservation"];
 export interface ResourceAccountingOptions {
   launchId?: string;
   limit?: number;
@@ -64,6 +67,11 @@ export async function getResourceAccounting(
   if (response.error || !response.data) {
     throw new ResourceAccountingQueryError(instanceId, response.response.status, response.error);
   }
+  if (response.data.instance_id.toLowerCase() !== instanceId.toLowerCase() ||
+      (options.launchId !== undefined && response.data.selected_launch_id.toLowerCase() !== options.launchId.toLowerCase())) {
+    throw new Error("RESOURCE_ACCOUNTING_RESPONSE_INVALID");
+  }
+  validatePodResourceEvidence(response.data);
   return response.data;
 }
 

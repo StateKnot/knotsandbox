@@ -66,8 +66,40 @@ struct OverheadResources {
 pub(crate) struct PodResourceObservation {
     workload: WorkloadResources,
     overhead: OverheadResources,
+    class_overhead: OverheadResources,
     effective_cpu: CpuMillis,
     effective_memory: MemoryBytes,
+}
+
+impl PodResourceObservation {
+    // Every quantity enters through bounded(), which proves <= i64::MAX.
+    pub(crate) fn workload_cpu_millis(&self) -> i64 {
+        self.workload.cpu.0 as i64
+    }
+    pub(crate) fn workload_memory_bytes(&self) -> i64 {
+        self.workload.memory.0 as i64
+    }
+    pub(crate) fn workload_ephemeral_bytes(&self) -> i64 {
+        self.workload.ephemeral.0 as i64
+    }
+    pub(crate) fn overhead_cpu_millis(&self) -> i64 {
+        self.overhead.cpu.0 as i64
+    }
+    pub(crate) fn overhead_memory_bytes(&self) -> i64 {
+        self.overhead.memory.0 as i64
+    }
+    pub(crate) fn effective_cpu_millis(&self) -> i64 {
+        self.effective_cpu.0 as i64
+    }
+    pub(crate) fn effective_memory_bytes(&self) -> i64 {
+        self.effective_memory.0 as i64
+    }
+    pub(crate) fn class_overhead_cpu_millis(&self) -> i64 {
+        self.class_overhead.cpu.0 as i64
+    }
+    pub(crate) fn class_overhead_memory_bytes(&self) -> i64 {
+        self.class_overhead.memory.0 as i64
+    }
 }
 
 fn quantity_text(value: &str) -> Result<(), ResourceError> {
@@ -322,12 +354,14 @@ pub(crate) fn observe_pod_resources(
         return Err(ResourceError::Baseline);
     }
     let overhead = parse_overhead(pod.spec.as_ref().and_then(|spec| spec.overhead.as_ref()))?;
-    if overhead != parse_overhead(class_overhead)? {
+    let class_overhead = parse_overhead(class_overhead)?;
+    if overhead != class_overhead {
         return Err(ResourceError::Baseline);
     }
     Ok(PodResourceObservation {
         workload,
         overhead,
+        class_overhead,
         effective_cpu: CpuMillis(bounded(workload.cpu.0.checked_add(overhead.cpu.0))?),
         effective_memory: MemoryBytes(bounded(workload.memory.0.checked_add(overhead.memory.0))?),
     })

@@ -9,9 +9,9 @@ use crate::{
     domain::InstanceAction,
     model::{CreateExecution, ExecutionTimeoutPolicy, StartRequest},
     runtime::KubernetesRuntime,
-    runtime_manifest::RuntimeManifestConfig,
+    runtime_manifest::{RuntimeManifestConfig, build_manifests, network_policy_name, pvc_name},
     termination_client::{TerminationObservation, test_support::FixtureGuard},
-    termination_runtime::TerminationRuntime,
+    termination_runtime::{TerminationRuntime, VerifiedLaunchResources},
 };
 use anyhow::{Context, ensure};
 use axum::{
@@ -34,6 +34,101 @@ pub(crate) struct FixtureRuntime {
     pub(crate) guard: FixtureGuard,
 }
 impl FixtureRuntime {
+    pub(crate) async fn observe_resources(&self) -> anyhow::Result<VerifiedLaunchResources> {
+        self.observe_resources_with(None, "fixture-pod-rv", "fixture-class-rv")
+            .await
+    }
+
+    pub(crate) async fn observe_resources_with(
+        &self,
+        overhead: Option<&serde_json::Value>,
+        pod_rv: &str,
+        class_rv: &str,
+    ) -> anyhow::Result<VerifiedLaunchResources> {
+        let target = self
+            .engine
+            .database
+            .load_termination_target(self.f.actor.tenant_id, self.create_op)
+            .await
+            .map_err(api_failure)?;
+        let context = &target.context;
+        let known = target
+            .known_resources
+            .context("recorded runtime resources")?;
+        let config = RuntimeManifestConfig {
+            runtime_class_name: "kata-qemu".into(),
+            dns_namespace: "kube-system".into(),
+            dns_labels: [("k8s-app".into(), "kube-dns".into())].into(),
+            ephemeral_storage_mib: 1024,
+            tmp_size_mib: 256,
+        };
+        let manifests = build_manifests(context, &config)?;
+        let mut pod = serde_json::to_value(manifests.pod)?;
+        pod["metadata"]["uid"] = json!(self.launch.pod_uid);
+        pod["metadata"]["resourceVersion"] = json!(pod_rv);
+        pod["spec"]["nodeName"] = json!(self.node.node_name);
+        if let Some(overhead) = overhead {
+            pod["spec"]["overhead"] = overhead.clone();
+        }
+        let mut pvc = serde_json::to_value(manifests.pvc)?;
+        pvc["metadata"]["uid"] = json!(self.launch.pvc_uid);
+        pvc["spec"]["volumeName"] = json!(self.launch.pv_name);
+        pvc["status"] = json!({"phase":"Bound"});
+        let mut policy = serde_json::to_value(manifests.network_policy)?;
+        policy["metadata"]["uid"] = json!(known.policy_uid);
+        let mut objects = test_support_db::runtime_class_guard::objects(overhead);
+        objects
+            .get_mut("/apis/node.k8s.io/v1/runtimeclasses/kata-qemu")
+            .context("class fixture")?["metadata"]["resourceVersion"] = json!(class_rv);
+        objects.extend(BTreeMap::from([
+            (format!("/api/v1/namespaces/{}", context.namespace), json!({
+                "apiVersion":"v1","kind":"Namespace","metadata":{"name":context.namespace,
+                "labels":{"sandbox.platform/managed":"true","sandbox.platform/tenant-id":context.tenant_id,"sandbox.platform/project-id":context.project_id,"sandbox.platform/cluster-epoch":context.cluster_epoch},
+                "annotations":{"sandbox.platform/certification-id":"test-resource-observation"}}})),
+            (format!("/apis/networking.k8s.io/v1/namespaces/{}/networkpolicies/sandbox-default-deny",context.namespace),json!({"apiVersion":"networking.k8s.io/v1","kind":"NetworkPolicy","metadata":{"name":"sandbox-default-deny","namespace":context.namespace},"spec":{"podSelector":{},"policyTypes":["Ingress","Egress"]}})),
+            (format!("/apis/cilium.io/v2/namespaces/{}/ciliumnetworkpolicies/{}",context.namespace,network_policy_name(context.workspace_id)),policy),
+            (format!("/api/v1/namespaces/{}/pods/{}",context.namespace,self.launch.pod_name),pod),
+            (format!("/api/v1/namespaces/{}/persistentvolumeclaims/{}",context.namespace,pvc_name(context.workspace_id)),pvc),
+            (format!("/api/v1/persistentvolumes/{}",self.launch.pv_name),json!({"apiVersion":"v1","kind":"PersistentVolume","metadata":{"name":self.launch.pv_name,"uid":self.launch.pv_uid},"spec":{"storageClassName":context.storage_class,"volumeMode":"Filesystem","accessModes":["ReadWriteOnce"],"persistentVolumeReclaimPolicy":"Retain","csi":{"driver":"diskplugin.csi.alibabacloud.com","volumeHandle":self.launch.csi_volume_handle},"claimRef":{"kind":"PersistentVolumeClaim","uid":self.launch.pvc_uid,"namespace":context.namespace,"name":pvc_name(context.workspace_id)}},"status":{"phase":"Bound"}})),
+            (format!("/api/v1/nodes/{}",self.node.node_name),json!({"apiVersion":"v1","kind":"Node","metadata":{"name":self.node.node_name,"uid":self.node.node_uid,"labels":{"sandbox.platform/worker-pool":"kata"},"annotations":{"sandbox.platform/runtime-profile-sha256":self.node.profile_sha256}},"spec":{"taints":[{"key":"sandbox.platform/untrusted","value":"true","effect":"NoSchedule"}]},"status":{"conditions":[{"type":"Ready","status":"True"}],"nodeInfo":{"architecture":"arm64","bootID":self.node.boot_id,"containerRuntimeVersion":"containerd://fixture","kernelVersion":"fixture","kubeProxyVersion":"fixture","kubeletVersion":"v1.35.0","machineID":"fixture","operatingSystem":"linux","osImage":"fixture","systemUUID":"fixture"}}})),
+        ]));
+        let service = tower::service_fn(move |request: Request<KubeBody>| {
+            let value = if request.method() == axum::http::Method::GET {
+                objects.get(request.uri().path()).cloned()
+            } else {
+                None
+            };
+            async move {
+                let (code, body) = match value {
+                    Some(body) => (200, body),
+                    None => (
+                        404,
+                        json!({"apiVersion":"v1","kind":"Status","status":"Failure","reason":"NotFound","message":"fixture resource missing","code":404}),
+                    ),
+                };
+                let mut response = Response::new(Body::from(body.to_string()));
+                *response.status_mut() = axum::http::StatusCode::from_u16(code)
+                    .unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+                response.headers_mut().insert(
+                    "content-type",
+                    axum::http::HeaderValue::from_static("application/json"),
+                );
+                Ok::<_, Infallible>(response)
+            }
+        });
+        let runtime = TerminationRuntime::new(
+            KubernetesRuntime::from_client(Client::new(service, "fixture")),
+            config,
+            "test-resource-observation".into(),
+        );
+        let observed = runtime.observe_launch(context, &known).await?;
+        ensure!(
+            observed.node == self.node && observed.launch == self.launch,
+            "resource fixture must pass the original exact launch/node checks"
+        );
+        Ok(observed.resources)
+    }
+
     pub(crate) async fn new(register: bool) -> anyhow::Result<Self> {
         Self::with_certification(register, Some(Utc::now() + Duration::days(2))).await
     }
@@ -60,7 +155,7 @@ impl FixtureRuntime {
         expiry: Option<DateTime<Utc>>,
         verified: Option<(&VerifiedFixtureConnections, &VerifiedRuntimeDatabase)>,
     ) -> anyhow::Result<Self> {
-        let (f, db) = if let Some((fixture, termination)) = verified {
+        let (mut f, db) = if let Some((fixture, termination)) = verified {
             (
                 Fixture::new_with_verified_connections(10, fixture).await?,
                 termination.database_for("sandbox_termination")?,
@@ -86,6 +181,16 @@ impl FixtureRuntime {
             db.verify_runtime_role().await?;
             (f, db)
         };
+        // This fixture now exercises the production Kubernetes verifier. Seed
+        // an approved policy supported by that verifier before accepting its
+        // instance; the generic database fixture's empty policy is insufficient.
+        let policy = Uuid::new_v4();
+        let mut tx = f.owner_transaction().await?;
+        sqlx::query("INSERT INTO security_policy_versions(id,tenant_id,name,version,status,rules) VALUES($1,$2,'termination-deny-all',1,'APPROVED',$3)")
+            .bind(policy).bind(f.actor.tenant_id).bind(json!({"profile":"deny-all","dns":true}))
+            .execute(&mut *tx).await?;
+        tx.commit().await?;
+        f.request.security_profile_id = policy;
         let engine = OperationEngine::new(db, format!("termination-test-{}", Uuid::new_v4()))?;
         let created = f
             .create("termination-instance")
@@ -165,7 +270,7 @@ impl FixtureRuntime {
             result
                 .engine
                 .database
-                .record_launch_registration(&permit, &ack)
+                .record_launch_registration(&permit, &ack, &result.observe_resources().await?)
                 .await
                 .map_err(api_failure)?;
         }
@@ -762,7 +867,7 @@ async fn starting_renewal_uses_immutable_extension_and_out_of_order_ack_cannot_r
     let (newest, newest_ack) = &authorizations[1];
     f.engine
         .database
-        .record_launch_authorization(newest, newest_ack)
+        .record_launch_authorization(newest, newest_ack, &f.observe_resources().await?)
         .await
         .map_err(api_failure)?;
     assert!(!candidate_includes(&f).await?);
@@ -773,12 +878,12 @@ async fn starting_renewal_uses_immutable_extension_and_out_of_order_ack_cannot_r
     let (older, older_ack) = &authorizations[0];
     f.engine
         .database
-        .record_launch_authorization(older, older_ack)
+        .record_launch_authorization(older, older_ack, &f.observe_resources().await?)
         .await
         .map_err(api_failure)?;
     f.engine
         .database
-        .record_launch_authorization(older, older_ack)
+        .record_launch_authorization(older, older_ack, &f.observe_resources().await?)
         .await
         .map_err(api_failure)?;
     assert!(!candidate_includes(&f).await?);
@@ -799,13 +904,13 @@ async fn starting_renewal_uses_immutable_extension_and_out_of_order_ack_cannot_r
     );
     f.engine
         .database
-        .record_launch_authorization(older, &replayed_ack)
+        .record_launch_authorization(older, &replayed_ack, &f.observe_resources().await?)
         .await
         .map_err(api_failure)?;
     let mut forged = older.clone();
     forged.lease_version += 1;
     assert!(
-        matches!(f.engine.database.record_launch_authorization(&forged,older_ack).await,
+        matches!(f.engine.database.record_launch_authorization(&forged,older_ack,&f.observe_resources().await?).await,
         Err(e) if e.code=="LAUNCH_REGISTRATION_MISMATCH")
     );
     let mut tx = f.f.owner_transaction().await?;
@@ -980,7 +1085,7 @@ async fn extension_ack_recovers_lost_base_ack_without_rewriting_base_evidence() 
     let ack = f.guard.client.register(&extension.request).await?;
     f.engine
         .database
-        .record_launch_authorization(&extension, &ack)
+        .record_launch_authorization(&extension, &ack, &f.observe_resources().await?)
         .await
         .map_err(api_failure)?;
     let mut tx = f.f.owner_transaction().await?;
@@ -1113,7 +1218,7 @@ async fn certification_must_cover_new_permit_and_assigned_renewal() -> anyhow::R
     let rejected = f
         .engine
         .database
-        .record_launch_authorization(&base, &oversized_ack)
+        .record_launch_authorization(&base, &oversized_ack, &f.observe_resources().await?)
         .await
         .err()
         .context("ACK must not exceed latest certification")?;
@@ -1221,7 +1326,7 @@ async fn expired_certification_blocks_ready_but_does_not_block_existing_safety_s
     let ack = f.guard.client.register(&permit.request).await?;
     f.engine
         .database
-        .record_launch_registration(&permit, &ack)
+        .record_launch_registration(&permit, &ack, &f.observe_resources().await?)
         .await
         .map_err(api_failure)?;
     f.running().await?;

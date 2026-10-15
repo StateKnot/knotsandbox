@@ -42,6 +42,7 @@ pub(crate) struct ScheduledRuntime {
     pub pvc: PersistentVolumeClaim,
     pub volume: PersistentVolume,
     pub node: Node,
+    pub resources: crate::runtime::VerifiedPodResources,
 }
 
 #[derive(Clone)]
@@ -156,10 +157,11 @@ impl GatewayRuntime {
         )?;
 
         let name = pod_name(context.workspace_id);
-        let pod = self
+        let readback = self
             .runtime
             .read_pod(&expected.pod, &known.pod_uid.to_string())
             .await?;
+        let pod = readback.pod;
         let container = container_name(context.launch_id);
         let node_name = pod
             .spec
@@ -208,6 +210,7 @@ impl GatewayRuntime {
             pvc,
             volume,
             node,
+            resources: readback.resources,
             verified: VerifiedRuntime {
                 identity: DispatchIdentity {
                     runtime_generation: context.generation,

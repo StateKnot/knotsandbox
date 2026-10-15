@@ -405,7 +405,8 @@ pub(super) async fn stage(f: &Fixture, w: &Worker, op: Uuid) -> anyhow::Result<(
 }
 
 /// This suite mocks all Kubernetes/host observations. Seed only the owner-side
-/// test fixture; production registration and mTLS proofs have separate PG tests.
+/// test fixture, including the explicitly synthetic resource prerequisite;
+/// production readback, registration and mTLS proofs have separate PG tests.
 pub(super) async fn register_mock_launch(
     f: &Fixture,
     op: Uuid,
@@ -430,6 +431,12 @@ pub(super) async fn register_mock_launch(
     .await?;
     sqlx::query("INSERT INTO launch_permits(id,tenant_id,project_id,instance_id,workspace_id,operation_id,runtime_node_id,cluster_epoch,generation,launch_id,pod_uid,namespace,pod_name,pvc_uid,pv_uid,pv_name,csi_volume_handle,expires_at) SELECT $1,i.tenant_id,i.project_id,i.id,i.workspace_id,$2,$3,i.cluster_epoch,i.runtime_generation,i.launch_id,i.pod_uid,i.namespace,i.pod_name,r.provider_id::uuid,$4,'pvc-mock','d-mock',i.compute_lease_expires_at FROM instances i JOIN external_resources r ON r.tenant_id=i.tenant_id AND r.workspace_id=i.workspace_id AND r.kind='PVC' AND r.status='ACTIVE' WHERE i.tenant_id=$5 AND i.id=$6")
         .bind(permit).bind(op).bind(node).bind(Uuid::new_v4()).bind(f.actor.tenant_id).bind(instance).execute(&mut *tx).await?;
+    // The ordinary role cannot write either record directly. This owner-only
+    // worker fixture still crosses the normal deferred observation/ACK guards
+    // in one transaction; it does not mint a runtime capability or certify an
+    // actual Kubernetes readback. No trigger, RLS or legacy-baseline bypass.
+    sqlx::query("SELECT sandbox_record_launch_resource_observation($1,$1,'BASE','worker-synthetic-pod-rv',$2,'worker-synthetic-class-rv',$3,0,0,i.cpu_millis,i.memory_mib*1048576,1073741824,i.cpu_millis,i.memory_mib*1048576,1073741824,0,0,i.cpu_millis,i.memory_mib*1048576,1073741824,i.cpu_millis,i.memory_mib*1048576,1073741824,clock_timestamp()) FROM instances i WHERE i.tenant_id=$4 AND i.id=$5")
+        .bind(permit).bind(Uuid::new_v4()).bind("a".repeat(64)).bind(f.actor.tenant_id).bind(instance).execute(&mut *tx).await?;
     sqlx::query(
         "INSERT INTO launch_permit_receipts(permit_id,tenant_id,journal_revision) VALUES($1,$2,1)",
     )

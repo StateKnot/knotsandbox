@@ -16,12 +16,12 @@ use std::{
     time::Duration,
 };
 
+use crate::db::Database;
 use anyhow::{Context, ensure};
 use rustls::{
     ClientConfig, RootCertStore, ServerConfig,
     pki_types::{CertificateDer, PrivateKeyDer, ServerName, pem::PemObject},
 };
-use sandbox_platform::db::Database;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -74,8 +74,24 @@ impl fmt::Display for AckIntentionallyLost {
 impl Error for AckIntentionallyLost {}
 
 impl CommitProxy {
+    #[allow(
+        dead_code,
+        reason = "shared helper also serves the termination lib-test seam"
+    )]
     pub async fn connect() -> anyhow::Result<(Self, Database)> {
-        let (mut url, upstream, ca_path) = checked_fixture()?;
+        Self::connect_role("TEST_WORKER_DATABASE_URL", "sandbox_worker").await
+    }
+
+    #[allow(
+        dead_code,
+        reason = "shared helper also serves the worker integration seam"
+    )]
+    pub async fn connect_termination() -> anyhow::Result<(Self, Database)> {
+        Self::connect_role("TEST_TERMINATION_DATABASE_URL", "sandbox_termination").await
+    }
+
+    async fn connect_role(environment: &str, role: &str) -> anyhow::Result<(Self, Database)> {
+        let (mut url, upstream, ca_path) = checked_fixture(environment, role)?;
         let directory = ca_path.parent().context("private fixture CA directory")?;
         let ca = bounded_file(&ca_path, 64 * 1024)?;
         let certificate = bounded_file(&directory.join("server.crt"), 128 * 1024)?;
@@ -139,7 +155,7 @@ impl CommitProxy {
             Ok(Ok(database)) => database,
             _ => {
                 proxy.stop_and_join().await?;
-                anyhow::bail!("private verify-full worker proxy connection failed");
+                anyhow::bail!("private verify-full runtime proxy connection failed");
             }
         };
         let verification_step = AtomicI32::new(0);
@@ -147,12 +163,13 @@ impl CommitProxy {
             database.verify_runtime_role().await?;
             verification_step.store(1,Ordering::SeqCst);
             let verified: bool = sqlx::query_scalar(
-                "SELECT session_user='sandbox_worker' AND current_user='sandbox_worker' AND current_database() LIKE '%_test' AND EXISTS(SELECT 1 FROM pg_stat_ssl WHERE pid=pg_backend_pid() AND ssl)",
+                "SELECT session_user::text=$1 AND current_user::text=$1 AND current_database() LIKE '%_test' AND EXISTS(SELECT 1 FROM pg_stat_ssl WHERE pid=pg_backend_pid() AND ssl)",
             )
+            .bind(role)
             .fetch_one(&database.pool)
             .await?;
             verification_step.store(2,Ordering::SeqCst);
-            ensure!(verified, "actual backend must retain worker role and TLS");
+            ensure!(verified, "actual backend must retain exact runtime role and TLS");
             Ok::<(), anyhow::Error>(())
         })
         .await;
@@ -165,7 +182,7 @@ impl CommitProxy {
             };
             proxy.finish(&database).await?;
             anyhow::bail!(
-                "private worker backend identity/TLS verification failed (step={step}, outcome={outcome})"
+                "private runtime backend identity/TLS verification failed (step={step}, outcome={outcome})"
             );
         }
         Ok((proxy, database))
@@ -223,9 +240,12 @@ impl Drop for CommitProxy {
     }
 }
 
-fn checked_fixture() -> anyhow::Result<(url::Url, SocketAddr, PathBuf)> {
-    let url = url::Url::parse(&std::env::var("TEST_WORKER_DATABASE_URL")?)
-        .map_err(|_| anyhow::anyhow!("invalid private worker fixture URL"))?;
+fn checked_fixture(
+    environment: &str,
+    role: &str,
+) -> anyhow::Result<(url::Url, SocketAddr, PathBuf)> {
+    let url = url::Url::parse(&std::env::var(environment)?)
+        .map_err(|_| anyhow::anyhow!("invalid private runtime fixture URL"))?;
     let target = url::Url::parse(&std::env::var("TEST_DATABASE_URL")?)
         .map_err(|_| anyhow::anyhow!("invalid private database fixture URL"))?;
     let ip: IpAddr = url
@@ -236,12 +256,12 @@ fn checked_fixture() -> anyhow::Result<(url::Url, SocketAddr, PathBuf)> {
     ensure!(
         matches!(url.scheme(), "postgres" | "postgresql")
             && ip.is_loopback()
-            && url.username() == "sandbox_worker"
+            && url.username() == role
             && url.path().ends_with("_test")
             && url.host_str() == target.host_str()
             && url.port_or_known_default() == target.port_or_known_default()
             && url.path() == target.path(),
-        "private ACK fixture requires exact worker login and same loopback test database"
+        "private ACK fixture requires exact runtime login and same loopback test database"
     );
     let parameters: Vec<_> = url.query_pairs().collect();
     ensure!(

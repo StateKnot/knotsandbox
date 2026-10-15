@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::{
     db::{Actor, Database, load_instance},
     error::ApiError,
-    history::{CursorSigner, HistoryPage, HistoryQuery, HistoryRow, Window},
+    history::{CursorSigner, HistoryPage, HistoryQuery, HistoryRow, PinnedHistoryRow, Window},
 };
 
 #[derive(Debug, Deserialize)]
@@ -78,8 +78,100 @@ pub struct ResourceAccounting {
     pub cluster_epoch: Uuid,
     pub request_evidence: String,
     pub pod_resource_evidence: String,
+    pub pod_resource_observation: Option<LaunchPodResourceObservation>,
     pub contract: Option<LaunchResourceContract>,
     pub receipts: HistoryPage<QuotaResourceReceipt>,
+}
+
+/// Kubernetes configuration facts, never physical usage or capacity. Integer
+/// quantities remain decimal strings all the way through JSON and the SDK.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PodResourceVector {
+    pub cpu_millis: String,
+    pub memory_bytes: String,
+    pub ephemeral_storage_bytes: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PodResourceOverhead {
+    pub cpu_millis: String,
+    pub memory_bytes: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RuntimeClassResourceObservation {
+    pub uid: Uuid,
+    /// Opaque GET metadata. This is not an adopted RuntimeClass version.
+    pub resource_version: String,
+    pub config_sha256: String,
+    pub overhead: PodResourceOverhead,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LaunchPodResourceObservation {
+    pub id: Uuid,
+    pub instance_id: Uuid,
+    pub workspace_id: Uuid,
+    pub generation: String,
+    pub launch_id: Uuid,
+    pub cluster_epoch: Uuid,
+    pub pod_uid: Uuid,
+    pub pod_resource_version: String,
+    pub node_uid: Uuid,
+    pub node_boot_id: Uuid,
+    pub runtime_class: RuntimeClassResourceObservation,
+    pub workload_request: PodResourceVector,
+    pub workload_limit: PodResourceVector,
+    pub pod_overhead: PodResourceOverhead,
+    pub effective_request: PodResourceVector,
+    pub effective_limit: PodResourceVector,
+    pub source: String,
+    pub observed_at: DateTime<Utc>,
+    pub recorded_at: DateTime<Utc>,
+}
+
+/// Explicit columns keep registration capabilities and raw Kubernetes metadata
+/// out of the public response. The database enforces the fixed quantity set.
+fn observation(row: sqlx::postgres::PgRow) -> Result<LaunchPodResourceObservation, ApiError> {
+    let vector = |prefix: &str| -> Result<PodResourceVector, sqlx::Error> {
+        Ok(PodResourceVector {
+            cpu_millis: row.try_get(format!("{prefix}_cpu_millis").as_str())?,
+            memory_bytes: row.try_get(format!("{prefix}_memory_bytes").as_str())?,
+            ephemeral_storage_bytes: row.try_get(format!("{prefix}_ephemeral_bytes").as_str())?,
+        })
+    };
+    Ok(LaunchPodResourceObservation {
+        id: row.try_get("id")?,
+        instance_id: row.try_get("instance_id")?,
+        workspace_id: row.try_get("workspace_id")?,
+        generation: row.try_get("generation")?,
+        launch_id: row.try_get("launch_id")?,
+        cluster_epoch: row.try_get("cluster_epoch")?,
+        pod_uid: row.try_get("pod_uid")?,
+        pod_resource_version: row.try_get("pod_resource_version")?,
+        node_uid: row.try_get("node_uid")?,
+        node_boot_id: row.try_get("node_boot_id")?,
+        runtime_class: RuntimeClassResourceObservation {
+            uid: row.try_get("class_uid")?,
+            resource_version: row.try_get("class_resource_version")?,
+            config_sha256: row.try_get("class_config_sha256")?,
+            overhead: PodResourceOverhead {
+                cpu_millis: row.try_get("class_overhead_cpu_millis")?,
+                memory_bytes: row.try_get("class_overhead_memory_bytes")?,
+            },
+        },
+        workload_request: vector("workload_request")?,
+        workload_limit: vector("workload_limit")?,
+        pod_overhead: PodResourceOverhead {
+            cpu_millis: row.try_get("pod_overhead_cpu_millis")?,
+            memory_bytes: row.try_get("pod_overhead_memory_bytes")?,
+        },
+        effective_request: vector("effective_request")?,
+        effective_limit: vector("effective_limit")?,
+        source: row.try_get("source")?,
+        observed_at: row.try_get("observed_at")?,
+        recorded_at: row.try_get("recorded_at")?,
+    })
 }
 
 #[derive(PartialEq, Eq)]
@@ -148,9 +240,11 @@ impl Database {
             .resource_accounting_binding(actor, id, query.launch_id)
             .await?;
         let kind = format!(
-            "resource-accounting:{}:{}:{}",
+            "resource-accounting:{}:{}:{}:{}:{}",
             binding.epoch,
             binding.selected_launch,
+            binding.current_launch,
+            binding.generation,
             query
                 .launch_id
                 .map_or_else(|| "all".into(), |v| v.to_string())
@@ -161,8 +255,63 @@ impl Database {
             limit: query.limit,
             cursor: query.cursor.clone(),
         };
-        let window = Window::new(&history_query, actor, &kind, signer, Utc::now())?;
+        let mut window = Window::new(&history_query, actor, &kind, signer, Utc::now())?;
+        if query.cursor.is_some() && window.snapshot.is_none() {
+            return Err(ApiError::new(
+                axum::http::StatusCode::BAD_REQUEST,
+                "INVALID_CURSOR",
+                "Resource evidence selection is absent; read the first page again",
+            ));
+        }
         let mut tx = self.begin(actor.tenant_id).await?;
+        if window.snapshot.is_none() {
+            let selected: Option<Uuid> = sqlx::query_scalar(
+                "SELECT id FROM launch_pod_resource_observations WHERE tenant_id=$1 AND project_id=$2 AND instance_id=$3 AND workspace_id=$4 AND launch_id=$5 AND cluster_epoch=$6 AND recorded_at<=$7 ORDER BY recorded_at,id LIMIT 1",
+            )
+            .bind(actor.tenant_id).bind(binding.project).bind(id).bind(binding.workspace)
+            .bind(binding.selected_launch).bind(binding.epoch).bind(window.cutoff)
+            .fetch_optional(&mut *tx).await?;
+            window.snapshot =
+                Some(selected.map_or(PinnedHistoryRow::NotCaptured, PinnedHistoryRow::Captured));
+        }
+        let pod_resource_observation = match window.snapshot.as_ref() {
+            Some(PinnedHistoryRow::Captured(observation_id)) => {
+                let row = sqlx::query(r#"
+                    SELECT id,instance_id,workspace_id,generation::text AS generation,launch_id,cluster_epoch,
+                      pod_uid,pod_resource_version,node_uid,node_boot_id,class_uid,class_resource_version,class_config_sha256,
+                      class_overhead_cpu_millis::text AS class_overhead_cpu_millis,
+                      class_overhead_memory_bytes::text AS class_overhead_memory_bytes,
+                      workload_request_cpu_millis::text AS workload_request_cpu_millis,
+                      workload_request_memory_bytes::text AS workload_request_memory_bytes,
+                      workload_request_ephemeral_bytes::text AS workload_request_ephemeral_bytes,
+                      workload_limit_cpu_millis::text AS workload_limit_cpu_millis,
+                      workload_limit_memory_bytes::text AS workload_limit_memory_bytes,
+                      workload_limit_ephemeral_bytes::text AS workload_limit_ephemeral_bytes,
+                      pod_overhead_cpu_millis::text AS pod_overhead_cpu_millis,
+                      pod_overhead_memory_bytes::text AS pod_overhead_memory_bytes,
+                      effective_request_cpu_millis::text AS effective_request_cpu_millis,
+                      effective_request_memory_bytes::text AS effective_request_memory_bytes,
+                      effective_request_ephemeral_bytes::text AS effective_request_ephemeral_bytes,
+                      effective_limit_cpu_millis::text AS effective_limit_cpu_millis,
+                      effective_limit_memory_bytes::text AS effective_limit_memory_bytes,
+                      effective_limit_ephemeral_bytes::text AS effective_limit_ephemeral_bytes,
+                      source,observed_at,recorded_at
+                    FROM launch_pod_resource_observations
+                    WHERE tenant_id=$1 AND project_id=$2 AND instance_id=$3 AND workspace_id=$4
+                      AND launch_id=$5 AND cluster_epoch=$6 AND id=$7
+                "#).bind(actor.tenant_id).bind(binding.project).bind(id).bind(binding.workspace)
+                    .bind(binding.selected_launch).bind(binding.epoch).bind(observation_id)
+                    .fetch_optional(&mut *tx).await?;
+                Some(observation(row.ok_or_else(|| {
+                    ApiError::conflict(
+                        "RESOURCE_ACCOUNTING_OBSERVATION_CHANGED",
+                        "The selected immutable evidence is unavailable; read the first page again",
+                    )
+                })?)?)
+            }
+            Some(PinnedHistoryRow::NotCaptured) => None,
+            None => unreachable!("the first page always pins its evidence selection"),
+        };
         let contract = sqlx::query_as::<_, LaunchResourceContract>("SELECT id,instance_id,workspace_id,generation::text AS generation,launch_id,cluster_epoch,operation_id,cpu_millis::text AS cpu_millis,memory_mib::text AS memory_mib,source,recorded_at FROM launch_resource_contracts WHERE tenant_id=$1 AND instance_id=$2 AND launch_id=$3 AND cluster_epoch=$4 AND recorded_at<=$5")
             .bind(actor.tenant_id).bind(id).bind(binding.selected_launch).bind(binding.epoch).bind(window.cutoff)
             .fetch_optional(&mut *tx).await?;
@@ -206,9 +355,19 @@ impl Database {
                 "HISTORY_START_NOT_CAPTURED"
             }
             .into(),
-            pod_resource_evidence: "NOT_CAPTURED".into(),
+            pod_resource_evidence: if pod_resource_observation.is_some() {
+                "KUBERNETES_API_READBACK"
+            } else {
+                "NOT_CAPTURED"
+            }
+            .into(),
+            pod_resource_observation,
             contract,
             receipts: window.page(fetched?, &history_query, actor, &kind, signer)?,
         })
     }
 }
+
+#[cfg(test)]
+#[path = "resource_accounting_observation_tests.rs"]
+mod tests;

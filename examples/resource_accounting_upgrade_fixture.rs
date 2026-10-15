@@ -3,11 +3,20 @@
 use std::{borrow::Cow, env, path::Path};
 
 use anyhow::ensure;
+use clap::Parser;
 use sqlx::{migrate::Migrator, postgres::PgPoolOptions};
 use url::Url;
 
+#[derive(Parser)]
+struct Args {
+    /// Exact released schema prefix to install in this empty, owned test DB.
+    #[arg(long, default_value_t = 44, value_parser = clap::value_parser!(u8).range(44..=45))]
+    through_version: u8,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
     let raw = env::var("TEST_MIGRATION_DATABASE_URL")
         .map_err(|_| anyhow::anyhow!("TEST_MIGRATION_DATABASE_URL is required"))?;
     let url = Url::parse(&raw).map_err(|_| anyhow::anyhow!("Invalid fixture database URL"))?;
@@ -62,7 +71,7 @@ async fn main() -> anyhow::Result<()> {
     let historical = Migrator {
         migrations: Cow::Owned(
             all.iter()
-                .filter(|migration| migration.version <= 44)
+                .filter(|migration| migration.version <= i64::from(args.through_version))
                 .cloned()
                 .collect(),
         ),
@@ -70,6 +79,9 @@ async fn main() -> anyhow::Result<()> {
     };
     historical.run(&pool).await?;
     pool.close().await;
-    println!("RESOURCE_ACCOUNTING_V44_SQLX_PREFIX_PREPARED");
+    println!(
+        "RESOURCE_ACCOUNTING_V{}_SQLX_PREFIX_PREPARED",
+        args.through_version
+    );
     Ok(())
 }

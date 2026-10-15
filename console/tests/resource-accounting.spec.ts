@@ -20,6 +20,7 @@ function accounting(id = instance, launch = project) {
     cluster_epoch: tenant,
     request_evidence: "CAPTURED",
     pod_resource_evidence: "NOT_CAPTURED",
+    pod_resource_observation: null,
     contract: {
       id: launch,
       instance_id: id,
@@ -90,6 +91,50 @@ function accounting(id = instance, launch = project) {
           cluster_epoch: tenant,
         },
       ],
+    },
+  };
+}
+
+function observedAccounting() {
+  const workload = {
+    cpu_millis: "1000",
+    memory_bytes: "2147483648",
+    ephemeral_storage_bytes: "1073741824",
+  };
+  const overhead = { cpu_millis: "40", memory_bytes: "9007199254740993" };
+  const effective = {
+    cpu_millis: "1040",
+    memory_bytes: "9007201402224641",
+    ephemeral_storage_bytes: "1073741824",
+  };
+  return {
+    ...accounting(),
+    pod_resource_evidence: "KUBERNETES_API_READBACK",
+    pod_resource_observation: {
+      id: otherLaunch,
+      instance_id: instance,
+      workspace_id: project,
+      generation: "1",
+      launch_id: project,
+      cluster_epoch: tenant,
+      pod_uid: instance,
+      pod_resource_version: "opaque:pod-rv",
+      node_uid: tenant,
+      node_boot_id: otherLaunch,
+      runtime_class: {
+        uid: otherLaunch,
+        resource_version: "opaque:class-rv",
+        config_sha256: "a".repeat(64),
+        overhead: { ...overhead },
+      },
+      workload_request: { ...workload },
+      workload_limit: { ...workload },
+      pod_overhead: { ...overhead },
+      effective_request: { ...effective },
+      effective_limit: { ...effective },
+      source: "KUBERNETES_API_READBACK",
+      observed_at: now,
+      recorded_at: now,
     },
   };
 }
@@ -184,6 +229,90 @@ test("quota scopes and exact decimal strings remain distinct from missing Pod ob
     panel.getByRole("button", { name: "资源账本下一页" }),
   ).toBeDisabled();
   await expect(panel.getByText(/\d+\s*%/)).toHaveCount(0);
+});
+
+test("trusted Pod configuration shows separate fixed quantities and exact bytes without a utilization claim", async ({
+  page,
+}) => {
+  const panel = await openLedger(page, async (route) => {
+    await route.fulfill({ json: observedAccounting() });
+  });
+  const observed = panel.getByLabel("可信 Pod 资源观察", { exact: true });
+  await expect(observed).toBeVisible();
+  await expect(
+    observed.getByRole("row", {
+      name: "工作负载 request 1000 2147483648 1073741824",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    observed.getByRole("row", {
+      name: "Pod overhead 40 9007199254740993 不适用",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    observed.getByRole("row", {
+      name: "有效 request 1040 9007201402224641 1073741824",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await observed.getByText("观察来源与归属", { exact: true }).click();
+  await expect(
+    observed.getByText("opaque:class-rv", { exact: true }),
+  ).toBeVisible();
+  await expect(observed.getByText(/不证明 Pod 创建时采用该版本/)).toBeVisible();
+  await expect(
+    panel.getByText("实际 Pod 资源：UNKNOWN · NOT_CAPTURED", { exact: true }),
+  ).toHaveCount(0);
+  await expect(panel.getByText(/\d+\s*%/)).toHaveCount(0);
+});
+
+test("failed reads and invalid observation quantities or scope clear prior trusted evidence", async ({
+  page,
+}) => {
+  let mode = "allowed";
+  const panel = await openLedger(page, async (route) => {
+    if (mode === "denied" || mode === "unavailable") {
+      await route.fulfill({
+        status: mode === "denied" ? 404 : 503,
+        json: { code: mode === "denied" ? "NOT_FOUND" : "UNAVAILABLE" },
+      });
+      return;
+    }
+    const data = observedAccounting();
+    if (mode === "overflow")
+      data.pod_resource_observation.pod_overhead.memory_bytes =
+        "9223372036854775808";
+    if (mode === "foreign")
+      data.pod_resource_observation.workspace_id = otherLaunch;
+    if (mode === "wrong-sum")
+      data.pod_resource_observation.effective_request.cpu_millis = "0";
+    await route.fulfill({ json: data });
+  });
+  for (const next of [
+    "denied",
+    "unavailable",
+    "overflow",
+    "foreign",
+    "wrong-sum",
+  ]) {
+    mode = "allowed";
+    await panel.getByRole("button", { name: "资源账本第一页" }).click();
+    await expect(
+      panel.getByLabel("可信 Pod 资源观察", { exact: true }),
+    ).toBeVisible();
+    mode = next;
+    await panel.getByRole("button", { name: "资源账本第一页" }).click();
+    await expect(panel.getByRole("alert")).toBeVisible();
+    await expect(
+      panel.getByLabel("可信 Pod 资源观察", { exact: true }),
+    ).toHaveCount(0);
+    await expect(panel.getByRole("table")).toHaveCount(0);
+    await expect(
+      panel.getByText("9007201402224641", { exact: true }),
+    ).toHaveCount(0);
+  }
 });
 
 test("bounded pagination resets on launch selection and never adds tenant/project quantities", async ({
@@ -338,17 +467,22 @@ test("switching instance cancels a waiting page and removes the previous instanc
         arrived = true;
         await held;
         try {
-          await route.fulfill({ json: accounting() });
+          await route.fulfill({ json: observedAccounting() });
         } catch {
           /* Exact abandoned instance request. */
         }
         settled = true;
       } else
         await route.fulfill({
-          json: accounting(id, id === instance ? project : otherLaunch),
+          json:
+            id === instance
+              ? observedAccounting()
+              : accounting(id, otherLaunch),
         });
     });
-    await expect(panel.getByRole("table")).toBeVisible();
+    await expect(
+      panel.getByLabel("可信 Pod 资源观察", { exact: true }),
+    ).toBeVisible();
     hold = true;
     await panel.getByRole("button", { name: "资源账本第一页" }).click();
     await expect.poll(() => arrived).toBe(true);
@@ -359,10 +493,16 @@ test("switching instance cancels a waiting page and removes the previous instanc
     await expect(
       panel.getByText(`选中启动 ${otherLaunch}`, { exact: true }),
     ).toBeVisible();
+    await expect(
+      panel.getByLabel("可信 Pod 资源观察", { exact: true }),
+    ).toHaveCount(0);
     release();
     await expect.poll(() => settled).toBe(true);
     await expect(
       panel.getByText(`选中启动 ${project}`, { exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      panel.getByLabel("可信 Pod 资源观察", { exact: true }),
     ).toHaveCount(0);
   } finally {
     release();

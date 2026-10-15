@@ -1,6 +1,8 @@
 # 开发进度与验收证据
 
-最新开发检查点（2026-10-15）：逐次启动资源账本第2/5步及相关6/7/8子项已实现并完成本地整轮验收。最终50文件冻结候选单轮27组164项、0失败、0ignored，PASS_FULL_ACCEPTANCE；44条正式迁移字节/checksum、source/bin/SDK稳定及自有清理均核对，09ca生产二进制未改。真实44→45维护门、旧数据/16预约基线、SDK75、维护18、OpenAPI13、Chrome34/consolebuild、最新Clippy-v3/fmt-v4分别通过。旧分批结果和v2/v3/49候选失败保留；precommit测试注入过早击中Worker启动检查，test-only post-policy响应barrier修正后专项10项及整轮6项GREEN，原5/12/35秒和断言保持。早期其他503/timer原因UNKNOWN，不将本次数据库20/timers8/worker4通过称为未知原因已修复。普通453/0/269早于integration修订，不从ignored推导PG证明。第3/4步实际Pod/RuntimeClass、利用率、预热与GPU待开发。见[交付记录](../research/launch-resource-accounting-delivery-20261015.md)。基线5086b28 CI成功不代替新提交CI；本轮上传后触发新CI，实际状态由本机交付回执另记。
+最新开发检查点（2026-10-15，第4步）：普通CPU可信启动资源观察、0046原子授权登记与固定证据分页已实现并完成本地验收。完整37组201项按最终制品分两批通过（42＋159），0失败／0ignored，汇总PASS_BATCHED_FINAL_ARTIFACTS，不称单轮全跑；新提交CI待同步后核对。新数据库8项、真实JWT/HTTP/独立Node SDK组合专项1项、普通Rust按三批未变SHA复用461通过／0失败／278环境ignored、SDK77项及资源账本Chrome8项另行通过；正常0045→0046维护门和真实amd64 runtime／runner生产构建、4项受限smoke及secrets-init检查通过。资源API、生成SDK和控制台协同升级，旧账本游标从第一页重读；缺证据旧launch仍NOT_CAPTURED，捕获后明确KUBERNETES_API_READBACK。Standards0发现，Spec1项过期旧ACK缺陷已修复、0未关闭；初始失败及夹具修正保留。详见[可信观察交付与验收范围](../research/trusted-launch-resource-observation-20261015.md)。实际利用率、预算化预准备、冷暖实测、GPU及恢复／云认证仍独立待完成。
+
+上一账本检查点（2026-10-15）：逐次启动资源账本第2/5步及相关6/7/8子项已实现并完成本地整轮验收。最终50文件冻结候选单轮27组164项、0失败、0ignored，PASS_FULL_ACCEPTANCE；44条正式迁移字节/checksum、source/bin/SDK稳定及自有清理均核对，09ca生产二进制未改。真实44→45维护门、旧数据/16预约基线、SDK75、维护18、OpenAPI13、Chrome34/consolebuild、最新Clippy-v3/fmt-v4分别通过。旧分批结果和v2/v3/49候选失败保留；precommit测试注入过早击中Worker启动检查，test-only post-policy响应barrier修正后专项10项及整轮6项GREEN，原5/12/35秒和断言保持。早期其他503/timer原因UNKNOWN，不将本次数据库20/timers8/worker4通过称为未知原因已修复。普通453/0/269早于integration修订，不从ignored推导PG证明。第3/4步实际Pod/RuntimeClass、利用率、预热与GPU待开发。见[交付记录](../research/launch-resource-accounting-delivery-20261015.md)。基线5086b28 CI成功不代替新提交CI；本轮上传后触发新CI，实际状态由本机交付回执另记。
 
 最新开发检查点（2026-10-12）：公开9b23f15的资源观测/采集、身份TLS/schema、SDK/控制台、云只读检查、fmt/Clippy/release单测、普通Rust、宿主必跑及隔离review回归均实际通过；宿主上传回执确认普通UID1001编译、精确1/0失败/0忽略、唯一marker、binary不变且无sudo Cargo。整套随后在PG终止认证组因Linux纳秒fixture与数据库微秒保存相差844ns失败，原15项通过/1失败；只规范该case的horizon到微秒，两个精确断言、生产时钟/有效期/守卫保持。独立TLS PG完整16/16、本机与Linux严格all-target Clippy/fmt通过，42条迁移/输入/二进制/SDK和自有清理核对。该测试修复的新远端重验仍按实际记录，9b23整套不标通过；后续浏览器/镜像、过期安全快照、实云/Kata与容量发行门仍待完成。详见[本批证据](../research/resource-observability-ci-delivery-20261012.md)。
 
@@ -137,7 +139,7 @@ Linux v6不可变668文件源码点 `7be7c22a0af3765adbd4033f32bfcd18f7658497f8a
 | G1-10 | 底座闭环验收 | 未开始 | — |
 | G1-11 | GPU节点与运行时 | 未开始 | P0并行硬件验证；锁版本/真实SKU、GPU设备组Kata直通、许可与IOMMU/ACS、driver/guest、reset/残留/隔离/fencing；未经认证不开GPU |
 | G1-12 | 资源感知节点弹性 | 未开始 | P1；预算/库存/min-max/HA/暖池与云adapter、可信drain及IaC对账；现有固定受保护节点仍不自动删 |
-| G2-01 | 领域库与配额 | 开发中 | 正式迁移0001..0037加0039..0045，共44条；38永久未发布。0045新增不可变launch申请、全部用途状态回执、精确启动绑定和旧预约基线，保留原政策/锁顺序。维护门与最终50候选单轮27组164项PASS；v2历史metadata和49候选precommit注入阶段已窄修GREEN，旧失败保留；44条迁移、source/bin/SDK和清理核对。见[交付](../research/launch-resource-accounting-delivery-20261015.md) |
+| G2-01 | 领域库与配额 | 开发中 | 正式迁移1..37加39..46，共45条；38未发布，原44条字节保持。0045申请／配额回执保留，0046增加不可变Pod观察、封闭旧ACK基线和授权同事务完整性。新8项DB＋1项HTTP、0045→0046实际维护门与37组201项最终制品分批通过。见[可信观察交付](../research/trusted-launch-resource-observation-20261015.md) |
 | G2-02 | 产品身份授权 | 开发中 | src/auth.rs、产品grant与主体停用检查；监控查询后重查issuer/subject映射、本地授权和token到期；正式0037下BFF 10项PG/OIDC/HTTP及真实跨站Keycloak/Chrome登录→操作→撤权验收通过，显式Subject mapper修复生产客户端缺sub；密文服务端会话、单次refresh与长流撤销已接入；账户管理待完成 |
 | G2-03 | 通用API契约 | 开发中 | src/api.rs、src/request.rs、openapi；当前为已实现子集 |
 | G2-04 | 操作引擎 | 开发中 | 真实stage调谐、UID持久化、恢复、heartbeat/退避、TTL扫描；专用终止队列与启动登记公平扫描，可信终止账本专项12项PG回归通过；0019通过真实历史升级回归修复RLS导致的队列回填遗漏 |
@@ -147,21 +149,21 @@ Linux v6不可变668文件源码点 `7be7c22a0af3765adbd4033f32bfcd18f7658497f8a
 | G2-08 | 命令执行 | 开发中 | 持久受理、单次CONNECT准入、常驻网关、v5 exec、OSS条件写入和结果事务已接通；6项真实PG测试包括完整本地HTTP/WebSocket与OSS签名替身组合，覆盖正常/截断/断流/存储失败/崩溃不重发；真实云与可信终止闭环待验收 |
 | G2-09 | 输出终端与文件 | 开发中 | 已接输出分页API/OpenAPI/SDK、独立读取权限与凭据、manifest/对象完整性核验和读取后再次鉴权；异常流/跨租户/篡改/读取中撤权已测，输出SSE和5项PG/HTTP/Node SDK专项已实现，文件API/账本/单次exec/OSS V4/内核路径/helper已接，正式0036下11项PG/HTTP/OSS与1项mTLS可信关闭审计复验通过；终端会话尚未实现 |
 | G2-10 | 审计和模板安全 | 开发中 | 固定审计元数据、不可变策略及同事务审计已实现；独立租户账户审计API/SDK/UI与真实PG撤权、期限、游标隔离通过。归档、保留策略产品化和完整模板认证仍待完成 |
-| G2-11 | SDK与调用样例 | 开发中 | OpenAPI生成类型、令牌SPI、原key重试、ETag、Operation/Execution等待及UNKNOWN分支；本轮SDK75项通过，新增getResourceAccounting只读有界分页、19位字符串和撤权错误语义，保留只发一次文件PUT、完整下载与安全读取。相关Docker用例最终单轮27组164项验收完成；完整云文件/执行/清理链及新提交CI独立核验 |
+| G2-11 | SDK与调用样例 | 开发中 | OpenAPI生成类型、令牌SPI、原key重试、ETag、Operation/Execution等待及UNKNOWN分支保持；本轮SDK77项通过，getResourceAccounting增加固定可信观察、nullable缺证据、19位精度及有效量／归属检查。与API／UI协同升级，旧资源游标重新第一页；37组201项最终制品分批通过，新CI待同步后核对 |
 | G2-12 | 内核故障回归 | 开发中 | PG故障/并发、worker失租约与UID丢失、SDK断流重放已覆盖；真实节点/网络/磁盘故障尚待环境 |
-| G2-13 | 资源规格与GPU账本 | 开发中 | 普通CPU三Flavor的受控数量/provision校验与0045逐次launch申请/配额归属已实现并完成本地整轮验收；tenant/project分列，新ordinary释放绑定原可信关闭，API/SDK/UI只读。实际Pod/RuntimeClass版本观察、批准profile、GPU设备组库存/租约/配额与实机认证仍待开发；相关最终单轮27组164项通过，仍不能计实际Pod/GPU整个工作包或生产认证完成 |
+| G2-13 | 资源规格与GPU账本 | 开发中 | 普通CPU三Flavor、0045逐次申请／配额、实际受守卫Class／Pod回读及0046可信原子登记已实现；Node／boot／permit精确归属，API／SDK／UI只读，缺历史不补造。新8＋1专项及维护／镜像通过，37组201项最终制品分批通过。GPU设备组库存／租约／配额、批准profile和实机认证未完成，配置观察不是物理容量或实测利用率 |
 | G3-01 | 实例详情 | 开发中 | 独立/details聚合持久工作区、模板digest、策略版本、租约与launch证据；执行摘要独立授权，实时健康明确UNKNOWN；控制台详情页已接真实API合同，浏览器使用合同替身验证；云连续采样待验收 |
 | G3-02 | 监控与告警 | 开发中 | 宿主固定指标已5→11，固定PromQL/原始样本时间/HA不累加、历史launch授权、查询后撤权与token过期接API/OpenAPI/SDK/控制台；采集链标准告警及原38场景回放保留，新六项双副本采集写入/故障恢复另验收。用量/节流/内存观察不等于完整利用率/浪费闭环，也无GPU；实例告警管理/自动修复及云验收待完成 |
 | G3-03 | 操作记录 | 开发中 | 项目作用域操作/审计分页API、HMAC游标、实时撤权、历史错误脱敏；控制台历史页已接真实API合同，归档保留待开发 |
 | G3-04 | 事件与通知 | 开发中 | 已有受租户项目隔离的SSE事件流与控制台断点重连/撤权清空证据；0042异常收件箱及正常分页/详情/幂等确认API已接SDK和UI。真实BFF异常ACK丢回执、UNKNOWN重载、读写撤权、原键/旧ETag重放和业务事实不变已通过；外发Webhook、归档保留、事件/通知容量及目标云入口慢消费者仍待验收 |
 | G3-05 | 安全防护 | 开发中 | 正式1..37上的只读/security API、OpenAPI/SDK/控制台已接入；实际PG/JWT/JWKS/真实Node SDK安全专项8项及capabilities 1项通过，最后DB时钟判定权限期限；压缩文档展开上限、数值精度、历史证据、optional脱敏与撤权已测，5组OpenAPI合同和2项Chrome HTTP合同通过。期望/历史/独立证据分离，独立认证仍UNKNOWN；持久隔离/解除隔离、拒绝历史和镜像认证待开发 |
 | G3-06 | 健康诊断 | 开发中 | 持久只读报告/120秒截止/30天保留与当前权限脱敏已接worker/API/OpenAPI/SDK/控制台；独立能力、结构化证据、原期限有界GET与请求记录重开已实现，8项PG/HTTP/JWT、capabilities1项及真实Chrome/OIDC/正常worker全链通过；guest探测与自动修复未实现 |
-| G3-07 | 定时与事件自动化 | 开发中 | 独立0039及0040 SERVICE绑定/0041公平扫描/0042通知、八条管理API、专用worker与固定最小权限已实现；版本1能力合同贯通API/SDK/控制台。原业务18、新通知PG5/签名HTTP1、独立进程1及真实BFF异常确认整链1/1证据保留。当前完整安装要求43条正式迁移1..37+39..44，无38；0043验收须绑定新源码，原41条通过记录不变。实云副作用、HA/执行容量和统一Linux八ELF安全签名发布待验收 |
+| G3-07 | 定时与事件自动化 | 开发中 | 独立0039、0040 SERVICE绑定、0041公平扫描、0042通知、八条管理API及专用worker保持；当前正式安装1..37+39..46，无38。历史升级metadata只精确区分0045／0046新增对象，独立核对其RLS／触发器／函数，不削弱旧对象断言。原业务／通知／进程／BFF证据保留，本轮37组201项分批通过；实云副作用、HA容量和统一签名发布仍独立 |
 | G3-08 | 备份与恢复产品化 | 开发中 | 冷备份账本、独立库存/签名/可信关闭、owner注册/激活和部署标签验证已有PG/TLS证据；恢复私有受理、Job/Pod/调度与历史控制、STOPPED交付/首次START、never-started DELETE和独立临时GC有新库PG/HTTP/mTLS阶段证据。存储用途映射及初始raw PVC准入/实际Pending父UID与早期PV意图已补齐，无父Bound拒绝已测；生成PV/selected-node/CSI状态、单AZ云身份与START拓扑约束、完整失败收口、正式listener/API及实云验收未完成 |
 | G3-09 | 租户账户与客户端 | 开发中 | 机器身份及项目grant管理已有真实全链；新增独立租户账户审计API/SDK/UI，无需项目选择，脱敏和当前授权5项实际PG/签名HTTP/Node专项通过。人类账户生命周期、MFA/邮件与生产HA待完成 |
 | G3-10 | 产品安装与控制台 | 开发中 | 新增租户账户审计和备份能力UI约束，控制台66单测及新增9项Chrome HTTP合同/生产构建通过；已有OIDC/BFF管理链证据保留，新审计尚未计作BFF全链。必跑CI新增tenant_audit真实数据库suite与SDK制品漂移检查，远端未执行。全产品安装组合、统一Linux八ELF/四OCI签名发布、实云/PKI/HA/容量待完成 |
 | G3-11 | 完整功能验收 | 未开始 | — |
-| G3-12 | 利用率与成本画像 | 开发中 | 宿主固定13项资源采样/查询与普通launch请求/全部用途配额状态账本已实现；只读页面保留REQUESTED_COMPUTE_QUOTA、HISTORY_START_NOT_CAPTURED/LEGACY_UNBOUND及Pod NOT_CAPTURED。申请数、配额和宿主共享容量均不能直接作利用率分母。实际Pod request/limit/overhead可信观察、PSI/峰值/覆盖率、存储聚合/浪费分类/资源时长与费用、GPU仍待开发。见[账本交付](../research/launch-resource-accounting-delivery-20261015.md) |
+| G3-12 | 利用率与成本画像 | 开发中 | 宿主13项资源采样、普通launch申请／全部用途配额账本，以及实际Pod request／limit／overhead可信观察已贯通API／SDK／UI；明确REQUESTED_COMPUTE_QUOTA、KUBERNETES_API_READBACK和NOT_CAPTURED，首次缺失随签名分页固定。配置、配额和共享祖先容量不能直接作利用率分母。PSI／峰值／覆盖率、存储浪费分类、资源时长／费用及GPU仍待开发。见[可信观察交付](../research/trusted-launch-resource-observation-20261015.md) |
 | G3-13 | 资源优化闭环 | 未开始 | P1；有证据建议/preview、显式策略/授权/撤销、保卷停机重建调档、batch队列/受控装箱和收益核验；缺测/UNKNOWN不误停 |
 | G4-01 | 权限与攻击面 | 开发中 | 整仓身份与安装问题已修复：完整安装输入绑定、输出读取后原身份复核、显式OAuth scope profile、SERVICE client及owner CAS轮换。真实身份/输出/委派和受影响API回归已通过并接必跑CI；网络/镜像/备份/session等完整攻击面与候选发布验收未完成。见[修复证据](../research/architecture-review-fixes-20261010.md) |
 | G4-02 | 状态与生命周期故障 | 开发中 | 生命周期worker永久故障与timer监督、公平到期领取及非阻塞锁已实现；真实进程运行后claim/timer ACL故障非零退出及物理PG后端缺席、锁超时同进程恢复、百项workspace行锁后续STOP均通过，并接必跑CI。实云、旧generation/终端/批量容量等完整矩阵待验收。见[修复证据](../research/architecture-review-fixes-20261010.md) |
@@ -210,8 +212,18 @@ Capture 独立首建专项在 695 文件源 `dffed1b4ebaf31e90c73280b43d1a5118d8
 
 ### RuntimeClass守卫与普通CPU实时回读（2026-10-15）
 
+本节保留第3步当时的证据状态；后续持久观察、公开资源证据及最终本地验收见下一节。
+
 本轮完成普通CPU受管理Class/Pod实时复核子项：实际VAP/Binding与固定名GET-only RBAC、配置UID/摘要及Pod UID/完整资源前后GET；首次合法调度、RV/status变化保留，资源/身份冲突拒绝，安全停止独立。大Kubernetes future放入深模块堆状态，默认线程栈下原故障用例通过；guard/verify/ensure/read调用者future实测112/128/48/48bytes。
 
 适用Docker回归35组192项分批通过，逐组对应最终二进制；原生459通过/269环境ignored，严格Clippy/fmt通过。实际Kubernetes1.36.4守卫、TLS回读、overhead dry-run及24项RBAC检查通过，非云Kata/GPU认证。Docker上下文为523个审核输入/7,867,697bytes，无node_modules、私有路径或symlink；自有清理确认。原93954fd CI准入fixture的手工RESTART缺四scope配额，本轮按正常reserve_quota修正并实际4项通过。
 
 恢复草稿被现有公开backups:restore权限门阻断，未进入restored START且未计验收；父流程代码与基线相同，未绕过权限。第4步原子可信登记、持久观察及只读证据展示仍待开发，Pod保持NOT_CAPTURED；利用率、快速启动预准备、GPU及生产发布门仍独立。详见[回读交付记录](../research/runtime-class-resource-readback-20261015.md)。
+
+### 可信启动资源观察与原子登记交付（2026-10-15）
+
+本轮完成逐次启动资源账本第4步普通CPU子项的本地验收。0046不可变Pod观察与封闭旧ACK基线、正式mTLS登记的ACK／观察共同提交、精确节点／boot／launch归属，以及API／SDK／UI固定证据分页均已实现。Standards0发现，Spec1项已修复／0未关闭：数据库续期但宿主extension未ACK时，过期旧请求／ACK仍须在登记入口及最终锁等待后按DB当前时钟拒绝；原期限、权限和释放证明不放宽。
+
+完整Docker矩阵37组201通过／0失败／0ignored，汇总PASS_BATCHED_FINAL_ARTIFACTS：前9组42项与后28组159项，两批间仅历史升级测试及其独立程序变化，其余公开源码／制品／SDK逐SHA保持，各批运行稳定和自有清理确认。普通Rust最终按三批未变SHA复用461通过／0失败／278环境ignored，新8项DB及1项真实JWT／HTTP／Node组合专项、SDK77和Chrome账本8项另有证据；未把分批或ignored写成单轮全跑。
+
+真实0045→0046维护门、普通owner正常迁移、普通app预检及新Pod进程恢复通过，自有PG／K3s清理确认；真实amd64 runtime／runner正常release、4项nonroot受限smoke及secrets-init通过，535冻结输入SHA保持，根／公开源码与镜像仅明确cfg(test) BFF夹具差异。strict Docker common.py白名单、BFF正常角色初始化与automation0046精确metadata断言修正均保留原失败。新提交CI待同步后核对；利用率／预准备／GPU／恢复和目标云生产认证仍独立。详见[本轮交付](../research/trusted-launch-resource-observation-20261015.md)及[开发表12.7](../research/rust-sandbox-development-workbreakdown.md#127-可信启动资源观察与原子登记2026-10-15)。

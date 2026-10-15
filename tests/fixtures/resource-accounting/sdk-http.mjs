@@ -12,6 +12,7 @@ try {
   if(phase==="REVOKED") { assert.equal(result.response.status,404);assert.equal(result.error.code,"RESOURCE_NOT_FOUND"); }
   else {
     assert.equal(result.response.status,200);assert.equal(result.data.pod_resource_evidence,"NOT_CAPTURED");
+    assert.equal(result.data.pod_resource_observation,null);
     assert.equal(result.data.receipts.items.length,8);
     for(const r of result.data.receipts.items) {
       assert.equal(typeof r.amount,"string");

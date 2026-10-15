@@ -543,7 +543,7 @@ def main() -> int:
         expected = [{"version": int(path.name.split("_", 1)[0]), "success": True,
                      "checksum": hashlib.sha384(path.read_bytes()).hexdigest()}
                     for path in sorted((root / "migrations").glob("*.sql"))]
-        helper.require([row["version"] for row in expected] == list(range(1, 38)) + [39, 40, 41, 42, 43, 44, 45]
+        helper.require([row["version"] for row in expected] == list(range(1, 38)) + [39, 40, 41, 42, 43, 44, 45, 46]
                        and ledger == expected, "Normal ledger checksums must match without unused 0038")
         record["migration_ledger"] = ledger
         stage = "source_binding"

@@ -193,7 +193,8 @@ impl TerminationController {
             .register(&permit.request)
             .await
             .map_err(|_| blocked("NODE_REGISTRATION_NOT_CONFIRMED"))?;
-        db.record_launch_authorization(&permit, &ack).await
+        db.record_launch_authorization(&permit, &ack, &observed.resources)
+            .await
     }
 
     async fn run_claim(&self, claim: Claim) {

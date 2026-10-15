@@ -10,6 +10,8 @@ mod worker_support;
 use std::{sync::atomic::Ordering, time::Duration};
 
 use anyhow::{Context, ensure};
+// Shared TLS COMMIT-ACK helper is also compiled inside the library tests.
+use sandbox_platform::db;
 use sandbox_platform::worker::Worker;
 use serde_json::Value;
 use sqlx::PgPool;

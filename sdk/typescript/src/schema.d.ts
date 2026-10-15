@@ -158,11 +158,13 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Read immutable launch requests and actual quota state receipts
+         * Read immutable launch requests, verified Pod configuration and quota receipts
          * @description Requires instances:read, checked before and after the database page query.
          *     Request contracts describe admitted ordinary CPU compute, not Pod resource
-         *     observations, host capacity or utilization. pod_resource_evidence=NOT_CAPTURED
-         *     explicitly identifies missing observations; HISTORY_START_NOT_CAPTURED never
+         *     observations, host capacity or utilization. Trusted persisted observations
+         *     have pod_resource_evidence=KUBERNETES_API_READBACK and a non-null fixed-shape
+         *     pod_resource_observation. NOT_CAPTURED with null explicitly identifies missing
+         *     evidence; HISTORY_START_NOT_CAPTURED never
          *     reconstructs old requests from current flavor. Tenant and project scopes
          *     must never be added together. State receipts are quota accounting facts.
          *
@@ -171,7 +173,10 @@ export interface paths {
          *     to that launch in the current installation epoch. Historical unbound rows
          *     remain LEGACY_UNBOUND without a manufactured PENDING event.
          *     Descending (captured_at,id) pagination uses a signed 24-hour cursor bound to
-         *     caller, tenant/project, instance, launch filter and limit. Repeat all filters.
+         *     caller, tenant/project, instance, current generation/launch, selected launch,
+         *     launch filter, limit and the exact first-page observation ID or first-page
+         *     absence. A later COMMIT cannot change missing evidence on continuation pages,
+         *     even if its recorded_at precedes cutoff. Repeat all filters.
          *     A concurrent epoch/launch change rejects the page. All quantities, generations
          *     and account versions are decimal strings, never JavaScript Numbers.
          */
@@ -2379,6 +2384,57 @@ export interface components {
             /** Format: date-time */
             cutoff: string;
         };
+        /** @description Kubernetes configuration quantities, not sampled usage or host capacity. */
+        PodResourceVector: {
+            cpu_millis: components["schemas"]["ResourceDecimal"];
+            memory_bytes: components["schemas"]["ResourceDecimal"];
+            ephemeral_storage_bytes: components["schemas"]["ResourceDecimal"];
+        };
+        PodResourceOverhead: {
+            cpu_millis: components["schemas"]["ResourceDecimal"];
+            memory_bytes: components["schemas"]["ResourceDecimal"];
+        };
+        /** @description Guarded current Class configuration read during trusted Pod validation. UID plus config_sha256 identifies configuration. resource_version is opaque GET metadata; it does not prove which Class version Pod admission adopted. */
+        RuntimeClassResourceObservation: {
+            /** Format: uuid */
+            uid: string;
+            resource_version: string;
+            config_sha256: string;
+            overhead: components["schemas"]["PodResourceOverhead"];
+        };
+        /** @description Immutable trusted Kubernetes readback committed atomically with launch authorization. Node identity binds the registration; nodeguard does not measure these configuration quantities. No raw Pod JSON, GPU resources, utilization denominator or host capacity is exposed. */
+        LaunchPodResourceObservation: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            instance_id: string;
+            /** Format: uuid */
+            workspace_id: string;
+            generation: components["schemas"]["ResourceDecimal"];
+            /** Format: uuid */
+            launch_id: string;
+            /** Format: uuid */
+            cluster_epoch: string;
+            /** Format: uuid */
+            pod_uid: string;
+            pod_resource_version: string;
+            /** Format: uuid */
+            node_uid: string;
+            /** Format: uuid */
+            node_boot_id: string;
+            runtime_class: components["schemas"]["RuntimeClassResourceObservation"];
+            workload_request: components["schemas"]["PodResourceVector"];
+            workload_limit: components["schemas"]["PodResourceVector"];
+            pod_overhead: components["schemas"]["PodResourceOverhead"];
+            effective_request: components["schemas"]["PodResourceVector"];
+            effective_limit: components["schemas"]["PodResourceVector"];
+            /** @enum {string} */
+            source: "KUBERNETES_API_READBACK";
+            /** Format: date-time */
+            observed_at: string;
+            /** Format: date-time */
+            recorded_at: string;
+        };
         ResourceAccounting: {
             /** Format: uuid */
             instance_id: string;
@@ -2388,8 +2444,12 @@ export interface components {
             cluster_epoch: string;
             /** @enum {string} */
             request_evidence: "CAPTURED" | "HISTORY_START_NOT_CAPTURED";
-            /** @enum {string} */
-            pod_resource_evidence: "NOT_CAPTURED";
+            /**
+             * @description NOT_CAPTURED requires null observation; KUBERNETES_API_READBACK requires a persisted observation.
+             * @enum {string}
+             */
+            pod_resource_evidence: "NOT_CAPTURED" | "KUBERNETES_API_READBACK";
+            pod_resource_observation: components["schemas"]["LaunchPodResourceObservation"] | null;
             contract: components["schemas"]["LaunchResourceContract"] | null;
             receipts: components["schemas"]["QuotaResourceReceiptPage"];
         };

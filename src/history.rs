@@ -172,6 +172,17 @@ struct Cursor {
     after_time: DateTime<Utc>,
     after_id: Uuid,
     expires_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    snapshot: Option<PinnedHistoryRow>,
+}
+
+/// A signed selection records absence as a fact. A later page must not turn a
+/// first-page miss into a newly committed row merely because its clock is old.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "state", content = "id", rename_all = "SCREAMING_SNAKE_CASE")]
+pub(crate) enum PinnedHistoryRow {
+    NotCaptured,
+    Captured(Uuid),
 }
 
 pub(crate) struct Window {
@@ -180,6 +191,7 @@ pub(crate) struct Window {
     pub(crate) after_time: Option<DateTime<Utc>>,
     pub(crate) after_id: Option<Uuid>,
     expires_at: DateTime<Utc>,
+    pub(crate) snapshot: Option<PinnedHistoryRow>,
 }
 impl Window {
     pub(crate) fn new(
@@ -210,6 +222,7 @@ impl Window {
                 after_time: Some(cursor.after_time),
                 after_id: Some(cursor.after_id),
                 expires_at: cursor.expires_at,
+                snapshot: cursor.snapshot,
             })
         } else {
             Ok(Self {
@@ -218,6 +231,7 @@ impl Window {
                 after_time: None,
                 after_id: None,
                 expires_at: now + Duration::seconds(CURSOR_TTL_SECONDS),
+                snapshot: None,
             })
         }
     }
@@ -245,6 +259,7 @@ impl Window {
                 after_time: row.time(),
                 after_id: row.id(),
                 expires_at: self.expires_at,
+                snapshot: self.snapshot.clone(),
             })?)
         } else {
             None
@@ -435,6 +450,7 @@ mod tests {
             after_time: now,
             after_id: Uuid::new_v4(),
             expires_at: now + Duration::days(1),
+            snapshot: None,
         }
     }
     #[test]
@@ -520,5 +536,34 @@ mod tests {
             };
             assert!(!error.to_string().contains("SECRET-MARKER"));
         }
+    }
+
+    #[test]
+    fn signed_row_selection_distinguishes_missing_from_a_fixed_row() {
+        let now = Utc::now();
+        let signer = signer("new", vec![]);
+        let mut value = cursor(now);
+        // Absence is explicit and survives signing; it cannot be replaced by a
+        // read-time query for a row that committed after the first page.
+        value.snapshot = Some(PinnedHistoryRow::NotCaptured);
+        let token = signer.encode(&value).unwrap();
+        assert!(token.len() <= MAX_CURSOR_LENGTH);
+        assert_eq!(
+            signer.decode(&token, now).unwrap().snapshot,
+            Some(PinnedHistoryRow::NotCaptured)
+        );
+        let id = Uuid::new_v4();
+        value.snapshot = Some(PinnedHistoryRow::Captured(id));
+        let token = signer.encode(&value).unwrap();
+        assert_eq!(
+            signer.decode(&token, now).unwrap().snapshot,
+            Some(PinnedHistoryRow::Captured(id))
+        );
+        let mut parts = token.split('.').map(str::to_owned).collect::<Vec<_>>();
+        let mut payload: serde_json::Value =
+            serde_json::from_slice(&URL_SAFE_NO_PAD.decode(&parts[1]).unwrap()).unwrap();
+        payload["snapshot"] = json!({"state":"NOT_CAPTURED"});
+        parts[1] = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).unwrap());
+        assert!(signer.decode(&parts.join("."), now).is_err());
     }
 }

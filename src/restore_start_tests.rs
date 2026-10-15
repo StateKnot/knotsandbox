@@ -178,7 +178,7 @@ pub(super) async fn run(case: StartCase<'_>) -> anyhow::Result<()> {
     let service = AdmissionService {
         database: admission_db,
         kubernetes: case.runtime.client_clone(),
-        config,
+        config: config.clone(),
     };
     let pvc_path = format!(
         "/api/v1/namespaces/{}/persistentvolumeclaims/ws-{}",
@@ -316,10 +316,30 @@ pub(super) async fn run(case: StartCase<'_>) -> anyhow::Result<()> {
         .client
         .register(&authorization.request)
         .await?;
+    let target = case
+        .base
+        .engine
+        .database
+        .load_termination_target(c.tenant_id, accepted.body.operation.id)
+        .await
+        .map_err(api_failure)?;
+    let observed = crate::termination_runtime::TerminationRuntime::new(
+        case.runtime.clone(),
+        config.runtime(),
+        "fixture-target".into(),
+    )
+    .observe_launch(
+        &c,
+        target
+            .known_resources
+            .as_ref()
+            .context("restored known runtime")?,
+    )
+    .await?;
     case.base
         .engine
         .database
-        .record_launch_authorization(&authorization, &ack)
+        .record_launch_authorization(&authorization, &ack, &observed.resources)
         .await
         .map_err(api_failure)?;
     {

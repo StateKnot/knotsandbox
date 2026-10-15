@@ -34,4 +34,6 @@ GRANT SELECT,INSERT ON never_authorized_pod_observations TO sandbox_termination;
 GRANT EXECUTE ON FUNCTION sandbox_close_never_authorized(uuid,uuid,text,bigint),sandbox_never_authorized(uuid,uuid,uuid,bigint,uuid,uuid,uuid) TO sandbox_termination;
 -- Migration 0036 file-transfer component grants.
 GRANT SELECT,UPDATE ON file_transfers TO sandbox_termination;
+GRANT EXECUTE ON FUNCTION sandbox_lock_registration_boundary(uuid) TO sandbox_termination;
+GRANT EXECUTE ON FUNCTION sandbox_record_launch_resource_observation(uuid,uuid,text,text,uuid,text,text,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz) TO sandbox_termination;
 COMMIT;

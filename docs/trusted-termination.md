@@ -12,11 +12,23 @@
 
 1. worker 持久登记精确 Pod/PVC/策略资源 UID；控制器重新读取 Kubernetes，核实当前 launch、generation、epoch、Node、PVC/PV/CSI handle。
 2. 数据库事务锁定 workspace → instance → 当前活动 → operation，复核实时权限、TTL、safe mode、模板和安全策略，写入不可变 base launch permit。宿主 CRI 前置门禁在许可登记之前拒绝启动。
-3. 控制器用双向 TLS 注册许可，将私有已验证响应的 journal revision 写入 ACK 账本。worker 只有在启动登记与 Kubernetes Ready 都通过时才能完成启动。
+3. 控制器用双向 TLS 注册许可，将私有已验证响应的 journal revision 与经内部能力验证的 Pod 资源观察同事务写入。nodeguard认证launch／节点／许可身份，资源值来自Kubernetes API实际回读；普通调用者不能提交观察JSON。worker只有在启动登记与Kubernetes Ready都通过时才能完成启动。
 4. CREATE/START 期间的 RENEW 保持同一 compute lease、launch 和 generation。数据库期限增长后，控制器创建不可变 `launch_permit_extensions`，绑定 base permit、compute lease ID/version 和新期限。新 extension ID 只作为本次注册请求 ID，不改变 base permit，也不改变终止挑战的外键。
 5. host 在 OPEN 状态下原子持久化较大期限，并返回 `effective_expires_at`。控制面验证该期限至少覆盖请求，但只把数据库批准的期限用于调度判断。ACK 可重试或乱序到达；旧 ACK 不能降低 journal 水位或替代较新期限。CLOSED/UNKNOWN gate 永不通过续租重开。
 
 RENEW 的同步成功表示数据库接受了新期限，不代表正在启动的宿主已经确认续期。控制器会继续处理待确认许可；缺失确认时不能推断实例可执行。运行中现存 exec/健康读取不因原始启动许可到期而被误判为新启动。新的 Run 始终受单次启动门禁约束。
+
+本次登记请求及宿主ACK自身的期限必须仍有效，不能只检查当前compute lease。数据库续期但extension尚未ACK时，已经过期的旧请求／旧ACK不能凭新lease重新登记。登记事务入口和所有可能阻塞的写入后的最终fence都读取数据库 `clock_timestamp()`，要求本次请求和ACK有效期在未来；失败整体回滚观察、ACK和水位。这个检查限制登记动作，不改写已提交的历史许可或把已有运行会话当成新的Run。
+
+## 0046资源观察与升级
+
+`VerifiedLaunchResources` 只能由runtime内部的完整Kubernetes回读构造，绑定tenant、project、instance、workspace、generation、launch、epoch、Pod UID、Node UID、boot ID和原许可。实际Pod request／limit／overhead与有效量分别保存，Class UID／内容摘要／回读RV及配置overhead独立保存；Class RV不是Pod采用该配置版本的证明，nodeguard也不声称测量了Kubernetes资源。
+
+资源观察在事务入口及最终阻塞之后都必须位于数据库当前时间前30秒至后2秒的窗口。原workspace／instance／operation锁序、实时权限、节点fence和认证覆盖检查保持；授权ACK和不可变观察共同提交，失败无半行。相同规范化内容及纯RV变化复用初始观察，不覆盖历史；冲突拒绝；真实COMMIT回执丢失后用原登记键重放。停止／清理不读取当前Class来决定是否允许原UID安全终止。
+
+0046在维护切换锁内冻结升级前已提交base／extension ACK，保留精确launch和节点归属。尚未ACK的旧permit不是历史豁免；旧基线ACK保持缺观察，不按当前Pod补造历史。新ACK与观察通过双向deferred约束保证同事务完整；两张新表append-only、FORCE RLS，runtime不能直接写表或改旧基线。只有独立termination身份经窄函数入口登记；API只读观察，worker／gateway不继承其写能力。
+
+部署先封闭并排空旧writer，以普通owner运行正常迁移及组件角色脚本，再由普通app执行 `sandboxd resource-accounting-check`，仅恢复批准制品。0046、对应二进制和资源证据API／生成SDK／控制台需协同升级；旧资源账本游标丢弃并重读第一页，不承诺旧writer混跑或直接应用回退。真实mTLS／数据库专项与0045→0046维护验收已通过，完整矩阵和新CI最终状态见[可信观察交付](../research/trusted-launch-resource-observation-20261015.md)；这些结果不替代Kata／CSI／云或GPU认证。
 
 ## STOP、RESTART 与 DELETE
 

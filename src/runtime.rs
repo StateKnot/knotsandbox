@@ -3,6 +3,7 @@
 
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use k8s_openapi::api::{
     core::v1::{Namespace, PersistentVolumeClaim, Pod},
     networking::v1::NetworkPolicy,
@@ -13,6 +14,7 @@ use kube::{
     core::{ApiResource, DynamicObject, GroupVersionKind},
 };
 use thiserror::Error;
+use uuid::Uuid;
 
 use crate::runtime_manifest::{
     ManifestError, RuntimeManifests, validate_existing_pod, validate_existing_policy,
@@ -52,6 +54,44 @@ impl From<kube::Error> for RuntimeError {
 #[derive(Clone)]
 pub struct KubernetesRuntime {
     client: Client,
+}
+
+/// A capability minted only by the complete, repeated API readback below.
+/// This carries facts forward without letting requested manifests or JSON
+/// manufacture evidence. It is deliberately neither Clone nor Deserialize.
+pub(crate) struct VerifiedPodResources {
+    pod_uid: Uuid,
+    pod_resource_version: String,
+    node_name: Option<String>,
+    quantities: crate::runtime_resource_contract::PodResourceObservation,
+    class: crate::runtime_class_guard::ManagedRuntimeClass,
+    observed_at: DateTime<Utc>,
+}
+
+impl VerifiedPodResources {
+    pub(crate) fn pod_uid(&self) -> Uuid {
+        self.pod_uid
+    }
+    pub(crate) fn pod_resource_version(&self) -> &str {
+        &self.pod_resource_version
+    }
+    pub(crate) fn node_name(&self) -> Option<&str> {
+        self.node_name.as_deref()
+    }
+    pub(crate) fn quantities(&self) -> &crate::runtime_resource_contract::PodResourceObservation {
+        &self.quantities
+    }
+    pub(crate) fn class(&self) -> &crate::runtime_class_guard::ManagedRuntimeClass {
+        &self.class
+    }
+    pub(crate) fn observed_at(&self) -> DateTime<Utc> {
+        self.observed_at
+    }
+}
+
+pub(crate) struct VerifiedPodReadback {
+    pub(crate) pod: Pod,
+    pub(crate) resources: VerifiedPodResources,
 }
 
 impl KubernetesRuntime {
@@ -279,22 +319,28 @@ impl KubernetesRuntime {
                 Err(e) => return Err(e.into()),
             },
         };
-        self.recheck_pod(expected, known_uid, pod, class, true)
-            .await
+        Ok(self
+            .recheck_pod(expected, known_uid, pod, class, true)
+            .await?
+            .pod)
     }
 
     /// Fresh read-only validation used by trusted launch and execution readers.
-    /// It does not create a historical observation or authorize CRI/cleanup.
+    /// It does not commit a historical observation or authorize CRI/cleanup.
     pub(crate) async fn read_pod(
         &self,
         expected: &Pod,
         known_uid: &str,
-    ) -> Result<Pod, RuntimeError> {
+    ) -> Result<VerifiedPodReadback, RuntimeError> {
         // Scheduled launch and exec readers share the same bounded interface.
         Box::pin(self.read_pod_inner(expected, known_uid)).await
     }
 
-    async fn read_pod_inner(&self, expected: &Pod, known_uid: &str) -> Result<Pod, RuntimeError> {
+    async fn read_pod_inner(
+        &self,
+        expected: &Pod,
+        known_uid: &str,
+    ) -> Result<VerifiedPodReadback, RuntimeError> {
         let class = crate::runtime_class_guard::read(self.client.clone()).await?;
         let (namespace, name) = identity(&expected.metadata)?;
         let api: Api<Pod> = Api::namespaced(self.client.clone(), namespace);
@@ -310,7 +356,7 @@ impl KubernetesRuntime {
         pod: Pod,
         class: crate::runtime_class_guard::ManagedRuntimeClass,
         allow_initial_scheduling: bool,
-    ) -> Result<Pod, RuntimeError> {
+    ) -> Result<VerifiedPodReadback, RuntimeError> {
         validate_existing_pod(&pod, expected, known_uid)?;
         validate_pod_resource_version(&pod)?;
         let resources = crate::runtime_resource_contract::observe_pod_resources(
@@ -343,7 +389,26 @@ impl KubernetesRuntime {
         {
             return Err(ManifestError::SpecificationDrift("Pod readback conflict").into());
         }
-        Ok(current)
+        let pod_uid = Uuid::parse_str(pod_uid(&current)?)
+            .ok()
+            .filter(|id| !id.is_nil())
+            .ok_or(RuntimeError::MissingIdentity)?;
+        let evidence = VerifiedPodResources {
+            pod_uid,
+            pod_resource_version: current
+                .metadata
+                .resource_version
+                .clone()
+                .ok_or(RuntimeError::MissingIdentity)?,
+            node_name: current.spec.as_ref().and_then(|s| s.node_name.clone()),
+            quantities: current_resources,
+            class: after,
+            observed_at: Utc::now(),
+        };
+        Ok(VerifiedPodReadback {
+            pod: current,
+            resources: evidence,
+        })
     }
 
     /// Requests termination with UID+resourceVersion preconditions. It never
@@ -446,8 +511,116 @@ mod tests {
     use kube::client::Body as KubeBody;
     use std::{
         convert::Infallible,
-        sync::{Arc, Mutex},
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicUsize, Ordering},
+        },
     };
+
+    #[tokio::test]
+    async fn verified_readback_carries_final_api_identifiers_and_actual_quantities()
+    -> anyhow::Result<()> {
+        use crate::runtime_manifest::{
+            RuntimeManifestConfig, RuntimeManifestContext, build_manifests,
+        };
+        use serde_json::json;
+        let context = RuntimeManifestContext {
+            tenant_id: Uuid::new_v4(),
+            project_id: Uuid::new_v4(),
+            instance_id: Uuid::new_v4(),
+            workspace_id: Uuid::new_v4(),
+            launch_id: Uuid::new_v4(),
+            cluster_epoch: Uuid::new_v4(),
+            generation: 1,
+            namespace: "resource-readback-test".into(),
+            storage_class: "encrypted-rwo".into(),
+            workspace_snapshot: None,
+            image_ref: "registry.example.test/runtime".into(),
+            image_digest: format!("sha256:{}", "a".repeat(64)),
+            template_approved: true,
+            security_policy_approved: true,
+            security_policy_rules: json!({"profile":"deny-all","dns":true}),
+            cpu_millis: 1000,
+            memory_mib: 2048,
+            workspace_size_gib: 20,
+        };
+        let config = RuntimeManifestConfig {
+            runtime_class_name: "kata-qemu".into(),
+            dns_namespace: "kube-system".into(),
+            dns_labels: [("k8s-app".into(), "kube-dns".into())].into(),
+            ephemeral_storage_mib: 1024,
+            tmp_size_mib: 256,
+        };
+        let manifests = build_manifests(&context, &config)?;
+        let pod_uid = Uuid::new_v4();
+        let mut actual = serde_json::to_value(&manifests.pod)?;
+        actual["metadata"]["uid"] = json!(pod_uid);
+        actual["spec"]["nodeName"] = json!("kata-resource-node");
+        actual["spec"]["overhead"] = json!({"cpu":"0.250","memory":"512M"});
+        let reads = Arc::new(AtomicUsize::new(0));
+        let class_reads = Arc::new(AtomicUsize::new(0));
+        let seen = reads.clone();
+        let seen_class = class_reads.clone();
+        let service = tower::service_fn(move |request: Request<KubeBody>| {
+            assert_eq!(request.method(), axum::http::Method::GET);
+            let value = if request.uri().path().contains("/pods/") {
+                let index = seen.fetch_add(1, Ordering::SeqCst) + 1;
+                let mut pod = actual.clone();
+                pod["metadata"]["resourceVersion"] = json!(format!("pod-opaque-{index}"));
+                pod["status"] =
+                    json!({"phase":"Pending","message":format!("metadata-only-{index}")});
+                pod
+            } else {
+                let mut object = crate::test_support_db::runtime_class_guard::object(
+                    request.uri().path(),
+                    Some(&json!({"cpu":"250m","memory":"512M"})),
+                )
+                .unwrap_or_else(|| panic!("unexpected readback fixture path"));
+                if request.uri().path().contains("/runtimeclasses/") {
+                    let index = seen_class.fetch_add(1, Ordering::SeqCst) + 1;
+                    object["metadata"]["resourceVersion"] = json!(format!("class-opaque-{index}"));
+                }
+                object
+            };
+            async move {
+                Ok::<_, Infallible>(
+                    Response::builder()
+                        .status(200)
+                        .header("content-type", "application/json")
+                        .body(Body::from(value.to_string()))
+                        .unwrap_or_else(|_| Response::new(Body::empty())),
+                )
+            }
+        });
+        let runtime = KubernetesRuntime::from_client(Client::new(service, "test"));
+        let started = Utc::now();
+        let readback = runtime
+            .read_pod(&manifests.pod, &pod_uid.to_string())
+            .await?;
+        assert_eq!(reads.load(Ordering::SeqCst), 2);
+        assert_eq!(class_reads.load(Ordering::SeqCst), 2);
+        assert_eq!(readback.resources.pod_uid(), pod_uid);
+        assert_eq!(readback.resources.pod_resource_version(), "pod-opaque-2");
+        assert_eq!(readback.resources.node_name(), Some("kata-resource-node"));
+        assert_eq!(
+            readback.resources.class().resource_version(),
+            "class-opaque-2"
+        );
+        assert_eq!(readback.resources.class().config_sha256().len(), 64);
+        assert!(readback.resources.observed_at() >= started);
+        assert!(readback.resources.observed_at() <= Utc::now());
+        let q = readback.resources.quantities();
+        assert_eq!(q.workload_cpu_millis(), 1000);
+        assert_eq!(q.workload_memory_bytes(), 2_147_483_648);
+        assert_eq!(q.workload_ephemeral_bytes(), 1_073_741_824);
+        assert_eq!(q.overhead_cpu_millis(), 250);
+        assert_eq!(q.overhead_memory_bytes(), 512_000_000);
+        assert_eq!(q.class_overhead_cpu_millis(), 250);
+        assert_eq!(q.class_overhead_memory_bytes(), 512_000_000);
+        assert_eq!(q.effective_cpu_millis(), 1250);
+        assert_eq!(q.effective_memory_bytes(), 2_659_483_648);
+        Ok(())
+    }
 
     fn runtime_class_response(overhead: serde_json::Value) -> KubernetesRuntime {
         let class = serde_json::json!({

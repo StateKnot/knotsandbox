@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ApiFailure, UUID, unwrap } from "./api.ts";
 import type { Schema } from "./api.ts";
 import type { Context } from "./App.tsx";
+import { validatePodResourceEvidence } from "../../sdk/typescript/src/resource-observation.ts";
 
 type Accounting = Schema["ResourceAccounting"];
 const MAX_INTEGER = 9223372036854775807n;
@@ -27,7 +28,6 @@ function checkedPage(
     !UUID.test(data.selected_launch_id) ||
     !UUID.test(data.cluster_epoch) ||
     (launch !== "" && data.selected_launch_id !== launch) ||
-    data.pod_resource_evidence !== "NOT_CAPTURED" ||
     !["CAPTURED", "HISTORY_START_NOT_CAPTURED"].includes(
       data.request_evidence,
     ) ||
@@ -50,6 +50,11 @@ function checkedPage(
         !decimal(contract.generation)))
   )
     throw new ApiFailure("RESOURCE_ACCOUNTING_RESPONSE_INVALID");
+  try {
+    validatePodResourceEvidence(data, instance.workspace_id);
+  } catch {
+    throw new ApiFailure("RESOURCE_ACCOUNTING_RESPONSE_INVALID");
+  }
   const ids = new Set<string>();
   for (const row of data.receipts.items) {
     if (
@@ -168,7 +173,8 @@ export function ResourceAccounting({
       <h3>启动资源与释放账本</h3>
       <p className="muted">
         租户与项目是两层独立配额，逐条列示，不能相加。账本记录申请和配额状态变化；实际
-        Pod 资源尚无可信回读，不提供利用率或节省比例。
+        Pod 配置来自独立可信回读，缺少证据时保持 UNKNOWN。配置不是实测用量，
+        不提供利用率或节省比例。
       </p>
       <div className="row">
         <label className="field">
@@ -235,7 +241,140 @@ export function ResourceAccounting({
       {data && (
         <>
           <p className="mono">选中启动 {data.selected_launch_id}</p>
-          <p>实际 Pod 资源：UNKNOWN · NOT_CAPTURED</p>
+          {data.pod_resource_observation ? (
+            <section aria-label="可信 Pod 资源观察">
+              <p>实际 Pod 资源：KUBERNETES_API_READBACK</p>
+              <p className="mono">观察 ID {data.pod_resource_observation.id}</p>
+              <div className="table-wrap">
+                <table aria-label="Pod 资源配置">
+                  <thead>
+                    <tr>
+                      <th>资源事实</th>
+                      <th>CPU / millicores</th>
+                      <th>内存 / bytes</th>
+                      <th>临时存储 / bytes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(
+                      [
+                        [
+                          "工作负载 request",
+                          data.pod_resource_observation.workload_request,
+                        ],
+                        [
+                          "工作负载 limit",
+                          data.pod_resource_observation.workload_limit,
+                        ],
+                        [
+                          "Pod overhead",
+                          data.pod_resource_observation.pod_overhead,
+                        ],
+                        [
+                          "有效 request",
+                          data.pod_resource_observation.effective_request,
+                        ],
+                        [
+                          "有效 limit",
+                          data.pod_resource_observation.effective_limit,
+                        ],
+                      ] as const
+                    ).map(([label, value]) => (
+                      <tr key={label}>
+                        <th scope="row">{label}</th>
+                        <td>{value.cpu_millis}</td>
+                        <td>{value.memory_bytes}</td>
+                        <td>
+                          {"ephemeral_storage_bytes" in value
+                            ? value.ephemeral_storage_bytes
+                            : "不适用"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <details>
+                <summary>观察来源与归属</summary>
+                <dl className="summary-grid">
+                  <div>
+                    <dt>Pod UID</dt>
+                    <dd>{data.pod_resource_observation.pod_uid}</dd>
+                  </div>
+                  <div>
+                    <dt>Pod 回读 RV</dt>
+                    <dd>
+                      {data.pod_resource_observation.pod_resource_version}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>节点 UID</dt>
+                    <dd>{data.pod_resource_observation.node_uid}</dd>
+                  </div>
+                  <div>
+                    <dt>节点 boot ID</dt>
+                    <dd>{data.pod_resource_observation.node_boot_id}</dd>
+                  </div>
+                  <div>
+                    <dt>RuntimeClass UID</dt>
+                    <dd>{data.pod_resource_observation.runtime_class.uid}</dd>
+                  </div>
+                  <div>
+                    <dt>Class 配置摘要</dt>
+                    <dd>
+                      {
+                        data.pod_resource_observation.runtime_class
+                          .config_sha256
+                      }
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Class 回读 RV</dt>
+                    <dd>
+                      {
+                        data.pod_resource_observation.runtime_class
+                          .resource_version
+                      }
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Class overhead CPU</dt>
+                    <dd>
+                      {
+                        data.pod_resource_observation.runtime_class.overhead
+                          .cpu_millis
+                      }{" "}
+                      millicores
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Class overhead 内存</dt>
+                    <dd>
+                      {
+                        data.pod_resource_observation.runtime_class.overhead
+                          .memory_bytes
+                      }{" "}
+                      bytes
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>观察时间</dt>
+                    <dd>{data.pod_resource_observation.observed_at}</dd>
+                  </div>
+                  <div>
+                    <dt>入账时间</dt>
+                    <dd>{data.pod_resource_observation.recorded_at}</dd>
+                  </div>
+                </dl>
+                <p className="fine">
+                  Class RV 是本次回读的不透明元数据，不证明 Pod
+                  创建时采用该版本；节点身份用于绑定登记，不表示节点测量了这些资源。
+                </p>
+              </details>
+            </section>
+          ) : (
+            <p>实际 Pod 资源：UNKNOWN · NOT_CAPTURED</p>
+          )}
           {data.contract ? (
             <dl className="summary-grid" aria-label="启动申请合同">
               <div>

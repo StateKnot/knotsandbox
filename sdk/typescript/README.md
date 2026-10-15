@@ -96,7 +96,7 @@ Unit tests include a real local HTTP redirect, replay after a simulated lost com
 
 ### Resource accounting
 
-Use `getResourceAccounting` for the read-only launch request and quota receipt
+Use `getResourceAccounting` for the read-only launch request, trusted Pod configuration and quota receipt
 view. It requires current `instances:read`; the helper validates UUIDs and bounded
 pagination inputs and preserves decimal strings, including 19-digit account
 values. It makes no mutation and never releases quota.
@@ -132,12 +132,21 @@ const launchPage = await getResourceAccounting(client, tenantId, job.instanceId,
 
 Continue a page with the same tenant, identity, instance, launch filter (including
 its omission), and limit. Cursors expire after 24 hours and bind the platform
-epoch and selected launch; a changed selected launch or filter requires a fresh first
+epoch, current generation/launch, selected launch and exact first-page observation ID
+or absence. A later COMMIT never changes an earlier page's `NOT_CAPTURED`, even if
+its insertion timestamp precedes cutoff. A changed selected launch or filter requires a fresh first
 page. `ResourceAccountingQueryError` exposes the HTTP `status` and structured
 `problem`; permission rejection must clear any previously displayed evidence.
 
-`REQUESTED_COMPUTE_QUOTA` describes admitted CPU/memory requests. Actual Pod
-resources remain `NOT_CAPTURED`; missing old contracts remain
+`REQUESTED_COMPUTE_QUOTA` describes admitted CPU/memory requests. `KUBERNETES_API_READBACK`
+with non-null `pod_resource_observation` describes immutable configuration captured
+through trusted launch registration. Workload request/limit, Pod overhead, and effective
+request/limit have fixed `cpu_millis`, `memory_bytes` and `ephemeral_storage_bytes` keys
+(overhead has only CPU/memory). Class configuration is a separate observation; its
+opaque GET resourceVersion does not prove which Class version admission adopted.
+The helper validates observation scope, fixed keys, canonical decimal integers no larger
+than i64_MAX, and checked effective sums without JavaScript Number conversion.
+Missing observations remain `NOT_CAPTURED` with null; missing old contracts remain
 `HISTORY_START_NOT_CAPTURED` and legacy receipts remain `LEGACY_UNBOUND`.
 Tenant and project quota scopes must not be added together, and neither receipt
 amounts nor requested compute are utilization denominators. A `RELEASED` receipt

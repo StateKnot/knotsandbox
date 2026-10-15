@@ -40,6 +40,8 @@ HISTORICAL_PROGRESSION_MARKER = "AUTO_UPGRADE_UNKNOWN_FAILED_DISTINCT_SOURCES_AC
 SUITES = [
     ("resource_accounting", "resource_accounting", "", "accepted_create_freezes_launch_request_and_scoped_pending_receipts_once"),
     ("resource_accounting_http", "resource_accounting_http", "", "signed_resource_http_and_node_sdk_preserve_decimal_quantities_and_revocation"),
+    ("pod_observation", "sandbox_platform", "launch_resource_observation_tests::", "actual_lost_commit_ack_replays_original_registration_and_observation_id"),
+    ("pod_observation_http", "sandbox_platform", "resource_accounting::tests::", "signed_pages_pin_first_page_absence_across_an_earlier_insert_later_commit_and_recheck_revocation"),
     ("db_cancellation", "sandbox_platform", "db::cancellation_tests::", "cancelled_begin_returns_runtime_tls_connection_idle_and_autocommit_safe"),
     ("bff_pg", "sandbox_platform", "bff::tests::", "browser_fixture_tagged_pools_drain_before_ordinary_database_drop"),
     ("service_clients", "service_clients", "", "service_client_binding_rejects_other_client_and_owner_rotation_revokes_delegation"),
@@ -61,7 +63,7 @@ SUITES = [
 ]
 # A broader local acceptance caller may supply exact expected counts. The
 # standalone review matrix retains its established selection and resources.
-EXPECTED_COUNTS = {"resource_accounting": 9, "resource_accounting_http": 3, "db_cancellation": 1, "bff_pg": 4, "automation_upgrade": 1, "worker_dispatch": 3, "worker_continuation": 6}
+EXPECTED_COUNTS = {"resource_accounting": 9, "resource_accounting_http": 3, "pod_observation": 8, "pod_observation_http": 1, "db_cancellation": 1, "bff_pg": 4, "automation_upgrade": 1, "worker_dispatch": 3, "worker_continuation": 6}
 
 
 def public_fingerprints():
@@ -180,8 +182,8 @@ def run(args):
             sql.append("CREATE ROLE " + role + " LOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD '" + password + "';")
         fixture.invoke(psql, env=psql_env, text="\n".join(sql))
         expected = [{"version": int(path.name.split("_", 1)[0]), "success": True, "checksum": hashlib.sha384(path.read_bytes()).hexdigest()} for path in sorted((ROOT / "migrations").glob("*.sql"))]
-        if [row["version"] for row in expected] != list(range(1, 38)) + [39, 40, 41, 42, 43, 44, 45]:
-            raise RuntimeError("review requires real formal migrations 1..37+39..45, never 38")
+        if [row["version"] for row in expected] != list(range(1, 38)) + [39, 40, 41, 42, 43, 44, 45, 46]:
+            raise RuntimeError("review requires real formal migrations 1..37+39..46, never 38")
         for index, (name, target, filter_name, required) in enumerate(SUITES, 1):
             if not re.fullmatch(r"[a-z][a-z0-9_]{0,39}", name):
                 raise RuntimeError("interface suite name invalid")
@@ -203,6 +205,11 @@ def run(args):
                 test_env[key] = "postgresql://" + role + ":" + passwords[role] + "@127.0.0.1:" + str(port) + "/" + database + "?" + tls_query
             test_env["TEST_OWNER_DATABASE_URL"] = test_env["TEST_MIGRATION_DATABASE_URL"]
             test_env["TEST_AUTOMATION_TLS_ROOTCERT"] = str(rootcert)
+            if name == "pod_observation":
+                # Only the historical cutover case creates and drops its own
+                # random database on this newly owned loopback TLS server.
+                test_env["TEST_POSTGRES_ADMIN_USER"] = admin
+                test_env["SANDBOX_POSTGRES_ADMIN_PASSWORD"] = environment["POSTGRES_PASSWORD"]
             if name == "bff_pg":
                 # Only this fixture creates its own additional random test
                 # databases. Do not expose admin authority to interface suites.

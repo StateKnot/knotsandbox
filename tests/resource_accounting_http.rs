@@ -150,6 +150,7 @@ async fn signed_resource_http_and_node_sdk_preserve_decimal_quantities_and_revoc
         ensure!(
             body["request_evidence"] == "CAPTURED"
                 && body["pod_resource_evidence"] == "NOT_CAPTURED"
+                && body["pod_resource_observation"].is_null()
         );
         ensure!(body["contract"]["cpu_millis"] == "1000" && body["contract"]["generation"] == "1");
         if let Some(cutoff) = &cutoff {

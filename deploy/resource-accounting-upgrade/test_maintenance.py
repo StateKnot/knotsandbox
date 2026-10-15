@@ -70,7 +70,7 @@ def main():
     upgrade.require(postgres['Id'] == pg_id and postgres['Name'].startswith('/sandbox-resource-'), 'OWNED_RESOURCE_FIXTURE_CONTAINER')
     name = 'sandbox-resource-maintenance-' + uuid.uuid4().hex
     record = {'status': 'STARTED', 'source': source, 'sandboxd_sha256': sandboxd_sha,
-              'scope': 'Actual local Kubernetes v1.36.4/fixture Alpine processes and TLS PostgreSQL normal SQLx44→45 migration/preflight; no production service OCI/Kata/cloud/GPU certification',
+              'scope': 'Actual local Kubernetes v1.36.4/fixture Alpine processes and TLS PostgreSQL normal SQLx migration/preflight from the explicitly prepared historical prefix; no production service OCI/Kata/cloud/GPU certification',
               'postgres_fixture_container_id': pg_id, 'k3s_sha256': fixture.K3S}
     container = None
     try:

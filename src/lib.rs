@@ -25,6 +25,9 @@ pub mod grants;
 pub mod history;
 pub mod instance_details;
 pub mod instance_security;
+mod launch_resource_observation_schema;
+#[cfg(test)]
+mod launch_resource_observation_tests;
 pub mod lifecycle;
 pub mod logging;
 pub mod model;

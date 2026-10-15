@@ -284,6 +284,8 @@ b66177be完整CI已确认资源容量与18组PG等前置门通过，但真实诊
 
 ### 12.5 启动申请与配额释放账本（2026-10-15）
 
+本节保留0045账本切片的原验收范围；后续Class回读和0046可信观察分别见12.6、12.7。
+
 本轮完成[逐次启动账本方案](launch-resource-accounting-plan-20261014.md)第2/5步及相关6/7/8账本子项的本地整轮验收。最终50文件冻结候选单轮27组164项、0失败、0ignored，PASS_FULL_ACCEPTANCE；44条迁移逐项字节/checksum、source/bin/SDK稳定及自有清理确认，生产09ca/SQL保持。历史分批、v2/v3和49候选FAIL保留；precommit测试注入过早击中Worker启动检查，经test-only post-policy响应barrier修正后专项10项及整轮6项GREEN，原期限/断言未改。早期其他503/timer原因UNKNOWN；第3/4步实际Pod观察、新CI及原61工作包发布门独立核验。
 
 | 工作包／步骤 | 本轮已实现子项 | 已有证据 | 保留缺口 |
@@ -297,8 +299,25 @@ b66177be完整CI已确认资源容量与18组PG等前置门通过，但真实诊
 
 ### 12.6 RuntimeClass守卫与普通CPU实时回读（2026-10-15）
 
+本节保留第3步当时的验收范围；当前第4步持久观察与公开证据状态见12.7。
+
 本轮完成普通CPU受管理Class/Pod实时复核子项：实际VAP/Binding与固定名GET-only RBAC、配置UID/摘要及Pod UID/完整资源前后GET；首次合法调度、RV/status变化保留，资源/身份冲突拒绝，安全停止独立。大Kubernetes future放入深模块堆状态，默认线程栈下原故障用例通过；guard/verify/ensure/read调用者future实测112/128/48/48bytes。
 
 适用Docker回归35组192项分批通过，逐组对应最终二进制；原生459通过/269环境ignored，严格Clippy/fmt通过。实际Kubernetes1.36.4守卫、TLS回读、overhead dry-run及24项RBAC检查通过，非云Kata/GPU认证。Docker上下文为523个审核输入/7,867,697bytes，无node_modules、私有路径或symlink；自有清理确认。原93954fd CI准入fixture的手工RESTART缺四scope配额，本轮按正常reserve_quota修正并实际4项通过。
 
 恢复草稿被现有公开backups:restore权限门阻断，未进入restored START且未计验收；父流程代码与基线相同，未绕过权限。第4步原子可信登记、持久观察及只读证据展示仍待开发，Pod保持NOT_CAPTURED；利用率、快速启动预准备、GPU及生产发布门仍独立。详见[回读交付记录](runtime-class-resource-readback-20261015.md)。
+
+### 12.7 可信启动资源观察与原子登记（2026-10-15）
+
+本轮完成逐次启动账本第4步普通CPU可信观察的本地验收；37组201项按最终制品分两批通过，专项、维护升级及本地生产镜像门分别通过。汇总PASS_BATCHED_FINAL_ARTIFACTS，不称单轮全跑或生产上线认证。原44条迁移逐字保持，新增0046后正式集合为1..37加39..46，共45条，0038继续未发布。
+
+| 原工作包／步骤 | 本轮实现 | 已有实际验收 | 保留门禁 |
+| --- | --- | --- | --- |
+| G0-08/G2-01/G2-13/G3-12；4 | runtime内部可信资源能力，经原mTLS登记将精确launch／Pod／Node／boot及独立Class配置观察与授权ACK原子提交；冻结旧ACK基线、幂等／冲突拒绝、真实ACK丢失复用 | 新DB8项覆盖回滚、跨租户非空升级、实际双跳TLS COMMIT ACK丢失、撤权／节点边界、RLS／禁写／preflight及过期旧ACK；普通原生461通过／0失败／278环境ignored | 完整矩阵37组201项已分两批核对最终制品通过；目标Kata／CSI／云节点认证独立，恢复草稿仍未计通过 |
+| G2-03/G2-11/G3-01/G3-12；7 | 只读nullable观察、来源枚举、固定request／limit／overhead／effective数量；签名游标固定观察ID或首次缺失，绑定current generation／launch并实时撤权 | 真实JWT／HTTP／独立Node SDK组合1项，实际先INSERT后COMMIT的cutoff反例；SDK77、资源账本Chrome8及consolebuild通过；精度／scope／错误清旧保持 | API、生成SDK与UI协同升级；旧资源游标丢弃、重新第一页。配置事实不等于采样利用率或GPU容量 |
+| G1-03/G2-01/G4-01/G4-06；6 | 0046精确schema／权限门、正常owner维护切换、普通app预检及批准writer恢复；不承诺旧writer混跑 | 真实K3s1.36.4＋独立TLS PG的0045→0046维护PASS，38.01秒，新Pod UID实际不同；16次VM内存采样最低4.588GiB，自有PG／K3s精确清理 | 空prefix45维护机制与非空旧ACK基线专项分别记录；Alpine进程不认证生产OCI服务／Kata／云 |
+| G4-01/G4-02；发行输入 | strict Docker context补唯一缺少的common.py导入；正常固定amd64 runtime／runner构建、原生静态SQLite及受限smoke | 最终535输入context SHA前后不变；runtime release1013.76秒、runner3.827秒，4项nonroot/read-only/network-none/drop-caps smoke及secrets-init实际检查通过，自有标签／副本已清 | 新提交GitHub CI与统一签名／安全／离线安装及生产上线仍独立；完整DB矩阵分批结果已另行核对 |
+
+独立Standards审查0项发现；Spec发现1项并已修复，0项未关闭：数据库续期但extension尚未ACK时，过期旧注册请求／ACK不能被当前较长compute lease续命。入口及最终阻塞后均以DB当前时钟检查本次请求和ACK期限；真实自然过期反例拒绝且无观察／ACK半提交。BFF自建库补正常termination角色脚本，历史automation升级只精确区分新增0046 metadata并独立验证；初始失败保留，未放宽生产权限或期限。
+
+完整矩阵为前9组42项与后28组159项；两批间仅automation_upgrade测试及其独立程序变化，其他公开源码／二进制／SDK逐SHA不变，各批运行稳定及自有清理确认。精确摘要和后续新提交CI状态见[本轮交付记录](trusted-launch-resource-observation-20261015.md)。本子项完成后才进入有预算／期限／撤销／GC的镜像和节点预准备，再进行冷暖端到端实测；GPU设备身份／独占租约／真实采样与可信回收继续按原表单独开发认证。当前不输出利用率、节省比例或GPU已完成结论。

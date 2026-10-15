@@ -37,6 +37,57 @@ pub struct TerminationRuntime {
 pub struct ObservedLaunch {
     pub node: NodeBinding,
     pub launch: LaunchBinding,
+    pub resources: VerifiedLaunchResources,
+}
+
+/// The trusted API readback and the exact scheduled launch/node identity travel
+/// together. Only observe_launch can mint this capability after every runtime
+/// check; public JSON, manifests and nodeguard resource claims cannot mint it.
+pub struct VerifiedLaunchResources {
+    node: NodeBinding,
+    launch: LaunchBinding,
+    record: LaunchResourceRecord,
+    observed_at: DateTime<Utc>,
+}
+
+/// Read-only values for the database adapter. Possessing or deserializing these
+/// scalars alone does not construct a VerifiedLaunchResources capability.
+pub(crate) struct LaunchResourceRecord {
+    pub(crate) pod_resource_version: String,
+    pub(crate) runtime_class_uid: Uuid,
+    pub(crate) runtime_class_resource_version: String,
+    pub(crate) runtime_class_config_sha256: String,
+    pub(crate) workload_request_cpu_millis: i64,
+    pub(crate) workload_request_memory_bytes: i64,
+    pub(crate) workload_request_ephemeral_bytes: i64,
+    pub(crate) workload_limit_cpu_millis: i64,
+    pub(crate) workload_limit_memory_bytes: i64,
+    pub(crate) workload_limit_ephemeral_bytes: i64,
+    pub(crate) pod_overhead_cpu_millis: i64,
+    pub(crate) pod_overhead_memory_bytes: i64,
+    pub(crate) effective_request_cpu_millis: i64,
+    pub(crate) effective_request_memory_bytes: i64,
+    pub(crate) effective_request_ephemeral_bytes: i64,
+    pub(crate) effective_limit_cpu_millis: i64,
+    pub(crate) effective_limit_memory_bytes: i64,
+    pub(crate) effective_limit_ephemeral_bytes: i64,
+    pub(crate) class_overhead_cpu_millis: i64,
+    pub(crate) class_overhead_memory_bytes: i64,
+}
+
+impl VerifiedLaunchResources {
+    pub(crate) fn node(&self) -> &NodeBinding {
+        &self.node
+    }
+    pub(crate) fn launch(&self) -> &LaunchBinding {
+        &self.launch
+    }
+    pub(crate) fn record(&self) -> &LaunchResourceRecord {
+        &self.record
+    }
+    pub(crate) fn observed_at(&self) -> DateTime<Utc> {
+        self.observed_at
+    }
 }
 
 /// Constructed only after authenticated host evidence and fresh, exact-identity
@@ -147,7 +198,48 @@ impl TerminationRuntime {
             node.validate() && launch.validate(),
             "invalid scheduled identity binding",
         )?;
-        Ok(ObservedLaunch { node, launch })
+        require(
+            resources.resources.pod_uid() == launch.pod_uid
+                && resources.resources.node_name() == Some(node.node_name.as_str()),
+            "resource observation differs from scheduled launch",
+        )?;
+        let quantities = resources.resources.quantities();
+        let class = resources.resources.class();
+        let record = LaunchResourceRecord {
+            pod_resource_version: resources.resources.pod_resource_version().to_owned(),
+            runtime_class_uid: class.uid(),
+            runtime_class_resource_version: class.resource_version().to_owned(),
+            runtime_class_config_sha256: class.config_sha256(),
+            workload_request_cpu_millis: quantities.workload_cpu_millis(),
+            workload_request_memory_bytes: quantities.workload_memory_bytes(),
+            workload_request_ephemeral_bytes: quantities.workload_ephemeral_bytes(),
+            // Both maps were independently parsed and equality was required by
+            // the fixed ordinary CPU contract. No limit is inferred unchecked.
+            workload_limit_cpu_millis: quantities.workload_cpu_millis(),
+            workload_limit_memory_bytes: quantities.workload_memory_bytes(),
+            workload_limit_ephemeral_bytes: quantities.workload_ephemeral_bytes(),
+            pod_overhead_cpu_millis: quantities.overhead_cpu_millis(),
+            pod_overhead_memory_bytes: quantities.overhead_memory_bytes(),
+            effective_request_cpu_millis: quantities.effective_cpu_millis(),
+            effective_request_memory_bytes: quantities.effective_memory_bytes(),
+            effective_request_ephemeral_bytes: quantities.workload_ephemeral_bytes(),
+            effective_limit_cpu_millis: quantities.effective_cpu_millis(),
+            effective_limit_memory_bytes: quantities.effective_memory_bytes(),
+            effective_limit_ephemeral_bytes: quantities.workload_ephemeral_bytes(),
+            class_overhead_cpu_millis: quantities.class_overhead_cpu_millis(),
+            class_overhead_memory_bytes: quantities.class_overhead_memory_bytes(),
+        };
+        let verified_resources = VerifiedLaunchResources {
+            node: node.clone(),
+            launch: launch.clone(),
+            record,
+            observed_at: resources.resources.observed_at(),
+        };
+        Ok(ObservedLaunch {
+            node,
+            launch,
+            resources: verified_resources,
+        })
     }
 
     /// Requests ordinary Kubernetes shutdown while the independent host gate

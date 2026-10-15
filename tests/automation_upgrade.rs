@@ -378,12 +378,12 @@ async fn snapshot(owner: &PgPool, scopes: &[Scope]) -> anyhow::Result<Snapshot> 
     .fetch_one(owner)
     .await?;
     facts.insert("platform_configuration".to_owned(), config);
-    // Exclude only additive 0042/0045 relations. Every historical relation's
+    // Exclude only additive 0042/0045/0046 relations. Every historical relation's
     // RLS flags and complete policy rows remain in the exact comparison.
-    let rls: Value = sqlx::query_scalar("SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.relname),'[]'::jsonb) FROM (SELECT c.relname,c.relrowsecurity,c.relforcerowsecurity,(SELECT jsonb_agg(to_jsonb(p) ORDER BY p.polname) FROM pg_policy p WHERE p.polrelid=c.oid) AS policies FROM pg_class c WHERE c.relnamespace='public'::regnamespace AND c.relkind IN('r','p') AND c.relname NOT IN('automation_notifications','launch_resource_contracts','quota_resource_receipts','launch_quota_bindings','quota_resource_legacy_baseline')) r").fetch_one(owner).await?;
+    let rls: Value = sqlx::query_scalar("SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.relname),'[]'::jsonb) FROM (SELECT c.relname,c.relrowsecurity,c.relforcerowsecurity,(SELECT jsonb_agg(to_jsonb(p) ORDER BY p.polname) FROM pg_policy p WHERE p.polrelid=c.oid) AS policies FROM pg_class c WHERE c.relnamespace='public'::regnamespace AND c.relkind IN('r','p') AND c.relname NOT IN('automation_notifications','launch_resource_contracts','quota_resource_receipts','launch_quota_bindings','quota_resource_legacy_baseline','launch_pod_resource_observations','launch_registration_legacy_baseline')) r").fetch_one(owner).await?;
     facts.insert("existing_rls_policies".to_owned(), rls);
     // A trigger name alone is not its identity: append_only already protects
-    // older tables. Match each new 0045 trigger by its exact relation and name.
+    // older tables. Match each new 0045/0046 trigger by its exact relation and name.
     let triggers: Value = sqlx::query_scalar(r#"
         SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.relation,r.tgname),'[]'::jsonb)
         FROM (SELECT t.tgrelid::regclass::text AS relation,t.tgname,t.tgenabled,t.tgtype,
@@ -403,10 +403,28 @@ async fn snapshot(owner: &PgPool, scopes: &[Scope]) -> anyhow::Result<Snapshot> 
               ('instances','launch_resource_capture'),
               ('launch_resource_contracts','launch_resource_quota_complete'),
               ('quota_reservations','quota_resource_launch_binding'),
-              ('quota_reservations','compute_quota_release_proof'))) r
+              ('quota_reservations','compute_quota_release_proof'),
+              ('launch_pod_resource_observations','append_only'),
+              ('launch_pod_resource_observations','launch_resource_observation_ack'),
+              ('launch_registration_legacy_baseline','append_only'),
+              ('launch_registration_legacy_baseline','baseline_closed'),
+              ('launch_permit_receipts','launch_registration_resource_complete'),
+              ('launch_permit_extension_receipts','launch_extension_resource_complete'))) r
     "#).fetch_one(owner).await?;
     facts.insert("existing_trigger_contracts".to_owned(), triggers);
-    let functions: Value = sqlx::query_scalar("SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.function),'[]'::jsonb) FROM (SELECT oid::regprocedure::text AS function,prosecdef,proconfig FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname NOT IN('sandbox_file_activity_match','sandbox_guard_automation_notification','sandbox_capture_automation_notification','sandbox_lock_automation_notification_head','sandbox_notify_worker_dispatch') AND NOT (prokind='f' AND pronargs=0 AND proname IN('sandbox_guard_quota_resource_identity','sandbox_capture_quota_resource','sandbox_capture_launch_resource','sandbox_bind_launch_quota','sandbox_guard_compute_quota_release'))) r").fetch_one(owner).await?;
+    let functions: Value = sqlx::query_scalar(r#"
+        SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.function),'[]'::jsonb)
+        FROM (SELECT oid::regprocedure::text AS function,prosecdef,proconfig FROM pg_proc f
+          WHERE pronamespace='public'::regnamespace
+            AND proname NOT IN('sandbox_file_activity_match','sandbox_guard_automation_notification','sandbox_capture_automation_notification','sandbox_lock_automation_notification_head','sandbox_notify_worker_dispatch')
+            AND NOT (prokind='f' AND pronargs=0 AND proname IN('sandbox_guard_quota_resource_identity','sandbox_capture_quota_resource','sandbox_capture_launch_resource','sandbox_bind_launch_quota','sandbox_guard_compute_quota_release'))
+            AND NOT EXISTS(SELECT 1 FROM unnest(ARRAY[
+              'public.sandbox_guard_launch_resource_registration()',
+              'public.sandbox_guard_launch_resource_observation()',
+              'public.sandbox_lock_registration_boundary(uuid)',
+              'public.sandbox_record_launch_resource_observation(uuid,uuid,text,text,uuid,text,text,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz)'
+            ]::text[]) added(signature) WHERE f.oid=to_regprocedure(added.signature))) r
+    "#).fetch_one(owner).await?;
     facts.insert("existing_function_security".to_owned(), functions);
     Ok(facts)
 }
@@ -458,6 +476,90 @@ async fn assert_resource_accounting_upgrade(
         total_baseline == 16,
         "Both historical tenants require a complete 16-reservation legacy baseline"
     );
+    Ok(())
+}
+
+async fn assert_pod_observation_upgrade(owner: &PgPool, scopes: &[Scope]) -> anyhow::Result<()> {
+    let guarded_tables: i64 = sqlx::query_scalar(r#"
+        SELECT count(*) FROM pg_class c WHERE c.relnamespace='public'::regnamespace
+          AND c.relname IN('launch_pod_resource_observations','launch_registration_legacy_baseline')
+          AND c.relkind='r' AND c.relrowsecurity AND c.relforcerowsecurity
+          AND (SELECT count(*) FROM pg_policy p WHERE p.polrelid=c.oid)=1
+          AND EXISTS(SELECT 1 FROM pg_policy p WHERE p.polrelid=c.oid
+            AND p.polname='tenant_isolation' AND p.polcmd='*' AND p.polpermissive
+            AND p.polroles=ARRAY[0::oid]
+            AND replace(replace(pg_get_expr(p.polqual,p.polrelid),'public.',''),' ','')='(tenant_id=sandbox_current_tenant_id())'
+            AND replace(replace(pg_get_expr(p.polwithcheck,p.polrelid),'public.',''),' ','')='(tenant_id=sandbox_current_tenant_id())')
+    "#).fetch_one(owner).await?;
+    ensure!(
+        guarded_tables == 2,
+        "Migration 46 requires both reviewed FORCE RLS observation tables and exact tenant policies"
+    );
+    let exact_triggers: i64 = sqlx::query_scalar(r#"
+        SELECT count(*) FROM (VALUES
+          ('launch_pod_resource_observations','append_only','sandbox_prevent_audit_mutation()',27,false),
+          ('launch_pod_resource_observations','launch_resource_observation_ack','sandbox_guard_launch_resource_observation()',5,true),
+          ('launch_registration_legacy_baseline','append_only','sandbox_prevent_audit_mutation()',27,false),
+          ('launch_registration_legacy_baseline','baseline_closed','sandbox_prevent_audit_mutation()',7,false),
+          ('launch_permit_receipts','launch_registration_resource_complete','sandbox_guard_launch_resource_registration()',5,true),
+          ('launch_permit_extension_receipts','launch_extension_resource_complete','sandbox_guard_launch_resource_registration()',5,true)
+        ) expected(relation,name,function,kind,deferred)
+        JOIN pg_trigger t ON t.tgrelid=to_regclass('public.'||expected.relation)
+          AND t.tgname=expected.name AND t.tgfoid=to_regprocedure('public.'||expected.function)
+          AND t.tgtype=expected.kind AND t.tgenabled='O' AND NOT t.tgisinternal
+          AND t.tgdeferrable=expected.deferred AND t.tginitdeferred=expected.deferred
+          AND t.tgnargs=0 AND t.tgqual IS NULL AND cardinality(t.tgattr::smallint[])=0
+    "#).fetch_one(owner).await?;
+    ensure!(
+        exact_triggers == 6,
+        "Migration 46 requires the six exact append-only and atomic-registration triggers"
+    );
+    let migration = include_str!("../migrations/0046_launch_pod_resource_observations.sql");
+    for (signature, result) in [
+        ("sandbox_guard_launch_resource_registration()", "trigger"),
+        ("sandbox_guard_launch_resource_observation()", "trigger"),
+        ("sandbox_lock_registration_boundary(uuid)", "boolean"),
+        (
+            "sandbox_record_launch_resource_observation(uuid,uuid,text,text,uuid,text,text,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz)",
+            "uuid",
+        ),
+    ] {
+        let name = signature
+            .split_once('(')
+            .context("fixed observation signature")?
+            .0;
+        let body = migration
+            .split_once(&format!("CREATE FUNCTION {name}("))
+            .context("reviewed observation declaration")?
+            .1
+            .split("$observation$")
+            .nth(1)
+            .context("reviewed observation body")?;
+        let guarded: bool=sqlx::query_scalar(r#"
+            SELECT f.prosrc=$2 AND f.prosecdef AND f.proconfig=ARRAY['search_path=pg_catalog']::text[]
+              AND f.proowner=current_user::regrole AND f.prorettype=to_regtype($3)
+              AND f.prokind='f' AND f.provolatile='v' AND f.proparallel='u'
+              AND NOT f.proretset AND NOT f.proisstrict AND NOT f.proleakproof
+              AND (SELECT lanname='plpgsql' FROM pg_language WHERE oid=f.prolang)
+              AND NOT EXISTS(SELECT 1 FROM aclexplode(COALESCE(f.proacl,acldefault('f',f.proowner))) a
+                  WHERE a.grantee=0 AND a.privilege_type='EXECUTE')
+            FROM pg_proc f WHERE f.oid=to_regprocedure('public.'||$1)
+        "#).bind(signature).bind(body).bind(result).fetch_one(owner).await?;
+        ensure!(
+            guarded,
+            "Migration 46 function must match its reviewed exact signature, body and security: {name}"
+        );
+    }
+    for scope in scopes {
+        let mut tx = tenant_tx(owner, scope.tenant).await?;
+        let rows:(i64,i64)=sqlx::query_as("SELECT (SELECT count(*) FROM launch_pod_resource_observations),(SELECT count(*) FROM launch_registration_legacy_baseline)")
+            .fetch_one(&mut *tx).await?;
+        ensure!(
+            rows == (0, 0),
+            "Migration 46 must not invent Pod observations or registration ACKs for these historical unregistered launches"
+        );
+        tx.commit().await?;
+    }
     Ok(())
 }
 
@@ -685,6 +787,7 @@ async fn upgrade_from_v41_preserves_historical_automation_and_rejects_invalid_so
         "Migration 44 dispatch hint must have an exact owner-only fixed-path trigger contract"
     );
     assert_resource_accounting_upgrade(&owner, &scopes).await?;
+    assert_pod_observation_upgrade(&owner, &scopes).await?;
     ensure!(
         snapshot_matches(&before_current_roles, snapshot(&owner, &scopes).await?)
             && notification_snapshot(&owner, &scopes).await? == notices_at42,

@@ -42,6 +42,7 @@ scripts/release/**
 !scripts/release/debian-security.lock.json
 !scripts/release/native-security.lock.json
 !scripts/release/sqlite_build.py
+!scripts/release/common.py
 # Public, committed certificate/SQL protocol fixtures needed only by the
 # isolated production SQLite acceptance stage; never copied to runtime images.
 !tests/
@@ -53,6 +54,9 @@ tests/fixtures/**
 tests/support/**
 !tests/support/mod.rs
 !tests/support/runtime_class_guard.rs
+!tests/worker_support/
+tests/worker_support/**
+!tests/worker_support/commit_proxy.rs
 !tests/nodeguard_journal_native.rs
 !tests/termination_credentials.rs
 !deploy/admission/
@@ -83,6 +87,7 @@ sdk/typescript/**
 !sdk/typescript/src/
 sdk/typescript/src/**
 !sdk/typescript/src/schema.d.ts
+!sdk/typescript/src/resource-observation.ts
 !sdk/typescript/src/events.ts
 !sdk/typescript/src/event-message.ts
 !sdk/typescript/src/sse.ts
