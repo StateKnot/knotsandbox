@@ -52,9 +52,22 @@ pub(crate) struct WorkloadResources {
     ephemeral: EphemeralStorageBytes,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct OverheadResources {
     cpu: CpuMillis,
     memory: MemoryBytes,
+}
+
+/// Parsed from a complete API Pod and its independently read managed class.
+/// Private fields and no deserializer keep callers from manufacturing an
+/// observation from requested values. This is live configuration, not a
+/// historical RuntimeClass adoption receipt or an exclusive capacity claim.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct PodResourceObservation {
+    workload: WorkloadResources,
+    overhead: OverheadResources,
+    effective_cpu: CpuMillis,
+    effective_memory: MemoryBytes,
 }
 
 fn quantity_text(value: &str) -> Result<(), ResourceError> {
@@ -293,4 +306,29 @@ pub(crate) fn validate_provision_resources(pod: &Pod, expected: &Pod) -> Result<
     bounded(workload.cpu.0.checked_add(overhead.cpu.0))?;
     bounded(workload.memory.0.checked_add(overhead.memory.0))?;
     Ok(())
+}
+
+/// Both sources must be available complete API objects. Absence of an overhead
+/// map on such an object means zero; an unavailable source must never call this
+/// function with a fabricated empty map. Full manifest/UID validation is kept
+/// separately, including its strict comparison of resource quantity spelling.
+pub(crate) fn observe_pod_resources(
+    pod: &Pod,
+    expected: &Pod,
+    class_overhead: Option<&BTreeMap<String, Quantity>>,
+) -> Result<PodResourceObservation, ResourceError> {
+    let workload = WorkloadResources::pod(pod)?;
+    if workload != WorkloadResources::pod(expected)? {
+        return Err(ResourceError::Baseline);
+    }
+    let overhead = parse_overhead(pod.spec.as_ref().and_then(|spec| spec.overhead.as_ref()))?;
+    if overhead != parse_overhead(class_overhead)? {
+        return Err(ResourceError::Baseline);
+    }
+    Ok(PodResourceObservation {
+        workload,
+        overhead,
+        effective_cpu: CpuMillis(bounded(workload.cpu.0.checked_add(overhead.cpu.0))?),
+        effective_memory: MemoryBytes(bounded(workload.memory.0.checked_add(overhead.memory.0))?),
+    })
 }

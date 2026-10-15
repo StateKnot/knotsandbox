@@ -1,4 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+#[path = "support/runtime_class_guard.rs"]
+mod runtime_class_guard;
 use std::collections::BTreeMap;
 
 use k8s_openapi::api::core::v1::{PersistentVolumeClaim, Pod};
@@ -45,7 +47,12 @@ async fn all_flavors_preserve_equal_requests_and_limits_and_supported_ephemeral_
             let known_uid = observed["metadata"]["uid"].as_str().unwrap().to_owned();
             let service = tower::service_fn(move |request: Request<KubeBody>| {
                 assert_eq!(request.method(), axum::http::Method::GET);
-                let body = observed.to_string();
+                let body = runtime_class_guard::object(
+                    request.uri().path(),
+                    Some(&observed["spec"]["overhead"]),
+                )
+                .unwrap_or_else(|| observed.clone())
+                .to_string();
                 async move {
                     Ok::<_, Infallible>(
                         Response::builder()
@@ -211,11 +218,18 @@ async fn a_created_pod_with_unsupported_overhead_is_not_returned_as_a_valid_laun
     let requests = Arc::new(Mutex::new(Vec::new()));
     let captured = requests.clone();
     let service = tower::service_fn(move |request: Request<KubeBody>| {
-        captured.lock().unwrap().push(request.method().clone());
-        let (status, body) = match *request.method() {
-            Method::GET => (404, json!({"apiVersion":"v1","kind":"Status","status":"Failure","reason":"NotFound","code":404,"message":"fixture absent"}).to_string()),
-            Method::POST => (201, created.to_string()),
-            _ => panic!("unexpected Kubernetes mutation"),
+        let (status, body) = if let Some(value) =
+            runtime_class_guard::object(request.uri().path(), None)
+        {
+            (200, value.to_string())
+        } else {
+            captured.lock().unwrap().push(request.method().clone());
+            match *request.method() {
+                Method::GET if captured.lock().unwrap().len() == 1 => (404, json!({"apiVersion":"v1","kind":"Status","status":"Failure","reason":"NotFound","code":404,"message":"fixture absent"}).to_string()),
+                Method::GET => (200, created.to_string()),
+                Method::POST => (201, created.to_string()),
+                _ => panic!("unexpected Kubernetes mutation"),
+            }
         };
         async move {
             Ok::<_, Infallible>(
@@ -251,8 +265,13 @@ async fn provisioning_rejects_request_plus_overhead_integer_overflow() -> anyhow
         let mut observed = serde_json::to_value(observed_pod(&manifests.pod))?;
         observed["spec"]["overhead"] = overhead;
         let known_uid = observed["metadata"]["uid"].as_str().unwrap().to_owned();
-        let service = tower::service_fn(move |_: Request<KubeBody>| {
-            let body = observed.to_string();
+        let service = tower::service_fn(move |request: Request<KubeBody>| {
+            let body = runtime_class_guard::object(
+                request.uri().path(),
+                Some(&observed["spec"]["overhead"]),
+            )
+            .unwrap_or_else(|| observed.clone())
+            .to_string();
             async move {
                 Ok::<_, Infallible>(
                     Response::builder()
@@ -300,9 +319,13 @@ async fn provisioning_keeps_the_full_pod_comparison_strict_for_quantity_aliases(
     let known_uid = observed["metadata"]["uid"].as_str().unwrap().to_owned();
     let requests = Arc::new(AtomicUsize::new(0));
     let captured = requests.clone();
-    let service = tower::service_fn(move |_: Request<KubeBody>| {
-        captured.fetch_add(1, Ordering::SeqCst);
-        let body = observed.to_string();
+    let service = tower::service_fn(move |request: Request<KubeBody>| {
+        let body = if let Some(value) = runtime_class_guard::object(request.uri().path(), None) {
+            value.to_string()
+        } else {
+            captured.fetch_add(1, Ordering::SeqCst);
+            observed.to_string()
+        };
         async move {
             Ok::<_, Infallible>(
                 Response::builder()
@@ -346,8 +369,12 @@ async fn provisioning_rejects_bad_overhead_but_safety_stop_still_targets_the_old
     let requests = Arc::new(Mutex::new(Vec::new()));
     let captured = requests.clone();
     let service = tower::service_fn(move |request: Request<KubeBody>| {
-        captured.lock().unwrap().push(request.method().clone());
-        let body = observed.to_string();
+        let body = if let Some(value) = runtime_class_guard::object(request.uri().path(), None) {
+            value.to_string()
+        } else {
+            captured.lock().unwrap().push(request.method().clone());
+            observed.to_string()
+        };
         async move {
             Ok::<_, Infallible>(
                 Response::builder()
@@ -486,7 +513,209 @@ fn config() -> RuntimeManifestConfig {
 fn observed_pod(pod: &Pod) -> Pod {
     let mut existing = pod.clone();
     existing.metadata.uid = Some(Uuid::new_v4().to_string());
+    existing.metadata.resource_version = Some("pod-fixture-rv".into());
     existing
+}
+
+#[tokio::test]
+async fn actual_pod_readback_rejects_resource_identity_and_guard_races() -> anyhow::Result<()> {
+    use axum::{
+        body::Body,
+        http::{Request, Response},
+    };
+    use kube::{Client, client::Body as KubeBody};
+    use sandbox_platform::runtime::KubernetesRuntime;
+    use std::{
+        convert::Infallible,
+        sync::{Arc, Mutex},
+    };
+
+    for case in [
+        "stable",
+        "status_rv_only",
+        "initial_scheduling",
+        "class_uid",
+        "class_overhead",
+        "class_scheduling",
+        "policy_uid",
+        "binding_uid",
+        "pod_uid",
+        "pod_overhead",
+        "pod_resources",
+        "pod_node",
+        "pod_spec",
+        "pod_invalid_rv",
+        "pod_missing_rv",
+        "pod_large_rv",
+        "pod_missing_overhead",
+        "pod_mismatched_overhead",
+    ] {
+        let manifests = build_manifests(&context(), &config())?;
+        let mut pod = serde_json::to_value(observed_pod(&manifests.pod))?;
+        pod["spec"]["nodeName"] = json!("kata-node");
+        if case == "initial_scheduling" {
+            pod["spec"].as_object_mut().unwrap().remove("nodeName");
+        }
+        // The actual Pod source may use a different supported quantity spelling
+        // for overhead, which is compared numerically to the separate Class.
+        pod["spec"]["overhead"] = json!({"cpu":"0.25","memory":"167772160"});
+        if case == "pod_missing_overhead" {
+            pod["spec"].as_object_mut().unwrap().remove("overhead");
+        } else if case == "pod_mismatched_overhead" {
+            pod["spec"]["overhead"]["cpu"] = json!("251m");
+        }
+        let known_uid = pod["metadata"]["uid"].as_str().unwrap().to_owned();
+        let calls = Arc::new(Mutex::new(BTreeMap::<String, usize>::new()));
+        let seen = calls.clone();
+        let service = tower::service_fn(move |request: Request<KubeBody>| {
+            assert_eq!(request.method(), axum::http::Method::GET);
+            let path = request.uri().path();
+            let count = {
+                let mut calls = calls.lock().unwrap();
+                let count = calls.entry(path.to_owned()).or_default();
+                *count += 1;
+                *count
+            };
+            let mut value =
+                runtime_class_guard::object(path, Some(&json!({"cpu":"250m","memory":"160Mi"})))
+                    .unwrap_or_else(|| pod.clone());
+            if count > 1 {
+                match (value["kind"].as_str(), case) {
+                    (Some("RuntimeClass"), "class_uid")
+                    | (Some("ValidatingAdmissionPolicy"), "policy_uid")
+                    | (Some("ValidatingAdmissionPolicyBinding"), "binding_uid")
+                    | (Some("Pod"), "pod_uid") => value["metadata"]["uid"] = json!(Uuid::new_v4()),
+                    (Some("RuntimeClass"), "class_overhead") => {
+                        value["overhead"]["podFixed"]["cpu"] = json!("251m")
+                    }
+                    (Some("RuntimeClass"), "class_scheduling") => {
+                        value["scheduling"]["nodeSelector"]["another-selector"] = json!("changed")
+                    }
+                    (Some("Pod"), "pod_overhead") => {
+                        value["spec"]["overhead"]["cpu"] = json!("251m")
+                    }
+                    (Some("Pod"), "pod_resources") => {
+                        value["spec"]["containers"][0]["resources"]["limits"]["cpu"] = json!("2")
+                    }
+                    (Some("Pod"), "pod_node") => value["spec"]["nodeName"] = json!("other-node"),
+                    (Some("Pod"), "initial_scheduling") => {
+                        value["spec"]["nodeName"] = json!("kata-node")
+                    }
+                    (Some("Pod"), "pod_spec") => value["spec"]["hostPID"] = json!(true),
+                    (Some("Pod"), "pod_invalid_rv") => {
+                        value["metadata"]["resourceVersion"] = json!("contains space")
+                    }
+                    (Some("Pod"), "pod_missing_rv") => {
+                        value["metadata"]
+                            .as_object_mut()
+                            .unwrap()
+                            .remove("resourceVersion");
+                    }
+                    (Some("Pod"), "pod_large_rv") => {
+                        value["metadata"]["resourceVersion"] = json!("x".repeat(257))
+                    }
+                    (_, "status_rv_only") => {
+                        value["metadata"]["resourceVersion"] = json!("opaque:revision-2");
+                        if value["kind"] == "Pod" {
+                            value["status"] = json!({"phase":"Running"});
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            std::future::ready(Ok::<_, Infallible>(
+                Response::builder()
+                    .status(200)
+                    .header("content-type", "application/json")
+                    .body(Body::from(value.to_string()))
+                    .unwrap(),
+            ))
+        });
+        let runtime = KubernetesRuntime::from_client(Client::new(service, "test"));
+        let result = runtime.ensure_pod(&manifests, Some(&known_uid)).await;
+        assert_eq!(
+            result.is_ok(),
+            matches!(case, "stable" | "status_rv_only" | "initial_scheduling"),
+            "case {case}: {result:?}"
+        );
+        if matches!(case, "stable" | "status_rv_only" | "initial_scheduling") {
+            let calls = seen.lock().unwrap();
+            assert_eq!(
+                calls
+                    .iter()
+                    .find(|(path, _)| path.contains("/pods/"))
+                    .map(|(_, n)| *n),
+                Some(2)
+            );
+            assert_eq!(calls["/apis/node.k8s.io/v1/runtimeclasses/kata-qemu"], 2);
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn created_pod_requires_an_independent_exact_uid_get() -> anyhow::Result<()> {
+    use axum::{
+        body::Body,
+        http::{Method, Request, Response},
+    };
+    use kube::{Client, client::Body as KubeBody};
+    use sandbox_platform::runtime::KubernetesRuntime;
+    use std::{
+        convert::Infallible,
+        sync::{Arc, Mutex},
+    };
+
+    for case in ["stable", "replaced", "first_scheduling"] {
+        let manifests = build_manifests(&context(), &config())?;
+        let pod = serde_json::to_value(observed_pod(&manifests.pod))?;
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let seen = calls.clone();
+        let service = tower::service_fn(move |request: Request<KubeBody>| {
+            let (status, value) = if let Some(value) =
+                runtime_class_guard::object(request.uri().path(), None)
+            {
+                (200, value)
+            } else {
+                let mut calls = calls.lock().unwrap();
+                calls.push(request.method().clone());
+                if calls.len() == 1 {
+                    (
+                        404,
+                        json!({"apiVersion":"v1","kind":"Status","status":"Failure","reason":"NotFound","code":404,"message":"absent"}),
+                    )
+                } else if request.method() == Method::POST {
+                    (201, pod.clone())
+                } else {
+                    let mut readback = pod.clone();
+                    if case == "replaced" {
+                        readback["metadata"]["uid"] = json!(Uuid::new_v4());
+                    } else if case == "first_scheduling" {
+                        readback["spec"]["nodeName"] = json!("kata-node");
+                    }
+                    (200, readback)
+                }
+            };
+            std::future::ready(Ok::<_, Infallible>(
+                Response::builder()
+                    .status(status)
+                    .header("content-type", "application/json")
+                    .body(Body::from(value.to_string()))
+                    .unwrap(),
+            ))
+        });
+        let runtime = KubernetesRuntime::from_client(Client::new(service, "test"));
+        let result = runtime.ensure_pod(&manifests, None).await;
+        assert_eq!(
+            result.is_ok(),
+            case != "replaced",
+            "case={case}: {result:?}"
+        );
+        let calls = seen.lock().unwrap();
+        assert_eq!(&calls[..3], [Method::GET, Method::POST, Method::GET]);
+        assert_eq!(calls.len(), if case == "replaced" { 3 } else { 4 });
+    }
+    Ok(())
 }
 
 fn mutate_pod(pod: &Pod, mutate: impl FnOnce(&mut Value)) -> Pod {

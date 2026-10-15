@@ -115,6 +115,7 @@ class TerminationInstaller(unittest.TestCase):
             {'apiGroups': [''], 'resources': ['namespaces'], 'resourceNames': ['sbx-project-2', 'sbx-project-3'], 'verbs': ['get']},
             {'apiGroups': [''], 'resources': ['nodes'], 'resourceNames': ['kata-1', 'kata-2', 'kata-3'], 'verbs': ['get']},
             {'apiGroups': [''], 'resources': ['persistentvolumes'], 'verbs': ['get']},
+            {'apiGroups': ['admissionregistration.k8s.io'], 'resources': ['validatingadmissionpolicies', 'validatingadmissionpolicybindings'], 'resourceNames': ['sandbox-kata-runtimeclass-v1'], 'verbs': ['get']},
             {'apiGroups': ['node.k8s.io'], 'resources': ['runtimeclasses'], 'resourceNames': ['kata-qemu'], 'verbs': ['get']},
             {'apiGroups': ['storage.k8s.io'], 'resources': ['volumeattachments'], 'verbs': ['list']}])
         for role in [r for r in objects['items'] if r['kind'] == 'Role']:

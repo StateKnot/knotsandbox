@@ -37,7 +37,7 @@ pub(super) struct MockKube {
     pub(super) pause_policy_create_response: Arc<AtomicBool>,
     pub(super) pause_policy_get: Arc<AtomicBool>,
     pub(super) pause_pvc_get: Arc<AtomicBool>,
-    pub(super) pause_pod_get: Arc<AtomicBool>,
+    pub(super) pause_recorded_pod_get: Arc<AtomicBool>,
     pub(super) paused: Arc<Semaphore>,
     pub(super) resume: Arc<Semaphore>,
     pub(super) slow_posts: Arc<AtomicBool>,
@@ -70,7 +70,7 @@ impl MockKube {
             pause_policy_create_response: Default::default(),
             pause_policy_get: Default::default(),
             pause_pvc_get: Default::default(),
-            pause_pod_get: Default::default(),
+            pause_recorded_pod_get: Default::default(),
             paused: Arc::new(Semaphore::new(0)),
             resume: Arc::new(Semaphore::new(0)),
             slow_posts: Default::default(),
@@ -111,7 +111,12 @@ impl MockKube {
                 } else if path.contains("/persistentvolumeclaims/") {
                     self.pause_pvc_get.swap(false, Ordering::SeqCst)
                 } else if path.contains("/pods/") {
-                    self.pause_pod_get.swap(false, Ordering::SeqCst)
+                    // Provisioning now performs independent GETs before its
+                    // checkpoint. This barrier belongs after the real durable
+                    // Pod checkpoint, irrespective of the number of GETs.
+                    self.pause_recorded_pod_get.load(Ordering::SeqCst)
+                        && self.pod_checkpoint_committed(&path).await?
+                        && self.pause_recorded_pod_get.swap(false, Ordering::SeqCst)
                 } else {
                     false
                 };
@@ -120,11 +125,10 @@ impl MockKube {
                 self.resume.acquire().await?.forget();
             }
         }
-        if method == Method::GET && path == "/apis/node.k8s.io/v1/runtimeclasses/kata-qemu" {
-            return Ok(json_response(
-                200,
-                json!({"apiVersion":"node.k8s.io/v1","kind":"RuntimeClass","metadata":{"name":"kata-qemu"},"handler":"kata-qemu","scheduling":{"nodeSelector":{"sandbox.platform/worker-pool":"kata"}}}),
-            ));
+        if method == Method::GET
+            && let Some(object) = crate::support::runtime_class_guard::object(&path, None)
+        {
+            return Ok(json_response(200, object));
         }
         if method == Method::GET && path == format!("/api/v1/namespaces/{}", self.namespace) {
             return Ok(json_response(
@@ -261,6 +265,54 @@ impl MockKube {
             armed.store(true, Ordering::SeqCst);
         }
         Ok(response)
+    }
+
+    async fn pod_checkpoint_committed(&self, path: &str) -> anyhow::Result<bool> {
+        let (pod_uid, generation) = {
+            let state = self
+                .state
+                .lock()
+                .map_err(|_| anyhow::anyhow!("mock lock poisoned"))?;
+            let pod = state.objects.get(path).context("barrier Pod missing")?;
+            let uid = pod["metadata"]["uid"]
+                .as_str()
+                .context("barrier Pod UID missing")?
+                .to_owned();
+            let generation: i64 = pod["metadata"]["labels"]["sandbox.platform/generation"]
+                .as_str()
+                .context("barrier Pod generation missing")?
+                .parse()?;
+            (uid, generation)
+        };
+        let mut tx = self.owner.begin().await?;
+        sqlx::query("SELECT set_config('app.tenant_id',$1,true)")
+            .bind(self.tenant.to_string())
+            .execute(&mut *tx)
+            .await?;
+        // Another connection can observe these facts only after the real
+        // resource/event/instance update transaction committed. An in-memory
+        // response, request counter, or claimed operation stage is insufficient.
+        let committed: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM external_resources r \
+             JOIN operations o ON (o.tenant_id,o.project_id,o.id)=(r.tenant_id,r.project_id,r.operation_id) \
+             JOIN instances i ON (i.tenant_id,i.project_id,i.id,i.workspace_id)=(r.tenant_id,r.project_id,r.instance_id,r.workspace_id) \
+             JOIN domain_events e ON (e.tenant_id,e.project_id,e.operation_id,e.aggregate_id)=(r.tenant_id,r.project_id,r.operation_id,r.operation_id) \
+             WHERE r.tenant_id=$1 AND r.operation_id=$2 AND r.provider='kubernetes' AND r.kind='POD' \
+             AND r.provider_id=$3 AND r.status='ACTIVE' AND r.owner_id=i.id \
+             AND r.generation=$4 AND i.runtime_generation=$4 AND i.pod_uid::text=$3 \
+             AND e.event_type='operation.progressed' AND e.payload->>'resource_kind'='POD' \
+             AND e.payload->>'provider_id'=$3 AND e.payload->>'generation'=r.generation::text \
+             AND e.payload->>'launch_id'=i.launch_id::text AND e.payload->>'cluster_epoch'=i.cluster_epoch::text \
+             AND e.payload->>'lease_token'=o.lease_token::text)",
+        )
+        .bind(self.tenant)
+        .bind(self.operation)
+        .bind(pod_uid)
+        .bind(generation)
+        .fetch_one(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(committed)
     }
     pub(super) fn posts(&self, kind: &str) -> anyhow::Result<usize> {
         Ok(*self

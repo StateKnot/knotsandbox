@@ -10,7 +10,7 @@ use crate::{
     runtime::KubernetesRuntime,
     runtime_manifest::{RuntimeManifestContext, build_manifests},
     termination_ledger::tests::FixtureRuntime,
-    test_support_db::api_failure,
+    test_support_db::{api_failure, runtime_class_guard},
     worker::Worker,
 };
 use anyhow::{Context, ensure};
@@ -143,7 +143,10 @@ pub(super) async fn run(case: StartCase<'_>) -> anyhow::Result<()> {
         "kube-system".into(),
         BTreeMap::from([("k8s-app".into(), "kube-dns".into())]),
     )?;
-    case.objects.lock().map_err(|_|anyhow::anyhow!("fixture poisoned"))?.insert("/apis/node.k8s.io/v1/runtimeclasses/kata-qemu".into(),json!({"apiVersion":"node.k8s.io/v1","kind":"RuntimeClass","metadata":{"name":"kata-qemu"},"handler":"kata-qemu","scheduling":{"nodeSelector":{"sandbox.platform/worker-pool":"kata"}}}));
+    case.objects
+        .lock()
+        .map_err(|_| anyhow::anyhow!("fixture poisoned"))?
+        .extend(runtime_class_guard::objects(None));
     let first = claim(&worker, &case, accepted.body.operation.id).await?;
     worker
         .reconcile(&first)

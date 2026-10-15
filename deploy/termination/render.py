@@ -168,6 +168,7 @@ def identities(inputs):
             {'apiGroups': [''], 'resources': ['namespaces'], 'resourceNames': sorted(p['namespace'] for p in value['projects']), 'verbs': ['get']},
             {'apiGroups': [''], 'resources': ['nodes'], 'resourceNames': sorted(n['node']['node_name'] for n in value['runtime_nodes']), 'verbs': ['get']},
             {'apiGroups': [''], 'resources': ['persistentvolumes'], 'verbs': ['get']},
+            {'apiGroups': ['admissionregistration.k8s.io'], 'resources': ['validatingadmissionpolicies', 'validatingadmissionpolicybindings'], 'resourceNames': ['sandbox-kata-runtimeclass-v1'], 'verbs': ['get']},
             {'apiGroups': ['node.k8s.io'], 'resources': ['runtimeclasses'], 'resourceNames': ['kata-qemu'], 'verbs': ['get']},
             {'apiGroups': ['storage.k8s.io'], 'resources': ['volumeattachments'], 'verbs': ['list']}]},
         {'apiVersion': 'rbac.authorization.k8s.io/v1', 'kind': 'ClusterRoleBinding', 'metadata': {'name': role},

@@ -290,6 +290,7 @@ async fn prepared_runtime(
     let manifests = build_manifests(&c, &config)?;
     let mut pod_object = serde_json::to_value(manifests.pod)?;
     pod_object["metadata"]["uid"] = json!(pod);
+    pod_object["metadata"]["resourceVersion"] = json!("pod-fixture-rv");
     pod_object["spec"]["nodeName"] = json!("kata-node");
     pod_object["status"] = json!({"phase":"Running","conditions":[{"type":"Ready","status":"True"}],"containerStatuses":[{"name":container_name(c.launch_id),"ready":true,"restartCount":0,"image":"fixture-image","imageID":"fixture-id","state":{"running":{}}}]});
     let mut pvc_object = serde_json::to_value(manifests.pvc)?;
@@ -298,11 +299,7 @@ async fn prepared_runtime(
     pvc_object["status"] = json!({"phase":"Bound"});
     let mut policy_object = serde_json::to_value(manifests.network_policy)?;
     policy_object["metadata"]["uid"] = json!(policy);
-    let objects = BTreeMap::from([
-        (
-            "/apis/node.k8s.io/v1/runtimeclasses/kata-qemu".into(),
-            json!({"apiVersion":"node.k8s.io/v1","kind":"RuntimeClass","metadata":{"name":"kata-qemu"},"handler":"kata-qemu","scheduling":{"nodeSelector":{"sandbox.platform/worker-pool":"kata"}}}),
-        ),
+    let mut objects = BTreeMap::from([
         (
             format!("/api/v1/namespaces/{}", c.namespace),
             json!({"apiVersion":"v1","kind":"Namespace","metadata":{"name":c.namespace,"labels":{"sandbox.platform/managed":"true","sandbox.platform/tenant-id":c.tenant_id,"sandbox.platform/project-id":c.project_id,"sandbox.platform/cluster-epoch":c.cluster_epoch},"annotations":{"sandbox.platform/certification-id":"test-certification"}}}),
@@ -347,6 +344,7 @@ async fn prepared_runtime(
             policy_object,
         ),
     ]);
+    objects.extend(support::runtime_class_guard::objects(None));
     Ok((c, config, objects))
 }
 

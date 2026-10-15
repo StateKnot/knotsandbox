@@ -1,0 +1,77 @@
+{
+  "policy": {
+    "apiVersion": "admissionregistration.k8s.io/v1",
+    "kind": "ValidatingAdmissionPolicy",
+    "metadata": {
+      "name": "sandbox-kata-runtimeclass-v1"
+    },
+    "spec": {
+      "failurePolicy": "Fail",
+      "matchConstraints": {
+        "matchPolicy": "Exact",
+        "namespaceSelector": {},
+        "objectSelector": {},
+        "resourceRules": [
+          {
+            "apiGroups": [
+              "node.k8s.io"
+            ],
+            "apiVersions": [
+              "v1"
+            ],
+            "operations": [
+              "CREATE",
+              "UPDATE",
+              "DELETE"
+            ],
+            "resources": [
+              "runtimeclasses"
+            ],
+            "scope": "Cluster"
+          }
+        ]
+      },
+      "matchConditions": [
+        {
+          "name": "ordinary-runtime-class",
+          "expression": "request.name == 'kata-qemu'"
+        }
+      ],
+      "validations": [
+        {
+          "expression": "request.operation != 'DELETE'",
+          "message": "KnotSandbox managed RuntimeClass deletion is forbidden",
+          "reason": "Forbidden"
+        },
+        {
+          "expression": "request.operation == 'DELETE' || (object.handler == 'kata-qemu' && has(object.scheduling) && has(object.scheduling.nodeSelector) && 'sandbox.platform/worker-pool' in object.scheduling.nodeSelector && object.scheduling.nodeSelector['sandbox.platform/worker-pool'] == 'kata')",
+          "message": "KnotSandbox requires the dedicated Kata handler and worker pool",
+          "reason": "Forbidden"
+        },
+        {
+          "expression": "request.operation != 'UPDATE' || (object.handler == oldObject.handler && has(object.overhead) == has(oldObject.overhead) && (!has(object.overhead) || object.overhead == oldObject.overhead) && has(object.scheduling) == has(oldObject.scheduling) && (!has(object.scheduling) || object.scheduling == oldObject.scheduling))",
+          "message": "KnotSandbox RuntimeClass handler overhead and scheduling are immutable",
+          "reason": "Forbidden"
+        }
+      ]
+    }
+  },
+  "binding": {
+    "apiVersion": "admissionregistration.k8s.io/v1",
+    "kind": "ValidatingAdmissionPolicyBinding",
+    "metadata": {
+      "name": "sandbox-kata-runtimeclass-v1"
+    },
+    "spec": {
+      "policyName": "sandbox-kata-runtimeclass-v1",
+      "validationActions": [
+        "Deny"
+      ],
+      "matchResources": {
+        "matchPolicy": "Exact",
+        "namespaceSelector": {},
+        "objectSelector": {}
+      }
+    }
+  }
+}

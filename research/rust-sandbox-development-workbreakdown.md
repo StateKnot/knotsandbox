@@ -294,3 +294,11 @@ b66177be完整CI已确认资源容量与18组PG等前置门通过，但真实诊
 | G2-12/G4-02/G4-06；8 | 普通角色TLS PostgreSQL、JWT/JWKS/HTTP与精确整数、延迟tenant上下文检查、维护失败与并发操作锁验收 | 最终50候选单轮27组164项、0失败/0ignored、44条迁移及source/bin/SDK/清理全部通过；原分批和v2/v3/49候选FAIL保留。barrier专项10项及本轮continuation6项GREEN；普通453/0/269早于integration修订，不替代实PG | test-only barrier先等真实policy POST、后锁domain_events并放行，独立启动5秒，原5/12/35秒与断言保持；49候选SQLx锁超时原因是注入过早。早期其他503/timer原因UNKNOWN，此次database20/timers8/worker4通过不代表修复未知原因；新CI待上传触发 |
 
 基线5086b28的GitHub CI run38464971503已实际completed/success，只证明该旧提交；本轮新提交CI待上传后触发，其实际状态由本机交付回执另行记录。两项维护P2和延迟上下文审查反馈均已处理，无未关闭项；完整安全/签名发布门及真实Kata/CSI/Cilium/GPU认证仍未因此完成。精确摘要、失败路径、维护范围和后续门见[本轮交付记录](launch-resource-accounting-delivery-20261015.md)，用户用法见[资源账本](../docs/resource-accounting.md)。
+
+### 12.6 RuntimeClass守卫与普通CPU实时回读（2026-10-15）
+
+本轮完成普通CPU受管理Class/Pod实时复核子项：实际VAP/Binding与固定名GET-only RBAC、配置UID/摘要及Pod UID/完整资源前后GET；首次合法调度、RV/status变化保留，资源/身份冲突拒绝，安全停止独立。大Kubernetes future放入深模块堆状态，默认线程栈下原故障用例通过；guard/verify/ensure/read调用者future实测112/128/48/48bytes。
+
+适用Docker回归35组192项分批通过，逐组对应最终二进制；原生459通过/269环境ignored，严格Clippy/fmt通过。实际Kubernetes1.36.4守卫、TLS回读、overhead dry-run及24项RBAC检查通过，非云Kata/GPU认证。Docker上下文为523个审核输入/7,867,697bytes，无node_modules、私有路径或symlink；自有清理确认。原93954fd CI准入fixture的手工RESTART缺四scope配额，本轮按正常reserve_quota修正并实际4项通过。
+
+恢复草稿被现有公开backups:restore权限门阻断，未进入restored START且未计验收；父流程代码与基线相同，未绕过权限。第4步原子可信登记、持久观察及只读证据展示仍待开发，Pod保持NOT_CAPTURED；利用率、快速启动预准备、GPU及生产发布门仍独立。详见[回读交付记录](runtime-class-resource-readback-20261015.md)。

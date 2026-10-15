@@ -6,7 +6,6 @@ use std::time::Duration;
 use k8s_openapi::api::{
     core::v1::{Namespace, PersistentVolumeClaim, Pod},
     networking::v1::NetworkPolicy,
-    node::v1::RuntimeClass,
 };
 use kube::{
     Api, Client, Config,
@@ -155,30 +154,7 @@ impl KubernetesRuntime {
     }
 
     pub async fn verify_runtime_class(&self) -> Result<(), RuntimeError> {
-        let api: Api<RuntimeClass> = Api::all(self.client.clone());
-        let class = api
-            .get_opt("kata-qemu")
-            .await?
-            .ok_or(RuntimeError::InvalidRuntimeClass)?;
-        if class.metadata.deletion_timestamp.is_some()
-            || class.handler != "kata-qemu"
-            || class
-                .scheduling
-                .as_ref()
-                .and_then(|s| s.node_selector.as_ref())
-                .and_then(|s| s.get("sandbox.platform/worker-pool"))
-                .map(String::as_str)
-                != Some("kata")
-        {
-            return Err(RuntimeError::InvalidRuntimeClass);
-        }
-        crate::runtime_resource_contract::validate_overhead(
-            class
-                .overhead
-                .as_ref()
-                .and_then(|overhead| overhead.pod_fixed.as_ref()),
-        )
-        .map_err(|_| RuntimeError::InvalidRuntimeClass)?;
+        crate::runtime_class_guard::read(self.client.clone()).await?;
         Ok(())
     }
 
@@ -242,9 +218,20 @@ impl KubernetesRuntime {
         manifests: &RuntimeManifests,
         known_uid: Option<&str>,
     ) -> Result<Pod, RuntimeError> {
+        // Typed Kubernetes readback state is large. Keep it on this module's
+        // heap so every lifecycle caller does not inline it into its own future.
+        Box::pin(self.ensure_pod_inner(manifests, known_uid)).await
+    }
+
+    async fn ensure_pod_inner(
+        &self,
+        manifests: &RuntimeManifests,
+        known_uid: Option<&str>,
+    ) -> Result<Pod, RuntimeError> {
         let expected = &manifests.pod;
         crate::runtime_resource_contract::validate_provision_resources(expected, expected)
             .map_err(|_| ManifestError::SpecificationDrift("runtime resource quantities"))?;
+        let class = crate::runtime_class_guard::read(self.client.clone()).await?;
         let (namespace, name) = identity(&expected.metadata)?;
         let api: Api<Pod> = Api::namespaced(self.client.clone(), namespace);
         let pod = match api.get_opt(name).await? {
@@ -253,15 +240,110 @@ impl KubernetesRuntime {
                 return Err(ManifestError::OwnershipMismatch("recorded Pod disappeared").into());
             }
             None => match api.create(&PostParams::default(), expected).await {
-                Ok(pod) => pod,
+                Ok(created) => {
+                    // A successful create response is not the independent
+                    // actual-object readback. Never adopt a same-name UID.
+                    validate_existing_pod(&created, expected, None)?;
+                    validate_pod_resource_version(&created)?;
+                    let created_resources =
+                        crate::runtime_resource_contract::observe_pod_resources(
+                            &created,
+                            expected,
+                            class.overhead(),
+                        )
+                        .map_err(|_| {
+                            ManifestError::SpecificationDrift("runtime resource quantities")
+                        })?;
+                    let created_uid = pod_uid(&created)?;
+                    let readback = api.get(name).await?;
+                    validate_existing_pod(&readback, expected, Some(created_uid))?;
+                    let readback_resources =
+                        crate::runtime_resource_contract::observe_pod_resources(
+                            &readback,
+                            expected,
+                            class.overhead(),
+                        )
+                        .map_err(|_| {
+                            ManifestError::SpecificationDrift("runtime resource quantities")
+                        })?;
+                    if created_resources != readback_resources
+                        || !consistent_node_placement(&created, &readback, true)
+                    {
+                        return Err(
+                            ManifestError::SpecificationDrift("Pod readback conflict").into()
+                        );
+                    }
+                    readback
+                }
                 Err(kube::Error::Api(e)) if e.code == 409 => api.get(name).await?,
                 Err(e) => return Err(e.into()),
             },
         };
+        self.recheck_pod(expected, known_uid, pod, class, true)
+            .await
+    }
+
+    /// Fresh read-only validation used by trusted launch and execution readers.
+    /// It does not create a historical observation or authorize CRI/cleanup.
+    pub(crate) async fn read_pod(
+        &self,
+        expected: &Pod,
+        known_uid: &str,
+    ) -> Result<Pod, RuntimeError> {
+        // Scheduled launch and exec readers share the same bounded interface.
+        Box::pin(self.read_pod_inner(expected, known_uid)).await
+    }
+
+    async fn read_pod_inner(&self, expected: &Pod, known_uid: &str) -> Result<Pod, RuntimeError> {
+        let class = crate::runtime_class_guard::read(self.client.clone()).await?;
+        let (namespace, name) = identity(&expected.metadata)?;
+        let api: Api<Pod> = Api::namespaced(self.client.clone(), namespace);
+        let pod = api.get(name).await?;
+        self.recheck_pod(expected, Some(known_uid), pod, class, false)
+            .await
+    }
+
+    async fn recheck_pod(
+        &self,
+        expected: &Pod,
+        known_uid: Option<&str>,
+        pod: Pod,
+        class: crate::runtime_class_guard::ManagedRuntimeClass,
+        allow_initial_scheduling: bool,
+    ) -> Result<Pod, RuntimeError> {
         validate_existing_pod(&pod, expected, known_uid)?;
-        crate::runtime_resource_contract::validate_provision_resources(&pod, expected)
-            .map_err(|_| ManifestError::SpecificationDrift("runtime resource quantities"))?;
-        Ok(pod)
+        validate_pod_resource_version(&pod)?;
+        let resources = crate::runtime_resource_contract::observe_pod_resources(
+            &pod,
+            expected,
+            class.overhead(),
+        )
+        .map_err(|_| ManifestError::SpecificationDrift("runtime resource quantities"))?;
+        let after = crate::runtime_class_guard::read(self.client.clone()).await?;
+        if !class.same_configuration(&after) {
+            return Err(RuntimeError::InvalidRuntimeClass);
+        }
+        let (namespace, name) = identity(&expected.metadata)?;
+        let api: Api<Pod> = Api::namespaced(self.client.clone(), namespace);
+        let current = api.get(name).await?;
+        validate_existing_pod(&current, expected, Some(pod_uid(&pod)?))?;
+        validate_pod_resource_version(&current)?;
+        let current_resources = crate::runtime_resource_contract::observe_pod_resources(
+            &current,
+            expected,
+            after.overhead(),
+        )
+        .map_err(|_| ManifestError::SpecificationDrift("runtime resource quantities"))?;
+        // Status and opaque RV may legitimately advance between GETs. During
+        // provisioning, an unassigned Pod may acquire its first node. Once a
+        // node exists it stays pinned; trusted scheduled reads require exact
+        // placement even when the initial source is still unassigned.
+        if resources != current_resources
+            || !consistent_node_placement(&pod, &current, allow_initial_scheduling)
+        {
+            return Err(ManifestError::SpecificationDrift("Pod readback conflict").into());
+        }
+        Ok(current)
     }
 
     /// Requests termination with UID+resourceVersion preconditions. It never
@@ -300,6 +382,49 @@ impl KubernetesRuntime {
     }
 }
 
+fn consistent_node_placement(before: &Pod, after: &Pod, allow_initial_scheduling: bool) -> bool {
+    let previous = before
+        .spec
+        .as_ref()
+        .and_then(|spec| spec.node_name.as_deref());
+    let current = after
+        .spec
+        .as_ref()
+        .and_then(|spec| spec.node_name.as_deref());
+    previous == current
+        || (allow_initial_scheduling
+            && previous.is_none()
+            && current.is_some_and(|node| !node.is_empty()))
+}
+
+fn pod_uid(pod: &Pod) -> Result<&str, RuntimeError> {
+    pod.metadata
+        .uid
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .ok_or(RuntimeError::MissingIdentity)
+}
+
+fn validate_pod_resource_version(pod: &Pod) -> Result<(), RuntimeError> {
+    if pod
+        .metadata
+        .resource_version
+        .as_deref()
+        .is_some_and(|value| {
+            !value.is_empty()
+                && value.len() <= 256
+                && value.is_ascii()
+                && !value
+                    .bytes()
+                    .any(|byte| byte.is_ascii_whitespace() || byte.is_ascii_control())
+        })
+    {
+        Ok(())
+    } else {
+        Err(RuntimeError::MissingIdentity)
+    }
+}
+
 fn identity(
     metadata: &k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
 ) -> Result<(&str, &str), RuntimeError> {
@@ -327,16 +452,18 @@ mod tests {
     fn runtime_class_response(overhead: serde_json::Value) -> KubernetesRuntime {
         let class = serde_json::json!({
             "apiVersion":"node.k8s.io/v1", "kind":"RuntimeClass",
-            "metadata":{"name":"kata-qemu"}, "handler":"kata-qemu",
+            "metadata":{"name":"kata-qemu","uid":"00000000-0000-4000-8000-000000000101","resourceVersion":"class-fixture-rv"}, "handler":"kata-qemu",
             "scheduling":{"nodeSelector":{"sandbox.platform/worker-pool":"kata"}},
             "overhead":overhead
         });
         let service = tower::service_fn(move |request: Request<KubeBody>| {
-            assert_eq!(
-                request.uri().path(),
-                "/apis/node.k8s.io/v1/runtimeclasses/kata-qemu"
-            );
-            let body = class.to_string();
+            let body = if request.uri().path() == "/apis/node.k8s.io/v1/runtimeclasses/kata-qemu" {
+                class.to_string()
+            } else {
+                crate::test_support_db::runtime_class_guard::object(request.uri().path(), None)
+                    .unwrap_or_else(|| panic!("unexpected class fixture request"))
+                    .to_string()
+            };
             async move {
                 Ok::<_, Infallible>(
                     Response::builder()
@@ -348,6 +475,49 @@ mod tests {
             }
         });
         KubernetesRuntime::from_client(Client::new(service, "test"))
+    }
+
+    #[tokio::test]
+    async fn readback_interface_keeps_large_kubernetes_state_off_caller_futures() {
+        let runtime = runtime_class_response(serde_json::Value::Null);
+        let manifests = RuntimeManifests {
+            pod: Pod::default(),
+            pvc: PersistentVolumeClaim::default(),
+            network_policy: DynamicObject::new(
+                "size-probe",
+                &ApiResource::from_gvk(&GroupVersionKind::gvk(
+                    "cilium.io",
+                    "v2",
+                    "CiliumNetworkPolicy",
+                )),
+            ),
+        };
+        let guard = crate::runtime_class_guard::read(runtime.client_clone());
+        let verify = runtime.verify_runtime_class();
+        let ensure = runtime.ensure_pod(&manifests, None);
+        let read = runtime.read_pod(&manifests.pod, "size-probe-uid");
+        for (name, bytes) in [
+            ("guard.read", std::mem::size_of_val(&guard)),
+            ("verify_runtime_class", std::mem::size_of_val(&verify)),
+            ("ensure_pod", std::mem::size_of_val(&ensure)),
+            ("read_pod", std::mem::size_of_val(&read)),
+        ] {
+            eprintln!("{name} inline future bytes: {bytes}");
+            assert!(
+                bytes <= 256,
+                "{name} leaked large readback state into callers: {bytes}"
+            );
+        }
+        let class = crate::runtime_class_guard::read(runtime.client_clone())
+            .await
+            .unwrap_or_else(|error| panic!("size fixture was invalid: {error}"));
+        let recheck = runtime.recheck_pod(&manifests.pod, None, Pod::default(), class, true);
+        let bytes = std::mem::size_of_val(&recheck);
+        eprintln!("recheck_pod internal future bytes: {bytes}");
+        assert!(
+            bytes <= 32 * 1024,
+            "internal readback future exceeded its heap budget: {bytes}"
+        );
     }
 
     #[tokio::test]
@@ -418,16 +588,18 @@ mod tests {
     async fn runtime_class_rejects_negative_cpu_overhead_from_the_api() -> anyhow::Result<()> {
         let class = serde_json::json!({
             "apiVersion":"node.k8s.io/v1", "kind":"RuntimeClass",
-            "metadata":{"name":"kata-qemu"}, "handler":"kata-qemu",
+            "metadata":{"name":"kata-qemu","uid":"00000000-0000-4000-8000-000000000101","resourceVersion":"class-fixture-rv"}, "handler":"kata-qemu",
             "scheduling":{"nodeSelector":{"sandbox.platform/worker-pool":"kata"}},
             "overhead":{"podFixed":{"cpu":"-250m","memory":"160Mi"}}
         });
         let service = tower::service_fn(move |request: Request<KubeBody>| {
-            assert_eq!(
-                request.uri().path(),
-                "/apis/node.k8s.io/v1/runtimeclasses/kata-qemu"
-            );
-            let body = class.to_string();
+            let body = if request.uri().path() == "/apis/node.k8s.io/v1/runtimeclasses/kata-qemu" {
+                class.to_string()
+            } else {
+                crate::test_support_db::runtime_class_guard::object(request.uri().path(), None)
+                    .unwrap_or_else(|| panic!("unexpected class fixture request"))
+                    .to_string()
+            };
             async move {
                 Ok::<_, Infallible>(
                     Response::builder()

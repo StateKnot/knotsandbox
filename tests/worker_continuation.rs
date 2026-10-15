@@ -172,13 +172,16 @@ async fn continuous_checkpoints_share_one_claim_and_only_trusted_ready_completes
     let mock = MockKube::new(&f, instance, op).await?;
     mock.require_committed_predecessor
         .store(true, Ordering::SeqCst);
-    mock.pause_pod_get.store(true, Ordering::SeqCst);
+    mock.pause_recorded_pod_get.store(true, Ordering::SeqCst);
     let w = worker(&f, &mock, "continuous-ready").await?;
     let mut running = Running::start(w);
     let outcome = async {
         paused(&mock).await?;
         let row = state(&f, op).await?;
-        ensure!(row == ("RUNNING".into(), "POD_RECORDED".into(), None, 1, 1));
+        ensure!(
+            row == ("RUNNING".into(), "POD_RECORDED".into(), None, 1, 1),
+            "actual operation at Pod GET barrier: {row:?}"
+        );
         let events = checkpoints(&f, op).await?;
         ensure!(events.len() == 3);
         for ((version, payload), (expected, kind)) in
@@ -359,7 +362,7 @@ async fn continuous_lost_commit_ack_stops_old_batch_and_recovers_same_uid() -> a
     mock.arm_commit = Some(proxy.arm.clone());
     mock.require_committed_predecessor
         .store(true, Ordering::SeqCst);
-    mock.pause_pod_get.store(true, Ordering::SeqCst);
+    mock.pause_recorded_pod_get.store(true, Ordering::SeqCst);
     let w = Worker::new(
         database.clone(),
         mock.runtime(),
@@ -386,7 +389,7 @@ async fn continuous_lost_commit_ack_stops_old_batch_and_recovers_same_uid() -> a
         proxy.drop_ack();
         paused(&mock).await?;
         let row=state(&f,op).await?;
-        ensure!(row==("RUNNING".into(),"POD_RECORDED".into(),None,2,2),"unknown ACK must release/reclaim instead of continuing the old lease");
+        ensure!(row==("RUNNING".into(),"POD_RECORDED".into(),None,2,2),"unknown ACK must release/reclaim instead of continuing the old lease; actual operation at Pod GET barrier: {row:?}");
         let recovered=checkpoints(&f,op).await?;
         ensure!(recovered.len()==3 && recovered[0]==events[0]);
         for (version,payload) in &recovered[1..] { ensure!(*version>=2 && payload["lease_token"]==2); }

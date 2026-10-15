@@ -207,3 +207,11 @@ Capture 独立首建专项在 695 文件源 `dffed1b4ebaf31e90c73280b43d1a5118d8
 本批新增6项真实TLS PG、原恢复4项、调度3项、实际进程1项、历史升级1项共15项全部通过，正常43条迁移逐项核SHA384；源码/制品/SDK稳定及自有容器/进程清理确认。四项异步观测、原生严格全仓Clippy/fmt通过。真实已提交ACK丢失下旧批次停止、token2恢复相同UID、唯一POST、可信Ready及连接退役均有实际断言；测试代理的TLS flush与收尾顺序问题已保留失败记录并修复重验。
 
 上一公共提交的CI在BFF清理安全检查失败，本机原始与诊断源码20项PG检查未复现；当前只补失败路径固定诊断，不宣称修复根因，仍需核对新CI。G2-04/G2-05、资源效率及GPU等完整工作包仍开发中。见[交付记录](../research/worker-continuation-delivery-20261013.md)与[开发表12.2](../research/rust-sandbox-development-workbreakdown.md#122-已提交阶段连续调谐交付2026-10-13)。
+
+### RuntimeClass守卫与普通CPU实时回读（2026-10-15）
+
+本轮完成普通CPU受管理Class/Pod实时复核子项：实际VAP/Binding与固定名GET-only RBAC、配置UID/摘要及Pod UID/完整资源前后GET；首次合法调度、RV/status变化保留，资源/身份冲突拒绝，安全停止独立。大Kubernetes future放入深模块堆状态，默认线程栈下原故障用例通过；guard/verify/ensure/read调用者future实测112/128/48/48bytes。
+
+适用Docker回归35组192项分批通过，逐组对应最终二进制；原生459通过/269环境ignored，严格Clippy/fmt通过。实际Kubernetes1.36.4守卫、TLS回读、overhead dry-run及24项RBAC检查通过，非云Kata/GPU认证。Docker上下文为523个审核输入/7,867,697bytes，无node_modules、私有路径或symlink；自有清理确认。原93954fd CI准入fixture的手工RESTART缺四scope配额，本轮按正常reserve_quota修正并实际4项通过。
+
+恢复草稿被现有公开backups:restore权限门阻断，未进入restored START且未计验收；父流程代码与基线相同，未绕过权限。第4步原子可信登记、持久观察及只读证据展示仍待开发，Pod保持NOT_CAPTURED；利用率、快速启动预准备、GPU及生产发布门仍独立。详见[回读交付记录](../research/runtime-class-resource-readback-20261015.md)。

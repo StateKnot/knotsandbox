@@ -14,8 +14,8 @@ use crate::{
     runtime::{KubernetesRuntime, RuntimeError},
     runtime_manifest::{
         ManifestError, RuntimeManifestConfig, RuntimeManifestContext, build_manifests,
-        container_name, network_policy_name, pod_name, pvc_name, validate_existing_pod,
-        validate_existing_policy, validate_existing_pvc,
+        container_name, network_policy_name, pod_name, pvc_name, validate_existing_policy,
+        validate_existing_pvc,
     },
 };
 
@@ -101,7 +101,6 @@ impl GatewayRuntime {
             return Err(RuntimeError::MissingIdentity);
         }
         let expected = build_manifests(context, &self.manifests)?;
-        self.runtime.verify_runtime_class().await?;
         self.runtime
             .verify_namespace(context, &self.certification_id)
             .await?;
@@ -156,10 +155,11 @@ impl GatewayRuntime {
             "bound volume identity differs from the workspace",
         )?;
 
-        let pods: Api<Pod> = Api::namespaced(client.clone(), &context.namespace);
         let name = pod_name(context.workspace_id);
-        let pod = pods.get(&name).await?;
-        validate_existing_pod(&pod, &expected.pod, Some(&known.pod_uid.to_string()))?;
+        let pod = self
+            .runtime
+            .read_pod(&expected.pod, &known.pod_uid.to_string())
+            .await?;
         let container = container_name(context.launch_id);
         let node_name = pod
             .spec

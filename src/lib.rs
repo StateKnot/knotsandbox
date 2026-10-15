@@ -33,6 +33,7 @@ pub mod resource_accounting;
 mod resource_accounting_schema;
 pub mod runner;
 pub mod runtime;
+mod runtime_class_guard;
 pub mod runtime_manifest;
 mod runtime_resource_contract;
 pub mod timers;

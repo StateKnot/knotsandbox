@@ -1,12 +1,12 @@
 # 逐次启动资源账本：下一完整交付方案
 
-状态：**进行中；账本子项已实现并完成本地整轮验收**。2026-10-15完成第2/5步的普通launch请求、全部用途配额状态捕获与可信释放历史，以及第6/7/8步相关权限/启动检查、只读API/SDK/UI。最终50文件候选单轮27组164项、0失败、0ignored实际通过，汇总PASS_FULL_ACCEPTANCE；44条迁移checksum、source/bin/SDK前后稳定与自有清理均核对，生产09ca/SQL保持。实际44→45维护门、SDK75/Chrome34及最新Clippy/fmt另行通过。此前分批结果和旧候选失败保留；precommit测试过早锁表已用post-policy响应barrier修正，专项10项及此次整轮6项GREEN。早期其他503/timer原因仍UNKNOWN，不以此次通过声称修复。第3/4步实际Pod/RuntimeClass可信观察是下一步；利用率、自动调档、预热和GPU未完成，新提交CI待上传触发。详见[交付记录](launch-resource-accounting-delivery-20261015.md)。
+状态：**进行中；第2/5账本和第3普通CPU实时回读子项已完成本地验收。** 原0045账本50文件单轮27组164项记录保留。本轮新增实际RuntimeClass守卫、Pod资源前后复核和最小RBAC，35组192项按最终二进制分批通过，459项原生及严格Clippy/fmt通过；恢复草稿在原有backups:restore关闭处阻断，未计通过。93954fd的CI准入fixture漏配额已修正并本地4项通过，新CI待同步后核对。第4步持久观察、利用率、自动调档、预热和GPU仍未完成，公开Pod证据继续NOT_CAPTURED。详见[本轮回读交付](runtime-class-resource-readback-20261015.md)与[原账本交付](launch-resource-accounting-delivery-20261015.md)。
 
 ## 数据与身份合同
 
 必须分别保存四种来源：受理时的用户规格；每次launch实际请求合同；经可信登记方回读的Pod request/limit/overhead；现有配额账的PENDING、ALLOCATED、RELEASED回执。宿主cgroup共享祖先的容量上界仍是独立观测，不能与其中任何一项直接等同。
 
-合同绑定tenant、project、instance、workspace、generation、launch与安装epoch。实际Pod观察再绑定Pod UID、Node UID、节点boot身份和登记许可。RuntimeClass的UID、resourceVersion及overhead保存为配置观察；Pod自身的资源值来自其实际UID回读。跨对象读取不是原子快照，不伪造Pod采用了某一RuntimeClass版本的证明。采用受管理的不可变版本配置和创建/回读复核；配置变化、UID替换或证据冲突拒绝登记或保持UNKNOWN。停止和清理仍允许依据原可信终止证据进行，不能被当前RuntimeClass变化卡住。
+合同绑定tenant、project、instance、workspace、generation、launch与安装epoch。实际Pod观察再绑定Pod UID、Node UID、节点boot身份和登记许可。RuntimeClass的UID、resourceVersion及overhead保存为配置观察；Pod自身的资源值来自其实际UID回读。跨对象读取不是原子快照，不伪造Pod采用了某一RuntimeClass版本的证明。本轮采用固定kata-qemu和真实VAP/Binding保护受控配置，当前配置身份是Class UID加规范化受控内容SHA-256；resourceVersion仅表示本次回读元数据。创建/回读前后核对守卫、Class及完整Pod UID/spec/resources，纯RV或status变化不等于资源漂移。配置变化、UID替换或证据冲突拒绝验证；第4步完成前不持久登记为历史观察。停止和清理仍允许依据原可信终止证据进行，不能被当前RuntimeClass变化卡住。Kubernetes v1.35并未天然将整个Class配置设为不可变，缓存admission也不提供adopted RV证明，官方源码依据见[本轮设计](runtime-class-resource-readback-20261015.md#官方行为与实现依据)。
 
 0045已新增append-only请求合同、配额状态回执、精确普通启动绑定与冻结旧预约基线，使用复合FK、有界数量和FORCE RLS；实际Pod观察表及其UID/Node/boot身份模型仍属于第3/4步。原迁移字节保持，当前正式迁移为1..37加39..45，共44条。旧launch没有足够证据时返回明确缺证据；不能按今天的Flavor、overhead或更新时间补造历史。
 
@@ -16,8 +16,8 @@
 | --- | --- | --- |
 | 1 | 确定可归一化的CPU/内存数量、来源与缺证据状态 | **数量/provision校验保持原已实现检查点，完整来源观察模型仍待第3/4步。** `runtime_resource_contract`接入实际生成、创建前/回读后和RuntimeClass入口；工作负载支持原CPU、memory、ephemeral-storage三个键，overhead只允许CPU/memory，拒绝负数、溢出、额外设备和sidecar。第2步申请标为`REQUESTED_COMPUTE_QUOTA`，实际Pod明确`NOT_CAPTURED`，不能把当前校验值当历史观察。 |
 | 2 | 不可变launch请求与配额回执 | **已实现并完成本地整轮验收。** 0045真实quota INSERT/status UPDATE同事务捕获全部purpose。CREATE/START在真实新身份提交时记录合同；RESTART受理时不提前记录，旧release后新generation/launch延迟精确归属；renew不新增。PENDING和申请同提交，tenant/project scope分列不相加。已验真实0044→0045维护切换，相关用例纳入最终50候选单轮27组164项PASS；旧候选失败保留。 |
-| 3 | 受控RuntimeClass配置与Pod资源回读 | `runtime`/`runtime_manifest`/`worker`保存版本配置观察并校验实际Pod资源。UID或值冲突拒绝；无法建立一致证据时UNKNOWN，不回填当前值。保持原CRI许可、节点/卷归属和期限。 |
-| 4 | 可信观察登记 | `gateway_runtime`、`termination_runtime`把已校验的Pod资源带入原许可登记事务；沿用workspace→instance→operation/node fence顺序。同UID相同内容幂等，冲突拒绝，COMMIT ACK丢失复用原登记。API/普通调用者不能伪造登记。 |
+| 3 | 受控RuntimeClass配置与Pod资源回读 | **普通CPU实时校验子项已开发并本地验收。** 真实VAP/Binding锁住kata-qemu配置更新/删除；逐字段GET核对、UID与配置摘要前后复核，创建后独立GET实际Pod，完整request/limit/overhead与总和溢出校验；provision允许首次调度、gateway固定节点。35组192项分批、真实本地Kubernetes及459原生通过；恢复草稿未到restored START，兼容性未计通过。持久观察属于第4步。 |
+| 4 | 可信观察登记 | **下一步待开发。** gateway_runtime、termination_runtime带入经校验资源能力，授权ACK与观察原子提交；保存Node/boot/epoch/permit与Class独立观察，沿用原锁序和实时权限/期限。冻结旧基线、同内容幂等/冲突拒绝、COMMIT ACK丢失复用；只读API/SDK/UI及签名分页固定观察ID或首次缺失状态。API与普通调用者不能伪造登记。 |
 | 5 | 完整释放历史 | **账本子项已实现并完成本地整轮验收。** `mark_ready`与原ALLOCATED同事务捕获，可信cleanup的RELEASED变化和回执同提交。新ordinary释放校验原launch proof+cleanup或持久never-authorized关闭；never-authorized两事务不提前释放。TTL、Pod缺失、CRI返回、API退出、节点失联不能直接结束预留。 |
 | 6 | 最小权限与启动门禁 | **账本子项已实现并完成本地整轮验收。** 只有API获得三张查询表SELECT，八种非API组件不新增账本读取，遗留基线runtime禁读；所有新表runtime禁写。缺迁移/checksum、表形状/RLS/trigger/function/grants漂移在bind/claim前拒绝。维护门执行真实准入/停写/排空/迁移/普通身份预检/目标恢复，不承诺N−1/N混跑。 |
 | 7 | 对外只读API、SDK与实例页面 | **账本子项已实现并完成本地整轮验收。** `instances:read`前后撤权/epoch核验、签名有界分页；默认当前合同+实例全部purpose/history，显式launch仅精确绑定ordinary CPU/MEM。数量/version/generation全为十进制字符串；SDK75项通过。UI只读并在切scope/撤权/失败后清空；Pod固定`NOT_CAPTURED`，没有Pod观察时间或利用率。 |

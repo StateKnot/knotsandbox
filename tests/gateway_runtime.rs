@@ -1,4 +1,6 @@
 //! Synthetic Kubernetes transport verifies client decisions, not Kata isolation.
+#[path = "support/runtime_class_guard.rs"]
+mod runtime_class_guard;
 use axum::{
     body::Body,
     http::{Method, Request, Response},
@@ -65,6 +67,7 @@ impl Fixture {
         let manifests = build_manifests(&context, &config)?;
         let mut pod = serde_json::to_value(manifests.pod)?;
         pod["metadata"]["uid"] = json!(known.pod_uid);
+        pod["metadata"]["resourceVersion"] = json!("pod-fixture-rv");
         pod["spec"]["nodeName"] = json!("kata-node");
         pod["status"] = json!({"phase":"Running","conditions":[{"type":"Ready","status":"True"}],"containerStatuses":[{"name":container_name(context.launch_id),"ready":true,"restartCount":0,"image":"registry.example.test/runtime","imageID":"runtime-image","state":{"running":{}}}]});
         let mut pvc = serde_json::to_value(manifests.pvc)?;
@@ -76,7 +79,8 @@ impl Fixture {
         let mut objects = BTreeMap::from([
             (
                 "class".into(),
-                json!({"apiVersion":"node.k8s.io/v1","kind":"RuntimeClass","metadata":{"name":"kata-qemu"},"handler":"kata-qemu","scheduling":{"nodeSelector":{"sandbox.platform/worker-pool":"kata"}}}),
+                runtime_class_guard::object("/apis/node.k8s.io/v1/runtimeclasses/kata-qemu", None)
+                    .ok_or_else(|| anyhow::anyhow!("class fixture"))?,
             ),
             (
                 "namespace".into(),
@@ -95,6 +99,22 @@ impl Fixture {
                 json!({"apiVersion":"v1","kind":"PersistentVolume","metadata":{"name":"workspace-volume","uid":Uuid::new_v4()},"spec":{"accessModes":["ReadWriteOnce"],"volumeMode":"Filesystem","storageClassName":context.storage_class,"csi":{"driver":"diskplugin.csi.alibabacloud.com","volumeHandle":"fixture-only-volume"},"claimRef":{"kind":"PersistentVolumeClaim","name":pvc_name(context.workspace_id),"namespace":context.namespace,"uid":known.pvc_uid}},"status":{"phase":"Bound"}}),
             ),
         ]);
+        for (key, path) in [
+            (
+                "guard-policy",
+                "/apis/admissionregistration.k8s.io/v1/validatingadmissionpolicies/sandbox-kata-runtimeclass-v1",
+            ),
+            (
+                "guard-binding",
+                "/apis/admissionregistration.k8s.io/v1/validatingadmissionpolicybindings/sandbox-kata-runtimeclass-v1",
+            ),
+        ] {
+            objects.insert(
+                key.into(),
+                runtime_class_guard::object(path, None)
+                    .ok_or_else(|| anyhow::anyhow!("guard fixture"))?,
+            );
+        }
         objects.insert("pod".into(), pod);
         objects.insert("pvc".into(), pvc);
         objects.insert("policy".into(), policy);
@@ -106,12 +126,21 @@ impl Fixture {
         })
     }
     fn runtime(&self) -> (GatewayRuntime, ObservedRequests) {
+        self.runtime_with_node_change(None)
+    }
+
+    fn runtime_with_node_change(
+        &self,
+        second_node: Option<&'static str>,
+    ) -> (GatewayRuntime, ObservedRequests) {
         let c = &self.context;
         let paths: BTreeMap<String, String> = [
             (
                 "class",
                 "/apis/node.k8s.io/v1/runtimeclasses/kata-qemu".into(),
             ),
+            ("guard-policy", "/apis/admissionregistration.k8s.io/v1/validatingadmissionpolicies/sandbox-kata-runtimeclass-v1".into()),
+            ("guard-binding", "/apis/admissionregistration.k8s.io/v1/validatingadmissionpolicybindings/sandbox-kata-runtimeclass-v1".into()),
             ("namespace", format!("/api/v1/namespaces/{}", c.namespace)),
             (
                 "baseline",
@@ -156,6 +185,7 @@ impl Fixture {
         let objects = self.objects.clone();
         let seen = Arc::new(Mutex::new(Vec::new()));
         let seen_clone = seen.clone();
+        let pod_reads = Arc::new(Mutex::new(0));
         let service = tower::service_fn(move |req: Request<KubeBody>| {
             let method = req.method().clone();
             let path = req.uri().path().to_string();
@@ -163,7 +193,7 @@ impl Fixture {
                 seen.push((method.clone(), path.clone()));
             }
             let body = paths.get(&path).and_then(|key| objects.get(key));
-            let (status, data) = if method == Method::GET
+            let (status, mut data) = if method == Method::GET
                 && let Some(body) = body
             {
                 (200, body.clone())
@@ -173,6 +203,17 @@ impl Fixture {
                     json!({"apiVersion":"v1","kind":"Status","status":"Failure","reason":"NotFound","message":"synthetic missing resource","code":404}),
                 )
             };
+            if method == Method::GET && path.contains("/pods/") {
+                let mut reads = pod_reads
+                    .lock()
+                    .unwrap_or_else(|_| panic!("pod fixture lock"));
+                *reads += 1;
+                if *reads > 1
+                    && let Some(node) = second_node
+                {
+                    data["spec"]["nodeName"] = json!(node);
+                }
+            }
             async move {
                 let mut response = Response::new(Body::from(data.to_string()));
                 *response.status_mut() = axum::http::StatusCode::from_u16(status)
@@ -196,6 +237,27 @@ impl Fixture {
 }
 
 #[tokio::test]
+async fn scheduled_verifier_pins_placement_across_resource_reads() -> anyhow::Result<()> {
+    for initially_unassigned in [false, true] {
+        let mut f = Fixture::new()?;
+        if initially_unassigned {
+            f.objects
+                .get_mut("pod")
+                .ok_or_else(|| anyhow::anyhow!("Pod fixture"))?["spec"]
+                .as_object_mut()
+                .ok_or_else(|| anyhow::anyhow!("Pod spec fixture"))?
+                .remove("nodeName");
+        }
+        let (runtime, _) = f.runtime_with_node_change(Some("other-node"));
+        assert!(
+            runtime.verify(&f.context, &f.known).await.is_err(),
+            "scheduled observation accepted a placement transition"
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn verifies_current_runtime_with_fresh_gets_only() -> anyhow::Result<()> {
     let f = Fixture::new()?;
     let (runtime, seen) = f.runtime();
@@ -212,10 +274,25 @@ async fn verifies_current_runtime_with_fresh_gets_only() -> anyhow::Result<()> {
     let seen = seen
         .lock()
         .map_err(|_| anyhow::anyhow!("test request lock"))?;
-    assert_eq!(
-        seen.len(),
-        16,
-        "both calls must independently observe all eight resources"
+    for path in [
+        "/apis/node.k8s.io/v1/runtimeclasses/kata-qemu".to_owned(),
+        format!(
+            "/api/v1/namespaces/{}/pods/{}",
+            f.context.namespace,
+            pod_name(f.context.workspace_id)
+        ),
+    ] {
+        assert_eq!(
+            seen.iter()
+                .filter(|(_, observed)| observed == &path)
+                .count(),
+            4,
+            "each verify must read both before and after: {path}"
+        );
+    }
+    assert!(
+        seen.len() >= 28,
+        "both calls must freshly observe all resources and guards"
     );
     assert!(seen.iter().all(|(m, _)| *m == Method::GET));
     Ok(())
@@ -225,6 +302,15 @@ async fn verifies_current_runtime_with_fresh_gets_only() -> anyhow::Result<()> {
 async fn rejects_replacement_drift_stale_readiness_and_fenced_nodes() -> anyhow::Result<()> {
     let attacks = [
         ("class", "/handler", json!("runc")),
+        ("class", "/metadata/resourceVersion", json!("")),
+        ("pod", "/metadata/resourceVersion", json!("")),
+        ("pod", "/spec/overhead", json!({"cpu":"0.0001"})),
+        (
+            "pod",
+            "/spec/overhead",
+            json!({"cpu":"250m","memory":"160Mi"}),
+        ),
+        ("guard-binding", "/spec/validationActions", json!(["Warn"])),
         (
             "namespace",
             "/metadata/annotations/sandbox.platform~1certification-id",
@@ -306,10 +392,22 @@ async fn rejects_replacement_drift_stale_readiness_and_fenced_nodes() -> anyhow:
     ];
     for (object, pointer, value) in attacks {
         let mut f = Fixture::new()?;
-        *f.objects
+        let target = f
+            .objects
             .get_mut(object)
-            .and_then(|o| o.pointer_mut(pointer))
-            .ok_or_else(|| anyhow::anyhow!("fixture path missing {object}{pointer}"))? = value;
+            .ok_or_else(|| anyhow::anyhow!("fixture object missing {object}"))?;
+        if object == "pod" && pointer == "/spec/overhead" {
+            // The valid baseline has no overhead. These attacks add a new
+            // field, while the other cases replace an existing JSON pointer.
+            target["spec"]
+                .as_object_mut()
+                .ok_or_else(|| anyhow::anyhow!("fixture Pod spec missing"))?
+                .insert("overhead".into(), value);
+        } else {
+            *target
+                .pointer_mut(pointer)
+                .ok_or_else(|| anyhow::anyhow!("fixture path missing {object}{pointer}"))? = value;
+        }
         let (runtime, seen) = f.runtime();
         assert!(
             runtime.verify(&f.context, &f.known).await.is_err(),

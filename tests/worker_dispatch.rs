@@ -68,8 +68,13 @@ fn probe_worker(
                 }
                 (
                     200,
-                    json!({"apiVersion":"node.k8s.io/v1","kind":"RuntimeClass","metadata":{"name":"kata-qemu"},"handler":"kata-qemu","scheduling":{"nodeSelector":{"sandbox.platform/worker-pool":"kata"}}}),
+                    support::runtime_class_guard::object(request.uri().path(), None)
+                        .unwrap_or_else(|| panic!("class probe fixture")),
                 )
+            } else if let Some(guard) =
+                support::runtime_class_guard::object(request.uri().path(), None)
+            {
+                (200, guard)
             } else {
                 // After releasing the probe, persist a normal bounded retry.
                 (

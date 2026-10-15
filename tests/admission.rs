@@ -15,7 +15,7 @@ use sandbox_platform::{
         AdmissionConfig, AdmissionRequest, AdmissionService, ControllerIdentity, WorkloadAuthority,
         execution_connect_identity, router, validate_workload,
     },
-    db::Database,
+    db::{Database, reserve_quota},
     domain::InstanceAction,
     runtime_manifest::{RuntimeManifestContext, build_manifests},
     tls::{admission_mutual_tls, serve_admission},
@@ -774,6 +774,22 @@ async fn real_readonly_role_authorizes_from_sql_and_rejects_expired_revoked_or_s
     sqlx::query("UPDATE operations SET status='CANCELLED',completed_at=clock_timestamp(),lease_owner=NULL,lease_until=NULL WHERE id=$1").bind(stop_id).execute(&mut *tx).await?;
     sqlx::query("INSERT INTO operations(id,tenant_id,project_id,instance_id,workspace_id,kind,request,actor_principal_id,request_id,deadline,restart_generation) VALUES($1,$2,$3,$4,$5,'RESTART','{}',$6,$7,clock_timestamp()+interval '1 minute',$8)")
         .bind(restart_id).bind(f.actor.tenant_id).bind(instance.project_id).bind(instance.id).bind(workspace).bind(f.actor.principal_id).bind(Uuid::new_v4()).bind(next_generation).execute(&mut *tx).await?;
+    // Publish the seeded generation with the same complete quota producer as
+    // ordinary RESTART. Its new contract cannot inherit the old launch's rows.
+    reserve_quota(
+        &mut tx,
+        &f.actor,
+        instance.project_id,
+        restart_id,
+        instance.id,
+        workspace,
+        &[
+            ("CPU_MILLIS", instance.cpu_millis),
+            ("MEMORY_MIB", instance.memory_mib),
+        ],
+    )
+    .await
+    .map_err(api_failure)?;
     sqlx::query("UPDATE instances SET desired_state='RUNNING',stop_reason=NULL,stop_accepted_at=NULL,pod_uid=NULL,runtime_generation=$2,launch_id=$3,active_operation_id=$4,slot_held=false,activity_id=NULL,activity_kind=NULL,activity_generation=NULL WHERE id=$1")
         .bind(instance.id).bind(next_generation).bind(next_launch).bind(restart_id).execute(&mut *tx).await?;
     // Revocation is intentionally irreversible. Use a newly approved immutable
@@ -790,6 +806,36 @@ async fn real_readonly_role_authorizes_from_sql_and_rejects_expired_revoked_or_s
         .bind(f.actor.principal_id)
         .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
+    let mut tx = f.owner_transaction().await?;
+    let restart_quota: Vec<(String, String, i64)> = sqlx::query_as(
+        "SELECT r.dimension,r.account_scope,r.amount FROM quota_resource_receipts r \
+         JOIN launch_quota_bindings b ON(b.tenant_id,b.reservation_id)=(r.tenant_id,r.reservation_id) \
+         JOIN launch_resource_contracts c ON(c.tenant_id,c.id)=(b.tenant_id,b.contract_id) \
+         WHERE r.tenant_id=$1 AND r.operation_id=$2 AND r.status='PENDING' \
+           AND r.purpose='ORDINARY_COMPUTE' AND c.instance_id=$3 AND c.workspace_id=$4 \
+           AND c.generation=$5 AND c.launch_id=$6 AND c.cluster_epoch=$7 \
+         ORDER BY r.dimension,r.account_scope",
+    )
+    .bind(f.actor.tenant_id)
+    .bind(restart_id)
+    .bind(instance.id)
+    .bind(workspace)
+    .bind(next_generation)
+    .bind(next_launch)
+    .bind(epoch)
+    .fetch_all(&mut *tx)
+    .await?;
+    assert_eq!(
+        restart_quota,
+        vec![
+            ("CPU_MILLIS".into(), "PROJECT".into(), instance.cpu_millis),
+            ("CPU_MILLIS".into(), "TENANT".into(), instance.cpu_millis),
+            ("MEMORY_MIB".into(), "PROJECT".into(), instance.memory_mib),
+            ("MEMORY_MIB".into(), "TENANT".into(), instance.memory_mib),
+        ],
+        "seeded RESTART must bind its own CPU/memory quota in both scopes"
+    );
     tx.commit().await?;
     a.context.generation = next_generation;
     a.context.launch_id = next_launch;

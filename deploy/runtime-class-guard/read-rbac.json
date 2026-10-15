@@ -1,0 +1,59 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "ClusterRole",
+      "metadata": {
+        "name": "sandbox-kata-runtimeclass-v1-read"
+      },
+      "rules": [
+        {
+          "apiGroups": [
+            "admissionregistration.k8s.io"
+          ],
+          "resources": [
+            "validatingadmissionpolicies",
+            "validatingadmissionpolicybindings"
+          ],
+          "resourceNames": [
+            "sandbox-kata-runtimeclass-v1"
+          ],
+          "verbs": [
+            "get"
+          ]
+        }
+      ]
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "ClusterRoleBinding",
+      "metadata": {
+        "name": "sandbox-kata-runtimeclass-v1-read"
+      },
+      "roleRef": {
+        "apiGroup": "rbac.authorization.k8s.io",
+        "kind": "ClusterRole",
+        "name": "sandbox-kata-runtimeclass-v1-read"
+      },
+      "subjects": [
+        {
+          "kind": "ServiceAccount",
+          "name": "sandbox-worker",
+          "namespace": "sandbox-system"
+        },
+        {
+          "kind": "ServiceAccount",
+          "name": "sandbox-gateway",
+          "namespace": "sandbox-system"
+        },
+        {
+          "kind": "ServiceAccount",
+          "name": "sandbox-termination",
+          "namespace": "sandbox-system"
+        }
+      ]
+    }
+  ]
+}
