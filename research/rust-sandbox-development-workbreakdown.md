@@ -324,14 +324,15 @@ b66177be完整CI已确认资源容量与18组PG等前置门通过，但真实诊
 
 ### 12.8 批准镜像节点预准备：后续有序实施（2026-10-15）
 
-本节按P0—P6顺序推进。**P0a与P0b节点指标/预算/告警已实现并完成本地验收；P0整体未完成，P0c及P1—P6仍未实现／未认证。** 已发布18ad317的CI 5 job／62 step全绿；本轮新源码CI独立核对。详见[生产实施计划](image-preparation-production-plan-20261015.md)及[固定版本官方源码核对](image-preparation-native-sources-20261015.md)。范围是批准OCI镜像准备，不预造CPU／GPU VM池，不产生普通launch许可。
+本节按P0—P6顺序推进。**P0a/P0b与P0c1安装级授权已完成本地验收；完整P0c与P0整体未完成，P0c2节点消费者／原生整链及P1—P6仍未完成／未认证。** 已发布dcb7554精确CI 5 job／62 step全绿；本轮新源码CI独立核对。详见[生产实施计划](image-preparation-production-plan-20261015.md)及[固定版本官方源码核对](image-preparation-native-sources-20261015.md)。范围是批准OCI镜像准备，不预造CPU／GPU VM池，不产生普通launch许可。
 
 | 顺序／工作包 | 开发内容与接口 | 退出门／依赖 |
 | --- | --- | --- |
 | 0；G4-01/G4-02 | 核对当前CI及失败回执，先修复已发布输入；每90分钟继续最前未闭合切片 | console准确COPY、fresh角色初始化和测试JWT签发顺序已修复；真实console镜像／TLS与39组203项最终分批回归通过，原生461／0／279ignored、严格Clippy／fmt通过；18ad317精确CI run38762694677首次5 job／62 step成功；不沿用旧结果证明新源码 |
 | P0a宿主子项；G0-08/G1-09/G3-12 | 固定UDS、只读有界ImageService、profile/boot/peer/同FD与mount身份；独立后台owner与scraper CA的`GET /v1/node-image-status`，默认关闭 | 普通原生472／0／279ignored（最终62制品SHA相同复用）；Linux70项、native1项、Python11项、两平台strict Clippy／fmt通过，精确自有清理；真实containerd→独立mTLS无VM诊断，不等于完整P0。见[本批交付](node-image-observation-delivery-20261015.md) |
 | P0b；G0-08/G1-09/G3-12 | 独立`/metrics/node-images`、显式profile绑定、node allowlist/预算、同Prom双Agent与受控失联/组件报告告警 | 本地Linux74项、native1项、Python27、schema28对象、锁定promtool原38+新38、完整观测入口49.658秒及strict Clippy/fmt通过；原时间过滤后HA去重、UNKNOWN清值/独立失败恢复已验。原生后端和真实管线分别验收，不称同一原生整链，见[本批交付](node-image-pipeline-delivery-20261016.md) |
-| P0c；G0-08/G1-09/G3-12 | 安装级operator持久授权/撤权、正常DB身份、固定查询/admin与当前epoch/boot/profile消费者 | 无VM读基线；失败/撤权清旧、不借instances:read。原生containerd→mTLS→remote-write→operator必须组成同一链路；完整cache/capacity/reclaimable仍UNKNOWN |
+| P0c1已本地验收；G0-08/G1-09/G3-12 | 持久安装读授权／永久撤权、owner CLI、普通app窄EXEC、真实JWT `GET /v1/operator/access`与schema/ACL预检 | 6专项、6组29 PG、正式自动化25、普通Rust475、SDK77、OpenAPI13、strict Clippy/fmt通过；身份/client/epoch ABA、锁后到期和写权漂移已验。只返回授权元数据，见[交付](installation-operator-access-delivery-20261016.md) |
+| P0c2未完成；完整P0c退出门 | 固定有界节点查询/admin读消费者、当前epoch/node/boot/profile与原时间新鲜度；外部I/O前后重授权 | 无VM读基线；失败/撤权清旧、不借instances:read；同一原生containerd→mTLS→remote-write→operator链仍待验。cache/capacity/reclaimable仍UNKNOWN |
 | P1；G1-04/G1-09/G1-12 | 定型平台manifest、namespace／snapshotter、native lease／content／snapshot引用及真实存储硬限组合 | 官方固定版本源码和实际backend证据；nil sandbox config会选default，不能仅传handler后宣称Kata已准备；未核实支持保持关闭 |
 | P2/P3；G2-01/G2-13/G1-12 | PG准备意图／预算及最小权限；独立准备授权、准确node／boot/profile/epoch；批准index＋selected manifest＋platform；短时凭据及有硬限的下载／解包 | P1通过后才pre-pull；瞬态headroom、inode／metadata／并发上界与真实写入硬限同时守住；不能拼普通launch许可 |
 | P4；G2-07/G4-02/G4-06 | 同键lost ACK／重启恢复、到期／撤销、活动共享引用保护、只释放本产品native引用和GC／物理对账 | UNKNOWN保留必要预算；引用释放不等于物理回收，RemoveImage不能盲删共享alias；不清全局目录／他人镜像 |

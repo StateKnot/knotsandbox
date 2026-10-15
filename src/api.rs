@@ -89,6 +89,7 @@ pub fn router_with_automations(
         .route("/health/live", get(|| async { StatusCode::NO_CONTENT }))
         .route("/health/ready", get(ready))
         .route("/v1/capabilities", get(get_capabilities))
+        .route("/v1/operator/access", get(operator_access))
         .route(
             "/v1/service-clients",
             get(list_service_clients).post(register_service_client),
@@ -246,8 +247,24 @@ pub(crate) async fn authenticate(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<(Actor, VerifiedIdentity), ApiError> {
+    let identity = verify_identity(state, headers).await?;
+    let actor = state
+        .database
+        .resolve_actor(
+            &identity,
+            request::tenant_id(headers)?,
+            crate::error::request_id(),
+        )
+        .await?;
+    Ok((actor, identity))
+}
+
+async fn verify_identity(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<VerifiedIdentity, ApiError> {
     let token = request::bearer(headers)?;
-    let identity = state.auth.verify(token).await.map_err(|e| match e {
+    state.auth.verify(token).await.map_err(|e| match e {
         AuthError::JwksUnavailable | AuthError::InvalidJwks => ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "IDENTITY_UNAVAILABLE",
@@ -259,16 +276,22 @@ pub(crate) async fn authenticate(
             "Required OAuth scope is missing",
         ),
         _ => request::unauthenticated(),
-    })?;
-    let actor = state
-        .database
-        .resolve_actor(
-            &identity,
-            request::tenant_id(headers)?,
-            crate::error::request_id(),
-        )
-        .await?;
-    Ok((actor, identity))
+    })
+}
+
+async fn operator_access(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    uri: axum::http::Uri,
+) -> Result<Json<crate::operator_access::OperatorAccess>, ApiError> {
+    // There is one configured installation. No caller-controlled scope/action.
+    if uri.query().is_some() {
+        return Err(ApiError::invalid(
+            "Operator access does not accept query parameters",
+        ));
+    }
+    let identity = verify_identity(&state, &headers).await?;
+    Ok(Json(state.database.node_image_access(&identity).await?))
 }
 
 fn json_body<T>(payload: Result<Json<T>, JsonRejection>) -> Result<T, ApiError> {

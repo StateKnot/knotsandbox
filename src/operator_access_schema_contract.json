@@ -1,0 +1,691 @@
+{
+  "node_image_reader_grants": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "uuid",
+        "default": null,
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "installation_id",
+        "type": "uuid",
+        "default": null,
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "cluster_epoch",
+        "type": "uuid",
+        "default": null,
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "identity_id",
+        "type": "uuid",
+        "default": null,
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "principal_id",
+        "type": "uuid",
+        "default": null,
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "identity_issuer",
+        "type": "text",
+        "default": null,
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "identity_subject",
+        "type": "text",
+        "default": null,
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "identity_client_id",
+        "type": "text",
+        "default": null,
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "binding_generation",
+        "type": "bigint",
+        "default": null,
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "principal_authz_version",
+        "type": "bigint",
+        "default": null,
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "default": "clock_timestamp()",
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "expires_at",
+        "type": "timestamp with time zone",
+        "default": null,
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "reason",
+        "type": "text",
+        "default": null,
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "revoked_at",
+        "type": "timestamp with time zone",
+        "default": null,
+        "identity": "",
+        "not_null": false,
+        "generated": ""
+      },
+      {
+        "name": "revocation_reason",
+        "type": "text",
+        "default": null,
+        "identity": "",
+        "not_null": false,
+        "generated": ""
+      }
+    ],
+    "indexes": [
+      {
+        "keys": [
+          {
+            "column": "id",
+            "options": 0,
+            "collation": null,
+            "operator_class": "pg_catalog.uuid_ops"
+          }
+        ],
+        "name": "node_image_reader_grants_pkey",
+        "ready": true,
+        "valid": true,
+        "unique": true,
+        "primary": true,
+        "immediate": true,
+        "key_count": 1,
+        "predicate": null,
+        "expressions": null,
+        "access_method": "btree",
+        "attribute_count": 1,
+        "nulls_not_distinct": false
+      },
+      {
+        "keys": [
+          {
+            "column": "installation_id",
+            "options": 0,
+            "collation": null,
+            "operator_class": "pg_catalog.uuid_ops"
+          },
+          {
+            "column": "cluster_epoch",
+            "options": 0,
+            "collation": null,
+            "operator_class": "pg_catalog.uuid_ops"
+          },
+          {
+            "column": "identity_id",
+            "options": 0,
+            "collation": null,
+            "operator_class": "pg_catalog.uuid_ops"
+          }
+        ],
+        "name": "node_image_reader_one_live",
+        "ready": true,
+        "valid": true,
+        "unique": true,
+        "primary": false,
+        "immediate": true,
+        "key_count": 3,
+        "predicate": "(revoked_at IS NULL)",
+        "expressions": null,
+        "access_method": "btree",
+        "attribute_count": 3,
+        "nulls_not_distinct": false
+      }
+    ],
+    "constraints": [
+      {
+        "kind": "c",
+        "name": "node_image_reader_grants_binding_generation_check",
+        "local": true,
+        "match": " ",
+        "columns": [
+          "binding_generation"
+        ],
+        "validated": true,
+        "deferrable": false,
+        "expression": "(binding_generation > 0)",
+        "no_inherit": false,
+        "delete_action": " ",
+        "update_action": " ",
+        "inherited_count": 0,
+        "referenced_table": null,
+        "initially_deferred": false,
+        "referenced_columns": []
+      },
+      {
+        "kind": "c",
+        "name": "node_image_reader_grants_check",
+        "local": true,
+        "match": " ",
+        "columns": [
+          "expires_at",
+          "created_at"
+        ],
+        "validated": true,
+        "deferrable": false,
+        "expression": "((expires_at > created_at) AND (expires_at <= (created_at + '24:00:00'::interval)))",
+        "no_inherit": false,
+        "delete_action": " ",
+        "update_action": " ",
+        "inherited_count": 0,
+        "referenced_table": null,
+        "initially_deferred": false,
+        "referenced_columns": []
+      },
+      {
+        "kind": "c",
+        "name": "node_image_reader_grants_check1",
+        "local": true,
+        "match": " ",
+        "columns": [
+          "revoked_at",
+          "revocation_reason"
+        ],
+        "validated": true,
+        "deferrable": false,
+        "expression": "(((revoked_at IS NULL) AND (revocation_reason IS NULL)) OR ((revoked_at IS NOT NULL) AND (revocation_reason IS NOT NULL) AND ((octet_length(revocation_reason) >= 1) AND (octet_length(revocation_reason) <= 256)) AND (revocation_reason !~ '[[:cntrl:]]'::text)))",
+        "no_inherit": false,
+        "delete_action": " ",
+        "update_action": " ",
+        "inherited_count": 0,
+        "referenced_table": null,
+        "initially_deferred": false,
+        "referenced_columns": []
+      },
+      {
+        "kind": "c",
+        "name": "node_image_reader_grants_id_check",
+        "local": true,
+        "match": " ",
+        "columns": [
+          "id"
+        ],
+        "validated": true,
+        "deferrable": false,
+        "expression": "(id <> '00000000-0000-0000-0000-000000000000'::uuid)",
+        "no_inherit": false,
+        "delete_action": " ",
+        "update_action": " ",
+        "inherited_count": 0,
+        "referenced_table": null,
+        "initially_deferred": false,
+        "referenced_columns": []
+      },
+      {
+        "kind": "f",
+        "name": "node_image_reader_grants_identity_id_fkey",
+        "local": true,
+        "match": "s",
+        "columns": [
+          "identity_id"
+        ],
+        "validated": true,
+        "deferrable": false,
+        "expression": null,
+        "no_inherit": true,
+        "delete_action": "a",
+        "update_action": "a",
+        "inherited_count": 0,
+        "referenced_table": "public.principal_identities",
+        "initially_deferred": false,
+        "referenced_columns": [
+          "id"
+        ]
+      },
+      {
+        "kind": "p",
+        "name": "node_image_reader_grants_pkey",
+        "local": true,
+        "match": " ",
+        "columns": [
+          "id"
+        ],
+        "validated": true,
+        "deferrable": false,
+        "expression": null,
+        "no_inherit": true,
+        "delete_action": " ",
+        "update_action": " ",
+        "inherited_count": 0,
+        "referenced_table": null,
+        "initially_deferred": false,
+        "referenced_columns": []
+      },
+      {
+        "kind": "c",
+        "name": "node_image_reader_grants_principal_authz_version_check",
+        "local": true,
+        "match": " ",
+        "columns": [
+          "principal_authz_version"
+        ],
+        "validated": true,
+        "deferrable": false,
+        "expression": "(principal_authz_version > 0)",
+        "no_inherit": false,
+        "delete_action": " ",
+        "update_action": " ",
+        "inherited_count": 0,
+        "referenced_table": null,
+        "initially_deferred": false,
+        "referenced_columns": []
+      },
+      {
+        "kind": "f",
+        "name": "node_image_reader_grants_principal_id_fkey",
+        "local": true,
+        "match": "s",
+        "columns": [
+          "principal_id"
+        ],
+        "validated": true,
+        "deferrable": false,
+        "expression": null,
+        "no_inherit": true,
+        "delete_action": "a",
+        "update_action": "a",
+        "inherited_count": 0,
+        "referenced_table": "public.principals",
+        "initially_deferred": false,
+        "referenced_columns": [
+          "id"
+        ]
+      },
+      {
+        "kind": "c",
+        "name": "node_image_reader_grants_reason_check",
+        "local": true,
+        "match": " ",
+        "columns": [
+          "reason"
+        ],
+        "validated": true,
+        "deferrable": false,
+        "expression": "(((octet_length(reason) >= 1) AND (octet_length(reason) <= 256)) AND (reason !~ '[[:cntrl:]]'::text))",
+        "no_inherit": false,
+        "delete_action": " ",
+        "update_action": " ",
+        "inherited_count": 0,
+        "referenced_table": null,
+        "initially_deferred": false,
+        "referenced_columns": []
+      }
+    ]
+  },
+  "node_image_reader_audit": {
+    "columns": [
+      {
+        "name": "id",
+        "type": "uuid",
+        "default": "gen_random_uuid()",
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "grant_id",
+        "type": "uuid",
+        "default": null,
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "installation_id",
+        "type": "uuid",
+        "default": null,
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "cluster_epoch",
+        "type": "uuid",
+        "default": null,
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "action",
+        "type": "text",
+        "default": null,
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "recorded_at",
+        "type": "timestamp with time zone",
+        "default": "clock_timestamp()",
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "database_role",
+        "type": "text",
+        "default": null,
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "reason",
+        "type": "text",
+        "default": null,
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      }
+    ],
+    "indexes": [
+      {
+        "keys": [
+          {
+            "column": "id",
+            "options": 0,
+            "collation": null,
+            "operator_class": "pg_catalog.uuid_ops"
+          }
+        ],
+        "name": "node_image_reader_audit_pkey",
+        "ready": true,
+        "valid": true,
+        "unique": true,
+        "primary": true,
+        "immediate": true,
+        "key_count": 1,
+        "predicate": null,
+        "expressions": null,
+        "access_method": "btree",
+        "attribute_count": 1,
+        "nulls_not_distinct": false
+      }
+    ],
+    "constraints": [
+      {
+        "kind": "c",
+        "name": "node_image_reader_audit_action_check",
+        "local": true,
+        "match": " ",
+        "columns": [
+          "action"
+        ],
+        "validated": true,
+        "deferrable": false,
+        "expression": "(action = ANY (ARRAY['GRANTED'::text, 'REVOKED'::text]))",
+        "no_inherit": false,
+        "delete_action": " ",
+        "update_action": " ",
+        "inherited_count": 0,
+        "referenced_table": null,
+        "initially_deferred": false,
+        "referenced_columns": []
+      },
+      {
+        "kind": "f",
+        "name": "node_image_reader_audit_grant_id_fkey",
+        "local": true,
+        "match": "s",
+        "columns": [
+          "grant_id"
+        ],
+        "validated": true,
+        "deferrable": false,
+        "expression": null,
+        "no_inherit": true,
+        "delete_action": "a",
+        "update_action": "a",
+        "inherited_count": 0,
+        "referenced_table": "public.node_image_reader_grants",
+        "initially_deferred": false,
+        "referenced_columns": [
+          "id"
+        ]
+      },
+      {
+        "kind": "p",
+        "name": "node_image_reader_audit_pkey",
+        "local": true,
+        "match": " ",
+        "columns": [
+          "id"
+        ],
+        "validated": true,
+        "deferrable": false,
+        "expression": null,
+        "no_inherit": true,
+        "delete_action": " ",
+        "update_action": " ",
+        "inherited_count": 0,
+        "referenced_table": null,
+        "initially_deferred": false,
+        "referenced_columns": []
+      },
+      {
+        "kind": "c",
+        "name": "node_image_reader_audit_reason_check",
+        "local": true,
+        "match": " ",
+        "columns": [
+          "reason"
+        ],
+        "validated": true,
+        "deferrable": false,
+        "expression": "(((octet_length(reason) >= 1) AND (octet_length(reason) <= 256)) AND (reason !~ '[[:cntrl:]]'::text))",
+        "no_inherit": false,
+        "delete_action": " ",
+        "update_action": " ",
+        "inherited_count": 0,
+        "referenced_table": null,
+        "initially_deferred": false,
+        "referenced_columns": []
+      }
+    ]
+  },
+  "platform_configuration": {
+    "columns": [
+      {
+        "name": "singleton",
+        "type": "boolean",
+        "default": "true",
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "cluster_epoch",
+        "type": "uuid",
+        "default": null,
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "safe_mode",
+        "type": "boolean",
+        "default": "true",
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "default": "clock_timestamp()",
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "safety_principal_id",
+        "type": "uuid",
+        "default": "'00000000-0000-4000-8000-000000000001'::uuid",
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      },
+      {
+        "name": "installation_id",
+        "type": "uuid",
+        "default": "gen_random_uuid()",
+        "identity": "",
+        "not_null": true,
+        "generated": ""
+      }
+    ],
+    "indexes": [
+      {
+        "keys": [
+          {
+            "column": "singleton",
+            "options": 0,
+            "collation": null,
+            "operator_class": "pg_catalog.bool_ops"
+          }
+        ],
+        "name": "platform_configuration_pkey",
+        "ready": true,
+        "valid": true,
+        "unique": true,
+        "primary": true,
+        "immediate": true,
+        "key_count": 1,
+        "predicate": null,
+        "expressions": null,
+        "access_method": "btree",
+        "attribute_count": 1,
+        "nulls_not_distinct": false
+      }
+    ],
+    "constraints": [
+      {
+        "kind": "c",
+        "name": "platform_configuration_installation_id_check",
+        "local": true,
+        "match": " ",
+        "columns": [
+          "installation_id"
+        ],
+        "validated": true,
+        "deferrable": false,
+        "expression": "(installation_id <> '00000000-0000-0000-0000-000000000000'::uuid)",
+        "no_inherit": false,
+        "delete_action": " ",
+        "update_action": " ",
+        "inherited_count": 0,
+        "referenced_table": null,
+        "initially_deferred": false,
+        "referenced_columns": []
+      },
+      {
+        "kind": "p",
+        "name": "platform_configuration_pkey",
+        "local": true,
+        "match": " ",
+        "columns": [
+          "singleton"
+        ],
+        "validated": true,
+        "deferrable": false,
+        "expression": null,
+        "no_inherit": true,
+        "delete_action": " ",
+        "update_action": " ",
+        "inherited_count": 0,
+        "referenced_table": null,
+        "initially_deferred": false,
+        "referenced_columns": []
+      },
+      {
+        "kind": "f",
+        "name": "platform_configuration_safety_principal_id_fkey",
+        "local": true,
+        "match": "s",
+        "columns": [
+          "safety_principal_id"
+        ],
+        "validated": true,
+        "deferrable": false,
+        "expression": null,
+        "no_inherit": true,
+        "delete_action": "a",
+        "update_action": "a",
+        "inherited_count": 0,
+        "referenced_table": "public.principals",
+        "initially_deferred": false,
+        "referenced_columns": [
+          "id"
+        ]
+      },
+      {
+        "kind": "c",
+        "name": "platform_configuration_singleton_check",
+        "local": true,
+        "match": " ",
+        "columns": [
+          "singleton"
+        ],
+        "validated": true,
+        "deferrable": false,
+        "expression": "singleton",
+        "no_inherit": false,
+        "delete_action": " ",
+        "update_action": " ",
+        "inherited_count": 0,
+        "referenced_table": null,
+        "initially_deferred": false,
+        "referenced_columns": []
+      }
+    ]
+  }
+}

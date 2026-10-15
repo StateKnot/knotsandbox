@@ -301,6 +301,7 @@ jobs:
           source .local/dev.env
           set +a
           cargo test --locked --test keycloak -- --ignored
+          cargo test --locked --test operator_access -- --ignored --test-threads=1
       - name: Real cross-site Keycloak login, console mutation and live authorization revocation
         shell: bash
         run: |

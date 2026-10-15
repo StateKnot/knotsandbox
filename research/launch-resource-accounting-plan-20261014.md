@@ -2,6 +2,8 @@
 
 状态：**第4步普通CPU可信观察已完成本地验收；37组201项按最终制品分两批通过，已公开；基线18ad317的CI 5 job/62 step已通过。** 当前对外支持可信 `KUBERNETES_API_READBACK` 加非空观察，缺证据保持 `NOT_CAPTURED` 加null。普通原生461项、SDK77项、资源账本Chrome8项、新DB8项＋HTTP组合1项、实际维护及生产镜像各自通过；分批结果不称单轮全跑，也不等于生产上线认证。前轮0045账本单轮27组164项、第3步35组192项分批记录均保留其原范围；恢复草稿仍未计验收。当前实现与最终本地验收范围见[可信观察交付](trusted-launch-resource-observation-20261015.md)，原回读及账本记录分别见[第3步](runtime-class-resource-readback-20261015.md)与[第2/5步](launch-resource-accounting-delivery-20261015.md)。利用率、自动调档、预热和GPU仍未完成。
 
+后续进展（2026-10-16）：节点镜像P0b的发布dcb7554精确CI 5 job/62 step已通过；本轮P0c1持久安装读授权／永久撤权、owner CLI、普通app/JWT授权检查完成本地验收。46条正常迁移及原45条不变、6专项、6组29 PG、正式自动化25、普通Rust475、SDK77均已验。它不代表启动利用率或完整节点查询已完成，P0c2及同一原生整链继续待开发。见[本批交付](installation-operator-access-delivery-20261016.md)。
+
 ## 数据与身份合同
 
 必须分别保存四种来源：受理时的用户规格；每次launch实际请求合同；经可信登记方回读的Pod request/limit/overhead；现有配额账的PENDING、ALLOCATED、RELEASED回执。宿主cgroup共享祖先的容量上界仍是独立观测，不能与其中任何一项直接等同。

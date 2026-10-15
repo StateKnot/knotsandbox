@@ -42,7 +42,41 @@ tags:
 - name: Workspaces
 - name: Files
 - name: BrowserIdentity
+- name: InstallationOperator
 paths:
+  "/v1/operator/access":
+    get:
+      tags: [InstallationOperator]
+      operationId: getInstallationNodeImageAccess
+      summary: Check current installation node image read authority
+      description: |
+        Requires a verified SERVICE access token and a finite, explicitly owner-issued
+        installation grant for node_images:read. No tenant header or query parameter
+        selects authority. Tenant grants (including instances:read and wildcard) confer
+        no installation access. ACTION_SCOPES additionally requires node_images:read.
+        Each call checks the current installation/cluster epoch, identity/client binding,
+        expiry and permanent revocation. A successful response is a no-store observation,
+        not a reusable authorization token, and contains no node inventory or metrics.
+      responses:
+        '200':
+          description: The fixed read action is currently authorized
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/InstallationNodeImageAccess"
+        '400':
+          "$ref": "#/components/responses/Problem"
+        '401':
+          "$ref": "#/components/responses/Problem"
+        '403':
+          "$ref": "#/components/responses/Problem"
+        '503':
+          "$ref": "#/components/responses/Unavailable"
+        default:
+          "$ref": "#/components/responses/Problem"
   "/health/live":
     get:
       tags:
@@ -3971,6 +4005,26 @@ components:
           schema:
             "$ref": "#/components/schemas/AcceptedExecution"
   schemas:
+    InstallationNodeImageAccess:
+      type: object
+      additionalProperties: false
+      required: [installation_id, cluster_epoch, grant_id, action, expires_at]
+      properties:
+        installation_id:
+          type: string
+          format: uuid
+        cluster_epoch:
+          type: string
+          format: uuid
+        grant_id:
+          type: string
+          format: uuid
+        action:
+          type: string
+          const: node_images:read
+        expires_at:
+          type: string
+          format: date-time
     Problem:
       type: object
       required:

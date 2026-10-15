@@ -1,6 +1,6 @@
 # 批准OCI镜像的节点预准备：生产实施计划
 
-状态：**P0a/P0b节点只读指标、预算及告警已实现并完成本地验收；P0整体未完成，P0c及P1—P6仍为未实现／未认证方案。** 本文件承接[开发表12.7](rust-sandbox-development-workbreakdown.md#127-可信启动资源观察与原子登记2026-10-15)的可信资源账本；已发布18ad317的精确CI 5 job/62 step已通过，当前按以下依赖推进；新源码CI单独核对。
+状态：**P0a/P0b与P0c1安装级持久授权已完成本地验收；P0整体与完整P0c未完成，P0c2节点消费者／原生整链及P1—P6仍未完成／未认证。** 本文件承接[开发表12.7](rust-sandbox-development-workbreakdown.md#127-可信启动资源观察与原子登记2026-10-15)的可信资源账本；已发布dcb7554的精确CI 5 job/62 step已通过，当前按以下依赖推进；新源码CI单独核对。
 范围仅为批准OCI镜像在准确节点／运行时中的有预算准备，不创建CPU／GPU VM池，不产生用户进程、工作区或普通launch许可。
 每90分钟是触发间隔，不是开发或验证超时；先接续已有在途工作，再持续完成选中的可验证切片，不因下一次触发重复启动。
 失败保存原现场并继续闭合该切片，不能因触发次数或时间到而标记通过，也不能跳过前置门开放拉取。
@@ -19,7 +19,7 @@
 基线只输出明确标注runtime-reported的聚合值及不透明FS身份，完整性、cache total、capacity、available、reclaimable和实际释放量保持UNKNOWN。
 接口来源固定为`RUNTIME_REPORTED`，并单独注明snapshotter报告范围和完整性UNKNOWN，不与普通launch的`KUBERNETES_API_READBACK`配置证据混用。
 `observation_success`仅表示RPC／形状／绑定身份校验成功，不能解释为存储全量采样成功，更不能直接用作硬预算准入。
-固定版本的官方来源与待核实项见[原生镜像来源调查](image-preparation-native-sources-20261015.md)；本文P0c及后续拟新增接口不是现有能力声明。
+固定版本的官方来源与待核实项见[原生镜像来源调查](image-preparation-native-sources-20261015.md)；P0c1授权基础见[本批交付](installation-operator-access-delivery-20261016.md)；本文P0c2节点查询及后续准备接口仍为方案。
 目标版本取仓库锁定的containerd／Kubernetes／snapshotter组合；锁版本、实际backend配置及官方来源三者不符时停止，不猜测某个RPC或插件支持。
 
 ## 端到端接口与身份
@@ -40,7 +40,7 @@
 安装级operator身份必须由可信issuer／subject和显式持久授权确定，普通租户不能通过传一个installation ID变成安装管理员。
 operator读／管理权限分开，授权变更可审计且每次读取前后重新核对；API采用正常非owner数据库角色和窄查询，不复用迁移登录。
 公开租户视图若以后需要，只显示该租户自己的策略／账务；全节点库存汇总和其他租户存在性不能沿实例接口泄露。
-这些是P0c必需实现合同，不代表当前已有全局operator授权模块；缺该模块时不能先开放全节点查询。
+P0c1已实现安装级持久授权／撤权与独立JWT授权检查；P0c2节点查询、admin读消费者及同一原生整链仍未完成，不先开放全节点数据。
 
 ## 第一个完整切片：节点只读基线
 
@@ -67,7 +67,8 @@ operator读／管理权限分开，授权变更可审计且每次读取前后重
 | --- | --- | --- | --- |
 | P0a宿主子项已本地验收；完整P0仍待P0c及原生整链 | `src/nodeguard/image_observation.rs`；接`metrics_server.rs`／固定UDS，只读有界collector及scraper mTLS诊断；见[本批交付](node-image-observation-delivery-20261015.md) | 正常／空镜像／无VM、超大响应、超时、取消、身份／mount切换、部分缺测；真实containerd与FS观察 | RPC／形状成功与统计完整性UNKNOWN分开，逻辑数不冒充容量；无写RPC或任意socket入口 |
 | P0b已完成本地验收，依赖P0a | `deploy/observability/observability.py`、对应verify／pipeline／tests；独立node allowlist、同Prom双Agent预算 | 实际抓取／remote-write、节点样本不被tenant过滤丢弃、旧VM样本保持、HA不累加、恶意label被剥离、WAL与样本上界 | 新旧两类样本在真实协议管线闭合；原生containerd另验，尚非同一原生整链；见[本批交付](node-image-pipeline-delivery-20261016.md) |
-| P0c，依赖P0a/P0b | `src/node_image_status.rs`、受限operator授权／查询及admin消费者；按实际模型另立正常迁移／最小读权限 | 真实OIDC/JWT、普通DB角色、固定selector、安装scope撤权、失效／boot变化清旧，无VM读基线 | 安装级授权与消费者完整；本批只读slice才可记完成 |
+| P0c1已本地验收，依赖P0a/P0b | `src/operator_access.rs`、正常0047／角色与schema预检、owner CLI和JWT授权检查 | 真实Keycloak/普通PG登录/CLI/TCP、永久撤权与ABA、锁后到期、写权漂移、历史升级；6专项及6组29/自动化25通过 | 安装授权基础可独立使用；仅授权元数据，无节点查询；见[交付](installation-operator-access-delivery-20261016.md) |
+| P0c2未完成，依赖P0c1 | `src/node_image_status.rs`、固定有界节点查询/admin读消费者与原生同链 | 固定selector/响应预算、当前epoch/node/boot/profile/原时间、I/O前后撤权清旧，无VM读基线 | 安装授权、真实消费者与同一原生整链完整后，完整P0c及本批P0只读slice才可记完成 |
 | P1，依赖P0 | `research/image-preparation-native-sources-20261015.md`、profile／部署合同 | 固定版本原生lease／content／snapshot引用、namespace／snapshotter、CRI GC交互、存储／内存／FD／专用网络槽的硬限与临时目录逐项源码及实测 | 官方来源＋真实backend证据确定一套受支持组合；共享daemon不能隔离准备开销时不开放该组合 |
 | P2，依赖P1 | `src/image_preparation.rs`、`src/image_preparation_budget.rs`、正常新迁移／角色／preflight | 并发预算预留／拒绝、跨租户归因、同键重放、撤权／epoch／节点换代、schema／列授权漂移 | PG意图／预算／身份持久且不可伪造，未派发任务也可安全关闭；没有直接runtime表写权 |
 | P3，依赖P1/P2 | `src/nodeguard/image_preparation.rs`、独立宿主协议／journal及controller adapter | 本地registry实际descriptor与平台选择、凭据隔离、摘要校验、受限下载／解包、native保护引用、内存／FD／网络槽耗尽与取消／崩溃 | 每任务和每节点真实硬限、瞬态headroom及原VM链路保留量守住；只有精确当前授权任务能产生准备回执 |

@@ -71,3 +71,6 @@ GRANT EXECUTE ON FUNCTION sandbox_expire_tenant_diagnoses(uuid,integer) TO sandb
 -- Immutable launch accounting: runtime components cannot author ledger facts.
 GRANT SELECT ON launch_resource_contracts,quota_resource_receipts,launch_quota_bindings TO sandbox_app;
 GRANT SELECT ON launch_pod_resource_observations TO sandbox_app;
+
+-- Fixed installation read authority only. Management and audit remain owner-only.
+GRANT EXECUTE ON FUNCTION sandbox_node_image_access(text,text,text,bigint) TO sandbox_app;

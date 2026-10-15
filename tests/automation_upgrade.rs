@@ -372,18 +372,20 @@ async fn snapshot(owner: &PgPool, scopes: &[Scope]) -> anyhow::Result<Snapshot> 
         }
         tx.commit().await?;
     }
+    // Only 0047's additive installation identity is excluded; its non-nil value
+    // and stability are checked separately before/after grants and replay.
     let config: Value = sqlx::query_scalar(
-        "SELECT jsonb_agg(to_jsonb(c) ORDER BY singleton) FROM platform_configuration c",
+        "SELECT jsonb_agg(to_jsonb(c)-'installation_id' ORDER BY singleton) FROM platform_configuration c",
     )
     .fetch_one(owner)
     .await?;
     facts.insert("platform_configuration".to_owned(), config);
-    // Exclude only additive 0042/0045/0046 relations. Every historical relation's
+    // Exclude only additive 0042/0045/0046/0047 relations. Every historical relation's
     // RLS flags and complete policy rows remain in the exact comparison.
-    let rls: Value = sqlx::query_scalar("SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.relname),'[]'::jsonb) FROM (SELECT c.relname,c.relrowsecurity,c.relforcerowsecurity,(SELECT jsonb_agg(to_jsonb(p) ORDER BY p.polname) FROM pg_policy p WHERE p.polrelid=c.oid) AS policies FROM pg_class c WHERE c.relnamespace='public'::regnamespace AND c.relkind IN('r','p') AND c.relname NOT IN('automation_notifications','launch_resource_contracts','quota_resource_receipts','launch_quota_bindings','quota_resource_legacy_baseline','launch_pod_resource_observations','launch_registration_legacy_baseline')) r").fetch_one(owner).await?;
+    let rls: Value = sqlx::query_scalar("SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.relname),'[]'::jsonb) FROM (SELECT c.relname,c.relrowsecurity,c.relforcerowsecurity,(SELECT jsonb_agg(to_jsonb(p) ORDER BY p.polname) FROM pg_policy p WHERE p.polrelid=c.oid) AS policies FROM pg_class c WHERE c.relnamespace='public'::regnamespace AND c.relkind IN('r','p') AND c.relname NOT IN('automation_notifications','launch_resource_contracts','quota_resource_receipts','launch_quota_bindings','quota_resource_legacy_baseline','launch_pod_resource_observations','launch_registration_legacy_baseline','node_image_reader_grants','node_image_reader_audit')) r").fetch_one(owner).await?;
     facts.insert("existing_rls_policies".to_owned(), rls);
     // A trigger name alone is not its identity: append_only already protects
-    // older tables. Match each new 0045/0046 trigger by its exact relation and name.
+    // older tables. Match each new 0045/0046/0047 trigger by its exact relation and name.
     let triggers: Value = sqlx::query_scalar(r#"
         SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.relation,r.tgname),'[]'::jsonb)
         FROM (SELECT t.tgrelid::regclass::text AS relation,t.tgname,t.tgenabled,t.tgtype,
@@ -409,7 +411,13 @@ async fn snapshot(owner: &PgPool, scopes: &[Scope]) -> anyhow::Result<Snapshot> 
               ('launch_registration_legacy_baseline','append_only'),
               ('launch_registration_legacy_baseline','baseline_closed'),
               ('launch_permit_receipts','launch_registration_resource_complete'),
-              ('launch_permit_extension_receipts','launch_extension_resource_complete'))) r
+              ('launch_permit_extension_receipts','launch_extension_resource_complete'),
+              ('node_image_reader_audit','append_only'),
+              ('node_image_reader_grants','immutable_node_image_reader'),
+              ('node_image_reader_grants','audit_node_image_reader'),
+              ('principals','node_image_reader_principal_change'),
+              ('principal_identities','node_image_reader_identity_change'),
+              ('platform_configuration','node_image_reader_scope_change'))) r
     "#).fetch_one(owner).await?;
     facts.insert("existing_trigger_contracts".to_owned(), triggers);
     let functions: Value = sqlx::query_scalar(r#"
@@ -422,7 +430,13 @@ async fn snapshot(owner: &PgPool, scopes: &[Scope]) -> anyhow::Result<Snapshot> 
               'public.sandbox_guard_launch_resource_registration()',
               'public.sandbox_guard_launch_resource_observation()',
               'public.sandbox_lock_registration_boundary(uuid)',
-              'public.sandbox_record_launch_resource_observation(uuid,uuid,text,text,uuid,text,text,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz)'
+              'public.sandbox_record_launch_resource_observation(uuid,uuid,text,text,uuid,text,text,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz)',
+              'public.sandbox_guard_node_image_reader()',
+              'public.sandbox_audit_node_image_reader()',
+              'public.sandbox_invalidate_node_image_reader()',
+              'public.sandbox_grant_node_image_reader(uuid,uuid,uuid,text,text,text,timestamptz,text)',
+              'public.sandbox_revoke_node_image_reader(uuid,uuid,uuid,text)',
+              'public.sandbox_node_image_access(text,text,text,bigint)'
             ]::text[]) added(signature) WHERE f.oid=to_regprocedure(added.signature))) r
     "#).fetch_one(owner).await?;
     facts.insert("existing_function_security".to_owned(), functions);
@@ -561,6 +575,83 @@ async fn assert_pod_observation_upgrade(owner: &PgPool, scopes: &[Scope]) -> any
         tx.commit().await?;
     }
     Ok(())
+}
+
+async fn assert_operator_authorization_upgrade(
+    owner: &PgPool,
+    app: &PgPool,
+    read_granted: bool,
+) -> anyhow::Result<Uuid> {
+    let installation: Uuid =
+        sqlx::query_scalar("SELECT installation_id FROM platform_configuration WHERE singleton")
+            .fetch_one(owner)
+            .await?;
+    ensure!(
+        !installation.is_nil(),
+        "Migration 47 must establish a non-nil installation identity"
+    );
+    let empty: bool = sqlx::query_scalar(
+        "SELECT NOT EXISTS(SELECT 1 FROM node_image_reader_grants) AND NOT EXISTS(SELECT 1 FROM node_image_reader_audit)",
+    )
+    .fetch_one(owner)
+    .await?;
+    ensure!(
+        empty,
+        "Migration/role installation must not preauthorize historical service identities"
+    );
+    for table in ["node_image_reader_grants", "node_image_reader_audit"] {
+        let private: bool = sqlx::query_scalar(
+            "SELECT NOT has_table_privilege(current_user,$1,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AND NOT has_any_column_privilege(current_user,$1,'SELECT,INSERT,UPDATE,REFERENCES')",
+        )
+        .bind(format!("public.{table}"))
+        .fetch_one(app)
+        .await?;
+        ensure!(
+            private,
+            "Ordinary app must have no private operator table/column grants"
+        );
+        let error = sqlx::query(&format!("SELECT id FROM public.{table} LIMIT 1"))
+            .fetch_optional(app)
+            .await
+            .err()
+            .context("Ordinary app unexpectedly read a private operator table")?;
+        ensure!(
+            error
+                .as_database_error()
+                .and_then(|error| error.code())
+                .as_deref()
+                == Some("42501"),
+            "Private operator tables must reject the actual ordinary app with insufficient_privilege"
+        );
+    }
+    let narrow: bool = sqlx::query_scalar(r#"
+        SELECT bool_and(p.oid IS NOT NULL
+            AND NOT EXISTS(SELECT 1 FROM aclexplode(COALESCE(p.proacl,acldefault('f',p.proowner))) a
+                WHERE a.grantee=0 AND a.privilege_type='EXECUTE')
+            AND NOT EXISTS(SELECT 1 FROM pg_roles r WHERE r.rolname IN
+                ('sandbox_app','sandbox_worker','sandbox_gateway','sandbox_admission','sandbox_termination',
+                 'sandbox_fencing','sandbox_volume_deleter','sandbox_backup','sandbox_automation',
+                 'sandbox_browser','sandbox_restore','sandbox_restore_admission','sandbox_restore_gc','sandbox_restore_gc_admission')
+                AND has_function_privilege(r.oid,p.oid,'EXECUTE') IS DISTINCT FROM
+                    (r.rolname='sandbox_app' AND expected.reader AND $1)))
+        FROM (VALUES
+            ('public.sandbox_guard_node_image_reader()',false),
+            ('public.sandbox_audit_node_image_reader()',false),
+            ('public.sandbox_invalidate_node_image_reader()',false),
+            ('public.sandbox_grant_node_image_reader(uuid,uuid,uuid,text,text,text,timestamptz,text)',false),
+            ('public.sandbox_revoke_node_image_reader(uuid,uuid,uuid,text)',false),
+            ('public.sandbox_node_image_access(text,text,text,bigint)',true)
+        ) expected(signature,reader)
+        LEFT JOIN pg_proc p ON p.oid=to_regprocedure(expected.signature)
+    "#)
+    .bind(read_granted)
+    .fetch_one(owner)
+    .await?;
+    ensure!(
+        narrow,
+        "Migration 47 must close PUBLIC/runtime management execution and grant only the explicit app reader"
+    );
+    Ok(installation)
 }
 
 async fn ledger(owner: &PgPool) -> anyhow::Result<Vec<(i64, Value)>> {
@@ -788,6 +879,7 @@ async fn upgrade_from_v41_preserves_historical_automation_and_rejects_invalid_so
     );
     assert_resource_accounting_upgrade(&owner, &scopes).await?;
     assert_pod_observation_upgrade(&owner, &scopes).await?;
+    let installation = assert_operator_authorization_upgrade(&owner, &app, false).await?;
     ensure!(
         snapshot_matches(&before_current_roles, snapshot(&owner, &scopes).await?)
             && notification_snapshot(&owner, &scopes).await? == notices_at42,
@@ -804,6 +896,10 @@ async fn upgrade_from_v41_preserves_historical_automation_and_rejects_invalid_so
             == all.iter().map(|m| m.version).collect::<Vec<_>>()
     );
     all_roles(&owner).await?;
+    ensure!(
+        assert_operator_authorization_upgrade(&owner, &app, true).await? == installation,
+        "Role installation must preserve the installation identity"
+    );
     ensure!(
         snapshot_matches(&before_current_roles, snapshot(&owner, &scopes).await?)
             && notification_snapshot(&owner, &scopes).await? == notices_at42,
@@ -1005,6 +1101,10 @@ async fn upgrade_from_v41_preserves_historical_automation_and_rejects_invalid_so
     let notification_before = notification_snapshot(&owner, &scopes).await?;
     all.run(&owner).await?;
     all_roles(&owner).await?;
+    ensure!(
+        assert_operator_authorization_upgrade(&owner, &app, true).await? == installation,
+        "Migration/role replay must preserve installation identity and must not preauthorize readers"
+    );
     ensure!(
         ledger(&owner).await? == upgraded_ledger,
         "Migration/role replay rewrote its immutable ledger"

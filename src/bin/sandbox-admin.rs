@@ -47,6 +47,8 @@ struct Args {
 enum Command {
     /// Bind or rotate a reviewed SERVICE OAuth client with exact previous value.
     BindServiceIdentity(FenceArgs),
+    /// Explicit installation-wide node image read authority; never a tenant grant.
+    NodeImageReader(OperatorGrantArgs),
     /// Enroll one quarantined node through reviewed inventory, live K8s and mTLS.
     EnrollNode(EnrollArgs),
     /// Record a node-wide SYSTEM incident affecting all tenants on that node.
@@ -55,6 +57,78 @@ enum Command {
     GuardContract(FenceArgs),
     /// Register disabled backup profiles, activate using live checks, or revoke.
     BackupProfile(backup_cli::BackupProfileArgs),
+}
+
+#[derive(clap::Args)]
+#[command(group(ArgGroup::new("operator_mode").required(true).args(["validate_only","apply"])))]
+struct OperatorGrantArgs {
+    #[arg(long)]
+    file: PathBuf,
+    #[arg(long)]
+    revoke: bool,
+    #[arg(long)]
+    validate_only: bool,
+    #[arg(long)]
+    apply: bool,
+    #[arg(long, env = "SANDBOX_ADMIN_DATABASE_URL", hide_env_values = true)]
+    database_url: Option<String>,
+    /// Development only: allow HTTP issuers at literal loopback IPs.
+    #[arg(long)]
+    allow_loopback_http: bool,
+}
+
+async fn node_image_reader(args: OperatorGrantArgs) -> anyhow::Result<()> {
+    use sandbox_platform::operator_access::{
+        GrantNodeImageReader, MAX_OPERATOR_GRANT_BYTES, RevokeNodeImageReader,
+    };
+    let mut bytes = Vec::new();
+    File::open(&args.file)?
+        .take((MAX_OPERATOR_GRANT_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)?;
+    let grant = if args.revoke {
+        None
+    } else {
+        Some(GrantNodeImageReader::parse(
+            &bytes,
+            args.allow_loopback_http,
+        )?)
+    };
+    let revoke = if args.revoke {
+        Some(RevokeNodeImageReader::parse(&bytes)?)
+    } else {
+        None
+    };
+    if args.validate_only {
+        println!(
+            "{}",
+            serde_json::json!({"validated":true,"database_checked":false,"changed":false})
+        );
+        return Ok(());
+    }
+    let url = args
+        .database_url
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("SANDBOX_ADMIN_DATABASE_URL required"))?;
+    let database = Database::connect_for_process(url, 2, DatabaseProcessRole::Admin).await?;
+    let outcome = async {
+        if let Some(request) = grant {
+            let receipt =
+                sandbox_platform::operator_access::grant_node_image_reader(&database, &request)
+                    .await?;
+            println!("{}", serde_json::to_string(&receipt)?);
+        } else if let Some(request) = revoke {
+            sandbox_platform::operator_access::revoke_node_image_reader(&database, &request)
+                .await?;
+            println!(
+                "{}",
+                serde_json::json!({"grant_id":request.grant_id,"revoked":true})
+            );
+        }
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+    database.pool.close().await;
+    outcome
 }
 async fn bind_service_identity(args: FenceArgs) -> anyhow::Result<()> {
     let request = sandbox_platform::admin::ServiceIdentityBindingRequest::parse(&read_enrollment(
@@ -220,6 +294,7 @@ async fn main() -> anyhow::Result<()> {
     if let Some(command) = args.command {
         return match command {
             Command::BindServiceIdentity(binding) => bind_service_identity(binding).await,
+            Command::NodeImageReader(request) => node_image_reader(request).await,
             Command::EnrollNode(enrollment) => enroll(enrollment).await,
             Command::NodeFence(incident) => fence(incident).await,
             Command::GuardContract(contract) => guard_contract(contract).await,

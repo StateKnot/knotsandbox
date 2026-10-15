@@ -31,6 +31,8 @@ mod launch_resource_observation_tests;
 pub mod lifecycle;
 pub mod logging;
 pub mod model;
+pub mod operator_access;
+mod operator_access_schema;
 pub mod request;
 pub mod resource_accounting;
 mod resource_accounting_schema;

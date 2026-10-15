@@ -736,7 +736,7 @@ fn dns_label(value: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
-fn validate_issuer(value: &str, allow_loopback_http: bool) -> Result<(), AdminError> {
+pub(crate) fn validate_issuer(value: &str, allow_loopback_http: bool) -> Result<(), AdminError> {
     let url = Url::parse(value).map_err(|_| AdminError::Invalid("invalid issuer URL"))?;
     let loopback = matches!(url.host(),Some(Host::Ipv4(ip)) if ip.is_loopback())
         || matches!(url.host(),Some(Host::Ipv6(ip)) if ip.is_loopback());
