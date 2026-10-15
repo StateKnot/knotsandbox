@@ -23,6 +23,7 @@ pub mod event_stream;
 pub mod execution;
 pub mod grants;
 pub mod history;
+pub mod image_artifact;
 pub mod instance_details;
 pub mod instance_security;
 mod launch_resource_observation_schema;

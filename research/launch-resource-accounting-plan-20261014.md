@@ -6,6 +6,8 @@
 
 后续进展（2026-10-16，P0c2b）：同一原生containerd→scraper mTLS→双Agent remote-write→实际receiver→operator API／admin八阶段整链已本地验收，最终v5主链82.876秒；原始scrape时间／collector报告推进、RPC失败／失联清旧、在途撤权与新grant原期限均通过。基线8e1fbbc的精确CI 5 job／62 step已通过，新提交CI另核；下一项为P1平台／原生引用和硬限组合，pre-pull／GPU／物理缓存与收益认证仍未完成。早期失败及匿名卷归属限制见[本批交付](native-image-chain-delivery-20261016.md)。
 
+最新后续检查点（2026-10-16，P1a）：离线OCI元数据公共模块与实际admin CLI已完成11项真实进程测试、Linux Docker七场景验收。固定expected digest／精确平台及元数据描述符一致性已实现，回执明确不查审批、不验层载荷、不授权准备；三项审查缺陷已修复并保留失败证据。基线57d1689精确CI 5 job／64 step全通过，本批CI独立核对。下一项是P1b运行时绑定／原生引用与硬限；pre-pull、GPU、物理容量与性能收益仍未认证，见[本批交付](image-artifact-delivery-20261016.md)。
+
 ## 数据与身份合同
 
 必须分别保存四种来源：受理时的用户规格；每次launch实际请求合同；经可信登记方回读的Pod request/limit/overhead；现有配额账的PENDING、ALLOCATED、RELEASED回执。宿主cgroup共享祖先的容量上界仍是独立观测，不能与其中任何一项直接等同。

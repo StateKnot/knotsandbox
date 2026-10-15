@@ -239,6 +239,10 @@ jobs:
           subprocess.run(['docker', 'pull', lock['prometheus_image']], check=True)
           PY
           .local/cluster-venv/bin/python scripts/test-node-image-query.py --artifacts .local/review-artifacts.jsonl --evidence-dir .local/node-image-query-ci
+      - name: Offline OCI metadata through the actual isolated Linux admin CLI
+        run: |
+          df -h .
+          python3 scripts/test-image-artifact.py --artifacts .local/review-artifacts.jsonl --evidence-dir .local/image-artifact-ci
       - name: Retain non-secret identity and lifecycle regression evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -256,6 +260,8 @@ jobs:
             .local/review-regressions/*.log
             .local/node-image-query-ci/*.json
             .local/node-image-query-ci/*.log
+            .local/image-artifact-ci/record.json
+            .local/image-artifact-ci/*.log
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14

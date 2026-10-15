@@ -1,0 +1,1 @@
+{"architecture":"amd64","os":"linux","config":{"Env":["PUBLIC_SECRET_SENTINEL=must-not-appear-in-receipt"],"Labels":{"public.fixture":"opaque config fields must not leak"}},"rootfs":{"type":"layers","diff_ids":["sha256:ec7e3831d613c86b6b14c1284c8df691ddfeac02b2b1b8e9328b36c85c1af7a9","sha256:ec7e3831d613c86b6b14c1284c8df691ddfeac02b2b1b8e9328b36c85c1af7a9"]}}
