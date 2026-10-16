@@ -10,6 +10,9 @@
 
 最新后续检查点（2026-10-16，P1b1）：实际安装plan／collect的受支持镜像运行时组合与相同读取字节认证已完成本地验收。14项Python、原版上游完整模板和默认Docker入口20实际CLI／40日志通过；配置换档真实FD屏障拒绝登记、目录FD输出及自有清理已核。基线0721699精确CI 5 job／65 step成功，本批CI另核。它仅证明配置与身份，实际daemon读回、pull／unpack、原生引用和硬限仍待推进，不增加VM或GPU配额、容量和收益声称。见[本批交付](host-image-runtime-profile-delivery-20261016.md)。
 
+
+最新开发检查点（2026-10-16，P1b2启动时runtime读回）：`CriProxy::verify_startup` 在版本核对后、原sandbox／进程覆盖恢复及开放登记前，沿原固定UDS执行有界 `Status(verbose=true)`。固定目录／endpoint、默认runc／两个handler、Kata ConfigPath／类型与安全选项冲突或缺失保持Closed，不输出原配置。普通Rust 65程序501通过／0失败／291环境ignored，其中新增4项含真实gRPC与原5秒deadline；Python runner 11项、Mac／Linux严格all-target Clippy及fmt通过。真正containerd 2.3.5的本地Linux arm64正反例与原生镜像mTLS回归各1项通过，源码／制品不变及自有容器／镜像清理确认。基线686b9b8精确CI 5 job／67 step全通过，本批CI另核。该片仅验证本次启动的runtime配置子集，沿用受控root UDS信任，不证明daemon PID／二进制、持续漂移、images／NRI状态或Kata能力；pull／unpack、原生引用／GC、硬限和GPU／云／CSI／性能仍待验收。见[本批交付](runtime-profile-startup-delivery-20261016.md)。
+
 ## 数据与身份合同
 
 必须分别保存四种来源：受理时的用户规格；每次launch实际请求合同；经可信登记方回读的Pod request/limit/overhead；现有配额账的PENDING、ALLOCATED、RELEASED回执。宿主cgroup共享祖先的容量上界仍是独立观测，不能与其中任何一项直接等同。

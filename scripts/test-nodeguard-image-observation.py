@@ -32,6 +32,8 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 CASE = "nodeguard::metrics_server::image_tests::native_containerd_inventory_status_is_scraper_only_without_vms"
 MARKER = "NODEGUARD_NATIVE_IMAGE_OBSERVATION_SCRAPER_ONLY_VERIFIED"
+ACCEPTANCE_SCOPE = "LOCAL_NATIVE_CONTAINERD_CRI_AND_MTLS_ONLY_NOT_KATA_GPU_CLOUD_OR_COMPLETE_CACHE_BYTES"
+SUCCESS_MESSAGE = "PASS exact native containerd image observation; owned daemon retired; no Kata/cloud certification"
 VERSION = "2.3.5"
 RELEASE = "https://github.com/containerd/containerd/releases/tag/v2.3.5"
 DOWNLOAD = "https://github.com/containerd/containerd/releases/download/v2.3.5/"
@@ -501,7 +503,7 @@ def run(args):
     record = {"status": "FAIL", "case": CASE, "commands": [], "failure_stage": "PREFLIGHT", "failure_code": None,
               "owned_container_cleanup_confirmed": True, "owned_image_cleanup_confirmed": True,
               "source_unchanged": None, "binary_unchanged": None, "artifacts_unchanged": None,
-              "scope": "LOCAL_NATIVE_CONTAINERD_CRI_AND_MTLS_ONLY_NOT_KATA_GPU_CLOUD_OR_COMPLETE_CACHE_BYTES"}
+              "scope": ACCEPTANCE_SCOPE}
     try:
         accept(args, evidence, record)
     except BaseException as error:
@@ -519,7 +521,7 @@ def run(args):
         error = CheckError("NATIVE_IMAGE_ACCEPTANCE_OR_CLEANUP_FAILED")
         error.evidence_saved = True
         raise error
-    print("PASS exact native containerd image observation; owned daemon retired; no Kata/cloud certification")
+    print(SUCCESS_MESSAGE)
 
 
 if __name__ == "__main__":

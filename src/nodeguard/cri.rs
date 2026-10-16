@@ -118,6 +118,11 @@ impl CriProxy {
         {
             return Err(GuardError::IdentityMismatch);
         }
+        super::runtime_profile::verify(
+            self.upstream.clone(),
+            self.observer.expected_kata_configuration(),
+        )
+        .await?;
         let sandboxes = tokio::time::timeout(
             Duration::from_secs(5),
             self.upstream

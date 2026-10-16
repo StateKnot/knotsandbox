@@ -1,9 +1,12 @@
 # 批准OCI镜像的节点预准备：生产实施计划
 
-状态：**P0a—P0c2b只读观察及同一原生整链、P1a元数据校验、P1b1宿主配置准入已完成本地验收；完整P1及P2—P6仍未完成／未认证。** 本文件承接[开发表12.7](rust-sandbox-development-workbreakdown.md#127-可信启动资源观察与原子登记2026-10-15)的可信资源账本；基线0721699的精确CI run38819043992，5 job/65 step已通过，当前按以下依赖推进；新源码CI单独核对。
+状态：**P0a—P0c2b只读观察及同一原生整链、P1a元数据校验、P1b1宿主配置准入、P1b2启动时runtime读回已完成本地验收；完整P1及P2—P6仍未完成／未认证。** 本文件承接[开发表12.7](rust-sandbox-development-workbreakdown.md#127-可信启动资源观察与原子登记2026-10-15)的可信资源账本；基线686b9b8的精确CI run38830234782，5 job/67 step已通过，当前按以下依赖推进；新源码CI单独核对。
 范围仅为批准OCI镜像在准确节点／运行时中的有预算准备，不创建CPU／GPU VM池，不产生用户进程、工作区或普通launch许可。
 每90分钟是触发间隔，不是开发或验证超时；先接续已有在途工作，再持续完成选中的可验证切片，不因下一次触发重复启动。
 失败保存原现场并继续闭合该切片，不能因触发次数或时间到而标记通过，也不能跳过前置门开放拉取。
+
+
+最新开发检查点（2026-10-16，P1b2启动时runtime读回）：`CriProxy::verify_startup` 在版本核对后、原sandbox／进程覆盖恢复及开放登记前，沿原固定UDS执行有界 `Status(verbose=true)`。固定目录／endpoint、默认runc／两个handler、Kata ConfigPath／类型与安全选项冲突或缺失保持Closed，不输出原配置。普通Rust 65程序501通过／0失败／291环境ignored，其中新增4项含真实gRPC与原5秒deadline；Python runner 11项、Mac／Linux严格all-target Clippy及fmt通过。真正containerd 2.3.5的本地Linux arm64正反例与原生镜像mTLS回归各1项通过，源码／制品不变及自有容器／镜像清理确认。基线686b9b8精确CI 5 job／67 step全通过，本批CI另核。该片仅验证本次启动的runtime配置子集，沿用受控root UDS信任，不证明daemon PID／二进制、持续漂移、images／NRI状态或Kata能力；pull／unpack、原生引用／GC、硬限和GPU／云／CSI／性能仍待验收。见[本批交付](runtime-profile-startup-delivery-20261016.md)。
 
 ## 当前事实与来源门
 
@@ -72,7 +75,8 @@ P0c1安装授权、P0c2a固定单节点查询／admin和P0c2b同一原生整链�
 | P0c2b已本地验收，完整P0c只读退出门 | 同一原生CRI→mTLS→双Agent remote-write→operator API/admin | 最终v5主链82.876秒，八阶段及真实原始scrape时间、报告推进／撤权清值通过；正常47迁移、旧native回归及本次资源清理通过 | [完整交付](native-image-chain-delivery-20261016.md)明确本地／合成认证边界与早期匿名卷归属限制；P1—P4前不开放准备操作 |
 | P1a已本地验收，依赖P0 | `src/image_artifact.rs`、实际admin CLI、[使用合同](../docs/image-artifact-metadata.md) | 固定expected digest，实际CLI 11项及Linux Docker七场景；平台精确匹配、同FD／摘要／大小、描述符和rootfs关系、未知扩展／预算／FIFO拒绝 | 仅元数据回执，不授权审批、完整内容或准备；[本批交付](image-artifact-delivery-20261016.md)保留失败与独立预期 |
 | P1b1已本地验收，依赖P1a | 既有`deploy/nodeguard/host_profile.py`／安装plan与锁定上游完整模板；不新增profile协议字段 | v4／overlayfs／明确kata-qemu映射、NRI显式关闭与扩展拒绝；七输入同次语义／SHA、FD／路径／输出目录身份；14项Python与默认Docker20实际CLI／40日志通过 | 仅配置准入与身份绑定；[交付](host-image-runtime-profile-delivery-20261016.md)保留竞态、失败与平台边界；不是daemon loaded config或实际pull证明 |
-| P1b后续待开发，依赖P1b1 | 固定版本原生adapter、profile／运行时读回和部署硬限合同 | 实际加载runtime读回及完整image选择证据、lease／content／snapshot引用、namespace／snapshotter、CRI GC交互、存储／内存／FD／专用网络槽的硬限与临时目录逐项源码及实测 | 官方来源＋真实backend证据确定一套受支持组合；共享daemon不能隔离准备开销时不开放该组合，P1a／P1b1成功不替代本门 |
+| P1b2已本地验收，依赖P1b1 | `runtime_profile`深模块接既有`CriProxy::verify_startup`，期望路径只读、原固定UDS | 真正2.3.5的Status匹配／ConfigPath错配后登记Closed；4合同测试含实际gRPC／decode／5秒timeout、普通501及Python11、两平台strict Clippy／fmt，原native镜像回归和自有清理通过 | [本批交付](runtime-profile-startup-delivery-20261016.md)仅证明此次启动runtime子集，不证明images／NRI、持续漂移、peer二进制或准备硬限；无新许可／schema |
+| P1b后续待开发，依赖P1b2 | 固定版本原生adapter、实际image选择／引用和部署硬限合同 | 完整image选择证据、lease／content／snapshot引用、namespace／snapshotter、CRI GC交互、存储／内存／FD／专用网络槽的硬限与临时目录逐项源码及实测；持续身份绑定另补 | 官方来源＋真实backend证据确定一套受支持组合；共享daemon不能隔离准备开销时不开放该组合，P1a／P1b1／P1b2成功不替代本门 |
 | P2，依赖P1 | `src/image_preparation.rs`、`src/image_preparation_budget.rs`、正常新迁移／角色／preflight | 并发预算预留／拒绝、跨租户归因、同键重放、撤权／epoch／节点换代、schema／列授权漂移 | PG意图／预算／身份持久且不可伪造，未派发任务也可安全关闭；没有直接runtime表写权 |
 | P3，依赖P1/P2 | `src/nodeguard/image_preparation.rs`、独立宿主协议／journal及controller adapter | 本地registry实际descriptor与平台选择、凭据隔离、摘要校验、受限下载／解包、native保护引用、内存／FD／网络槽耗尽与取消／崩溃 | 每任务和每节点真实硬限、瞬态headroom及原VM链路保留量守住；只有精确当前授权任务能产生准备回执 |
 | P4，依赖P3 | `src/image_preparation_reconcile.rs`、GC／升级与运维工具 | 实际lost ACK、daemon／controller重启、boot变化、到期／撤销、活动共享引用、GC竞争／回收延迟及内存／FD／网络槽实际退役 | UNKNOWN保留必要预算与引用；确认副作用结束后再释放临时资源槽，只删本产品确定所有权，物理释放单独核验 |

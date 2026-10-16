@@ -413,6 +413,10 @@ mod linux {
                 sandboxes: Mutex::new(BTreeMap::new()),
             })
         }
+        pub(in crate::nodeguard) fn expected_kata_configuration(&self) -> &Path {
+            &self.profile.kata_configuration.path
+        }
+
         pub fn capture(
             &self,
             sandbox_id: &str,

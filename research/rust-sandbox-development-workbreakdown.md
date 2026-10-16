@@ -324,7 +324,7 @@ b66177be完整CI已确认资源容量与18组PG等前置门通过，但真实诊
 
 ### 12.8 批准镜像节点预准备：后续有序实施（2026-10-15）
 
-本节按P0—P6顺序推进。**P0a—P0c2b只读观察与同一原生整链、P1a元数据校验、P1b1宿主配置准入已完成本地验收；完整P1及P2—P6仍未完成／未认证。** 基线0721699精确CI run38819043992的5 job／65 step全绿；本轮新源码CI独立核对。详见[生产实施计划](image-preparation-production-plan-20261015.md)及[固定版本官方源码核对](image-preparation-native-sources-20261015.md)。范围是批准OCI镜像准备，不预造CPU／GPU VM池，不产生普通launch许可。
+本节按P0—P6顺序推进。**P0a—P0c2b只读观察与同一原生整链、P1a元数据校验、P1b1宿主配置准入、P1b2启动时runtime读回已完成本地验收；完整P1及P2—P6仍未完成／未认证。** 基线686b9b8精确CI run38830234782的5 job／67 step全绿；本轮新源码CI独立核对。详见[生产实施计划](image-preparation-production-plan-20261015.md)及[固定版本官方源码核对](image-preparation-native-sources-20261015.md)。范围是批准OCI镜像准备，不预造CPU／GPU VM池，不产生普通launch许可。
 
 | 顺序／工作包 | 开发内容与接口 | 退出门／依赖 |
 | --- | --- | --- |
@@ -336,9 +336,12 @@ b66177be完整CI已确认资源容量与18组PG等前置门通过，但真实诊
 | P0c2b已本地验收；完整P0c只读退出门 | 同一个原生containerd→mTLS→双Agent remote-write→operator API/admin链；原生故障、失联／恢复、撤权后清值 | 最终v5主链82.876秒，原生／operator各1项通过，八阶段及原始scrape时间、报告推进／在途撤权已核实；正常47迁移、自有资源清理及旧native回归通过。早期失败和未确认匿名卷归属保留；物理cache／GPU／收益仍UNKNOWN，见[本批交付](native-image-chain-delivery-20261016.md) |
 | P1a已本地验收；G1-04/G1-09 | `image_artifact::verify_oci_metadata`及实际`sandbox-admin image-artifact verify`：独立expected digest、精确平台、OCI元数据摘要／大小／声明一致性、有界同FD读取 | 实际CLI 11项、Linux Docker七场景通过；metadata-only回执明确未检查审批、未验证层载荷、不允许准备，逻辑字节不代表物理容量。保留三项审查反例的RED／GREEN，见[交付](image-artifact-delivery-20261016.md)与[使用合同](../docs/image-artifact-metadata.md) |
 | P1b1已本地验收；G1-04/G1-09 | 真实安装plan／collect的v4受支持组合、明确Kata image平台／snapshotter映射、禁shim／server／存储扩展和显式关闭NRI；同FD语义／SHA与私有目录FD最后发布enrollment | 14项Python、真实锁定上游完整模板、默认Docker入口20个实际CLI场景／40日志通过；真实FD屏障下配置替换不产登记，输入和精确自有清理通过。仅配置身份，不证明实际daemon或pull已采用，见[交付](host-image-runtime-profile-delivery-20261016.md) |
-| P1b后续待开发；G1-04/G1-09/G1-12 | 实际加载runtime与配置意图读回、准确平台／namespace／snapshotter及原生lease／content／snapshot引用、GC和真实存储／内存／FD／网络硬限组合 | 官方固定版本源码和真实backend证据；Status不含独立images插件配置，handler平台声明不替代实际pull选择。nil sandbox config会选default；未核实支持保持关闭，不能由P1a／P1b1签发准备许可 |
+| P1b2已本地验收；G1-04/G1-09 | 原生产startup链增加有界Status runtime子集读回；期望Kata路径与实际配置不符不开放coverage／登记 | 普通Rust501／291ignored、4新合同含真实gRPC／原5秒timeout、Python11、两平台strict Clippy／fmt；实际2.3.5正反例及原native镜像回归各1项、自有清理通过。非持续漂移／peer二进制／images／NRI／Kata能力认证，见[本批交付](runtime-profile-startup-delivery-20261016.md) |
+| P1b后续待开发；G1-04/G1-09/G1-12 | 准确image平台／namespace／snapshotter及原生lease／content／snapshot引用、GC和真实存储／内存／FD／网络硬限组合；持续身份绑定另补 | 官方固定版本源码和真实backend证据；Status不含独立images插件配置，handler平台声明不替代实际pull选择。nil sandbox config会选default；未核实支持保持关闭，不能由P1a／P1b1／P1b2签发准备许可 |
 | P2/P3；G2-01/G2-13/G1-12 | PG准备意图／预算及最小权限；独立准备授权、准确node／boot/profile/epoch；批准index＋selected manifest＋platform；短时凭据及有硬限的下载／解包 | P1通过后才pre-pull；瞬态headroom、inode／metadata／并发上界与真实写入硬限同时守住；不能拼普通launch许可 |
 | P4；G2-07/G4-02/G4-06 | 同键lost ACK／重启恢复、到期／撤销、活动共享引用保护、只释放本产品native引用和GC／物理对账 | UNKNOWN保留必要预算；引用释放不等于物理回收，RemoveImage不能盲删共享alias；不清全局目录／他人镜像 |
 | P5/P6；G0-07/G3-03/G4-05/G4-09 | placement后才复核HIT／MISS／UNKNOWN；普通启动许可和Ready原合同保持；真实本地协议与目标环境冷暖基线 | Docker可验PG／registry／containerd及硬限，不代Kata／GPU／云p95/p99、72h成本及生产隔离认证；无实测不承诺加速或节省比例 |
 
 每轮记录具体开发文件／接口、真实验收与剩余门；完整分步表在上述计划中。只读基线先完成，原生引用及硬预算未闭合前不开放后台pre-pull；计划表和研究来源不计实现进度。
+
+最新开发检查点（2026-10-16，P1b2启动时runtime读回）：`CriProxy::verify_startup` 在版本核对后、原sandbox／进程覆盖恢复及开放登记前，沿原固定UDS执行有界 `Status(verbose=true)`。固定目录／endpoint、默认runc／两个handler、Kata ConfigPath／类型与安全选项冲突或缺失保持Closed，不输出原配置。普通Rust 65程序501通过／0失败／291环境ignored，其中新增4项含真实gRPC与原5秒deadline；Python runner 11项、Mac／Linux严格all-target Clippy及fmt通过。真正containerd 2.3.5的本地Linux arm64正反例与原生镜像mTLS回归各1项通过，源码／制品不变及自有容器／镜像清理确认。基线686b9b8精确CI 5 job／67 step全通过，本批CI另核。该片仅验证本次启动的runtime配置子集，沿用受控root UDS信任，不证明daemon PID／二进制、持续漂移、images／NRI状态或Kata能力；pull／unpack、原生引用／GC、硬限和GPU／云／CSI／性能仍待验收。见[本批交付](runtime-profile-startup-delivery-20261016.md)。

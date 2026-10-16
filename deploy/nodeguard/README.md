@@ -61,6 +61,10 @@ runtime handler 的 legacy `snapshotter` 可缺省、为空或同为 `overlayfs`
 
 已有登记节点继续使用其原档案；采用本组合需走隔离、维护和重新认证流程，不能覆盖原 profile 或 journal。生产档案协议和 Rust HostProfile 字段保持不变；P1a 能解析 arm64 元数据不扩大当前安装器的 amd64 宿主支持范围。
 
+nodeguard 每次进程启动／首次 journal 初始化时，沿原固定 containerd UDS 依次执行版本核对及 `Status(verbose=true)` 的 runtime 配置读回；只有与档案的 Kata ConfigPath、固定根目录／endpoint、默认 runc／两个 handler、Kata shim 类型与受支持安全选项相符，且原 sandbox／进程覆盖恢复通过后，才开放登记。Status 单次仍限 5 秒，独立 protobuf 解码上限 256 KiB、各 info 值 64 KiB；重复已解释 JSON 字段、缺失／冲突配置或错误均拒绝，不输出原始配置／提供方错误。CNI 尚未就绪的 `NetworkReady=false` 不阻断配置核对，`RuntimeReady=true` 也不证明 Kata shim／VM 能力。
+
+这项读回遵循[固定版本 Status 实现](https://github.com/containerd/containerd/blob/v2.3.5/internal/cri/server/status.go)及[配置 JSON 结构](https://github.com/containerd/containerd/blob/v2.3.5/internal/cri/config/config.go)。它仅检查 runtime 配置子集；未解释的顶层设置不被认证，Status 不包含独立 images 配置／NRI 状态。信任仍为既有受控本地 root UDS，不是 daemon PID／二进制身份认证，也不持续检测后续 daemon 重连／漂移。此结果不能作为镜像准备、HIT／READY 或未来拉取许可；实际 pull 平台、namespace／snapshotter、原生引用／GC及硬限仍需独立验收。
+
 首次初始化记录永久 marker 和 FULL-sync SQLite。只允许尚未登记的新节点；已有 marker/config 的节点拒绝重装，防止销毁旧实例证据。部分安装失败后保持隔离，先检查已修改的文件和 journal；不要自动删除 marker 或重建数据库。bootstrap 工具也会记录 guarded-plan 所有权，阻止原 `install/upgrade` 将 kubelet 悄悄改回直连运行时。当前不能对承载租户实例的节点做无损滚动替换。
 
 ## 登记与认证材料

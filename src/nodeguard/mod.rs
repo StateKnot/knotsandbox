@@ -22,6 +22,8 @@ pub mod protocol;
 #[cfg(any(target_os = "linux", test))]
 mod runtime_observation;
 #[cfg(any(target_os = "linux", test))]
+mod runtime_profile;
+#[cfg(any(target_os = "linux", test))]
 pub mod server;
 #[allow(clippy::all)]
 #[allow(rustdoc::invalid_html_tags)]
