@@ -8,6 +8,8 @@
 
 最新后续检查点（2026-10-16，P1a）：离线OCI元数据公共模块与实际admin CLI已完成11项真实进程测试、Linux Docker七场景验收。固定expected digest／精确平台及元数据描述符一致性已实现，回执明确不查审批、不验层载荷、不授权准备；三项审查缺陷已修复并保留失败证据。基线57d1689精确CI 5 job／64 step全通过，本批CI独立核对。下一项是P1b运行时绑定／原生引用与硬限；pre-pull、GPU、物理容量与性能收益仍未认证，见[本批交付](image-artifact-delivery-20261016.md)。
 
+最新后续检查点（2026-10-16，P1b1）：实际安装plan／collect的受支持镜像运行时组合与相同读取字节认证已完成本地验收。14项Python、原版上游完整模板和默认Docker入口20实际CLI／40日志通过；配置换档真实FD屏障拒绝登记、目录FD输出及自有清理已核。基线0721699精确CI 5 job／65 step成功，本批CI另核。它仅证明配置与身份，实际daemon读回、pull／unpack、原生引用和硬限仍待推进，不增加VM或GPU配额、容量和收益声称。见[本批交付](host-image-runtime-profile-delivery-20261016.md)。
+
 ## 数据与身份合同
 
 必须分别保存四种来源：受理时的用户规格；每次launch实际请求合同；经可信登记方回读的Pod request/limit/overhead；现有配额账的PENDING、ALLOCATED、RELEASED回执。宿主cgroup共享祖先的容量上界仍是独立观测，不能与其中任何一项直接等同。

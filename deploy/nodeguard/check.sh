@@ -18,3 +18,4 @@ with tempfile.TemporaryDirectory(prefix='sandbox-nodeguard-check-') as temporary
     playbook = nodeguard.playbook(cluster.DEFAULT_CACHE,path/'guarded')
     cluster.ansible(cluster.DEFAULT_CACHE,path/'guarded',playbook,['--syntax-check'])
 PY
+"$nodeguard_python" deploy/nodeguard/tests/check_containerd_template.py

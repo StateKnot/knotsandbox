@@ -47,6 +47,20 @@
 
 CRI runtime 前门为 `/run/sandbox-nodeguard/cri.sock`，image endpoint 仍直接使用 `/run/containerd/containerd.sock`。host profile 验证没有其他 runtime handler、默认系统 runc、显式 systemd cgroups、禁用 Kata VM cache/template/annotation，以及 kubelet 无旁路 endpoint。任何不匹配、符号链接二进制或额外 handler 都拒绝安装，需要按认证配置处理，不能忽略。
 
+当前安装组合固定 Linux amd64、containerd 2.3.5 的 v4 配置、`/var/lib/containerd`、`/run/containerd` 和本地 Unix socket。生成器显式配置默认 `overlayfs`，并通过锁定上游模板生成以下 image handler 映射；collector 要求唯一的 `kata-qemu` 映射，拒绝缺失、旧拼写、其他平台或 snapshotter 冲突：
+
+```toml
+[plugins."io.containerd.cri.v1.images".runtime_platforms."kata-qemu"]
+platform = "linux/amd64"
+snapshotter = "overlayfs"
+```
+
+runtime handler 的 legacy `snapshotter` 可缺省、为空或同为 `overlayfs`；非空冲突拒绝。Kata 表仅接受类型、options 和该兼容字段，额外 `runtime_path`／`base_runtime_spec` 不能引入未认证 shim 或规格。额外 imports、动态插件目录、proxy plugins、stream processors、server／snapshotter 插件覆盖也不进入该档案。NRI 须显式为 `disable = true` 且无额外配置；生成器同时关闭它。配置 v4 与 `runtime_platforms` 的含义以 [固定 containerd 配置结构](https://github.com/containerd/containerd/blob/v2.3.5/internal/cri/config/config.go)为准，v4 server 插件覆盖见[实际服务端配置](https://github.com/containerd/containerd/blob/v2.3.5/cmd/containerd/server/config/config.go)，NRI 不能依赖缺省关闭，见[默认配置](https://github.com/containerd/containerd/blob/v2.3.5/internal/nri/config.go)。这只是受支持配置的准入，不能证明运行中 daemon 已加载它、实际 pull 平台或 unpack snapshotter 已正确绑定；后续原生读回、引用、GC 与硬限仍须独立验收。
+
+采集从可信目录逐级打开，不跟随符号链接，拒绝 FIFO 和可由 group/other 修改的输入或祖先。配置上限 1 MiB，二进制上限 512 MiB；语义解析与 SHA256 使用同一次读取的字节，七份输入保留原 FD，发布前再检查内容元信息、路径和目录身份。输出目录须 root 所有、group/other 无权限且全部祖先可信，安装流程创建为 0700；三份文件通过目录 FD 排他写入为 0600 并 fsync，`enrollment.json` 最后发布。失败可能留下本次较早写出的 profile/config，节点继续隔离，按原部分安装流程复核；不自动删除或覆盖资料。该检查不承诺跨文件原子快照，后续 HostObserver 仍重新验证当前文件。
+
+已有登记节点继续使用其原档案；采用本组合需走隔离、维护和重新认证流程，不能覆盖原 profile 或 journal。生产档案协议和 Rust HostProfile 字段保持不变；P1a 能解析 arm64 元数据不扩大当前安装器的 amd64 宿主支持范围。
+
 首次初始化记录永久 marker 和 FULL-sync SQLite。只允许尚未登记的新节点；已有 marker/config 的节点拒绝重装，防止销毁旧实例证据。部分安装失败后保持隔离，先检查已修改的文件和 journal；不要自动删除 marker 或重建数据库。bootstrap 工具也会记录 guarded-plan 所有权，阻止原 `install/upgrade` 将 kubelet 悄悄改回直连运行时。当前不能对承载租户实例的节点做无损滚动替换。
 
 ## 登记与认证材料

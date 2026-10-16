@@ -41,6 +41,24 @@ jobs:
           .local/cluster-venv/bin/python scripts/tests/api-contract.py
           .local/cluster-venv/bin/python -m unittest discover -s deploy/resource-accounting-upgrade/tests -v
           .local/cluster-venv/bin/python -m unittest discover -s deploy/runtime-class-guard/tests -v
+      - name: Real host profile collection and configuration races in isolated Docker
+        run: |
+          df -h .
+          .local/cluster-venv/bin/python scripts/test-host-profile.py --evidence-dir .local/host-profile-ci
+      - name: Retain host profile collection evidence
+        if: always() && hashFiles('.local/host-profile-ci/record.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: host-profile-${{ github.sha }}
+          path: |
+            .local/host-profile-ci/record.json
+            .local/host-profile-ci/inside-record.json
+            .local/host-profile-ci/*.log
+            .local/host-profile-ci/cli-logs/*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
       - name: Verify independent metrics collectors, mTLS and persisted WAL
         run: |
           .local/cluster-venv/bin/python - <<'PY'

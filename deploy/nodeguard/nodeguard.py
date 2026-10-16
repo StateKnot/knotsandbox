@@ -100,7 +100,9 @@ def guarded_inventory(original, settings):
     for name, item in settings['nodes'].items():
         host = result['all']['hosts'][name]
         require('sandbox.platform/unverified=true:NoSchedule' in host['node_taints'], 'node must retain quarantine')
-        host.update({'kubelet_custom_flags': [], 'containerd_extra_args': 'disabled_plugins = ["io.containerd.monitor.container.v1.restart"]', 'cri_socket': 'unix:///run/sandbox-nodeguard/cri.sock',
+        host.update({'kubelet_custom_flags': [], 'containerd_snapshotter': 'overlayfs', 'nri_enabled': False,
+                     'containerd_extra_args': 'disabled_plugins = ["io.containerd.monitor.container.v1.restart"]\n\n[plugins."io.containerd.cri.v1.images".runtime_platforms."kata-qemu"]\nplatform = "linux/amd64"\nsnapshotter = "overlayfs"',
+                     'cri_socket': 'unix:///run/sandbox-nodeguard/cri.sock',
                      'kubelet_config_extra_args': {'imageServiceEndpoint': 'unix:///run/containerd/containerd.sock'},
                      'containerd_additional_runtimes': [{'name': 'kata-qemu', 'type': 'io.containerd.kata.v2', 'options': {'ConfigPath': '/etc/kata-containers/configuration-qemu.toml'}}],
                      'sandbox_enrollment_node_uid': item['node_uid']})

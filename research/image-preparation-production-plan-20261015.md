@@ -1,6 +1,6 @@
 # 批准OCI镜像的节点预准备：生产实施计划
 
-状态：**P0a—P0c2b只读观察及同一原生整链、P1a离线元数据校验已完成本地验收；完整P1及P2—P6仍未完成／未认证。** 本文件承接[开发表12.7](rust-sandbox-development-workbreakdown.md#127-可信启动资源观察与原子登记2026-10-15)的可信资源账本；基线57d1689的精确CI run38810699148，5 job/64 step已通过，当前按以下依赖推进；新源码CI单独核对。
+状态：**P0a—P0c2b只读观察及同一原生整链、P1a元数据校验、P1b1宿主配置准入已完成本地验收；完整P1及P2—P6仍未完成／未认证。** 本文件承接[开发表12.7](rust-sandbox-development-workbreakdown.md#127-可信启动资源观察与原子登记2026-10-15)的可信资源账本；基线0721699的精确CI run38819043992，5 job/65 step已通过，当前按以下依赖推进；新源码CI单独核对。
 范围仅为批准OCI镜像在准确节点／运行时中的有预算准备，不创建CPU／GPU VM池，不产生用户进程、工作区或普通launch许可。
 每90分钟是触发间隔，不是开发或验证超时；先接续已有在途工作，再持续完成选中的可验证切片，不因下一次触发重复启动。
 失败保存原现场并继续闭合该切片，不能因触发次数或时间到而标记通过，也不能跳过前置门开放拉取。
@@ -71,7 +71,8 @@ P0c1安装授权、P0c2a固定单节点查询／admin和P0c2b同一原生整链�
 | P0c2a已本地验收，依赖P0c1 | `src/node_image_query.rs`、`src/node_image_metrics.rs`、0048和HTTPS admin读消费者 | 真实JWT／PG／HTTPS十项，真实Prom四场景；固定预算、最新完整单副本cohort、原时间与I/O后重授权 | 普通app窄EXEC，私有认证／写ACL漂移拒绝；仅本子片完成，见[交付](node-image-query-delivery-20261016.md) |
 | P0c2b已本地验收，完整P0c只读退出门 | 同一原生CRI→mTLS→双Agent remote-write→operator API/admin | 最终v5主链82.876秒，八阶段及真实原始scrape时间、报告推进／撤权清值通过；正常47迁移、旧native回归及本次资源清理通过 | [完整交付](native-image-chain-delivery-20261016.md)明确本地／合成认证边界与早期匿名卷归属限制；P1—P4前不开放准备操作 |
 | P1a已本地验收，依赖P0 | `src/image_artifact.rs`、实际admin CLI、[使用合同](../docs/image-artifact-metadata.md) | 固定expected digest，实际CLI 11项及Linux Docker七场景；平台精确匹配、同FD／摘要／大小、描述符和rootfs关系、未知扩展／预算／FIFO拒绝 | 仅元数据回执，不授权审批、完整内容或准备；[本批交付](image-artifact-delivery-20261016.md)保留失败与独立预期 |
-| P1b待开发，依赖P1a | `research/image-preparation-native-sources-20261015.md`、profile／部署合同与原生adapter | 固定版本原生lease／content／snapshot引用、runtime handler／平台／namespace／snapshotter、CRI GC交互、存储／内存／FD／专用网络槽的硬限与临时目录逐项源码及实测 | 官方来源＋真实backend证据确定一套受支持组合；共享daemon不能隔离准备开销时不开放该组合，P1a成功不替代本门 |
+| P1b1已本地验收，依赖P1a | 既有`deploy/nodeguard/host_profile.py`／安装plan与锁定上游完整模板；不新增profile协议字段 | v4／overlayfs／明确kata-qemu映射、NRI显式关闭与扩展拒绝；七输入同次语义／SHA、FD／路径／输出目录身份；14项Python与默认Docker20实际CLI／40日志通过 | 仅配置准入与身份绑定；[交付](host-image-runtime-profile-delivery-20261016.md)保留竞态、失败与平台边界；不是daemon loaded config或实际pull证明 |
+| P1b后续待开发，依赖P1b1 | 固定版本原生adapter、profile／运行时读回和部署硬限合同 | 实际加载runtime读回及完整image选择证据、lease／content／snapshot引用、namespace／snapshotter、CRI GC交互、存储／内存／FD／专用网络槽的硬限与临时目录逐项源码及实测 | 官方来源＋真实backend证据确定一套受支持组合；共享daemon不能隔离准备开销时不开放该组合，P1a／P1b1成功不替代本门 |
 | P2，依赖P1 | `src/image_preparation.rs`、`src/image_preparation_budget.rs`、正常新迁移／角色／preflight | 并发预算预留／拒绝、跨租户归因、同键重放、撤权／epoch／节点换代、schema／列授权漂移 | PG意图／预算／身份持久且不可伪造，未派发任务也可安全关闭；没有直接runtime表写权 |
 | P3，依赖P1/P2 | `src/nodeguard/image_preparation.rs`、独立宿主协议／journal及controller adapter | 本地registry实际descriptor与平台选择、凭据隔离、摘要校验、受限下载／解包、native保护引用、内存／FD／网络槽耗尽与取消／崩溃 | 每任务和每节点真实硬限、瞬态headroom及原VM链路保留量守住；只有精确当前授权任务能产生准备回执 |
 | P4，依赖P3 | `src/image_preparation_reconcile.rs`、GC／升级与运维工具 | 实际lost ACK、daemon／controller重启、boot变化、到期／撤销、活动共享引用、GC竞争／回收延迟及内存／FD／网络槽实际退役 | UNKNOWN保留必要预算与引用；确认副作用结束后再释放临时资源槽，只删本产品确定所有权，物理释放单独核验 |
@@ -79,6 +80,7 @@ P0c1安装授权、P0c2a固定单节点查询／admin和P0c2b同一原生整链�
 | P6，依赖P0—P5 | `scripts/test-image-preparation.py`、Docker registry／PG／containerd验收，生产节点演练 | 全生命周期与故障、迁移／preflight、真实统计；随后目标Kata／云冷暖p50/p95/p99、成功率和成本 | 本地证据和目标平台认证分列；未过生产认证不开默认预准备或承诺加速收益 |
 
 P1必须单独闭合Kata使用的snapshotter选择：已核实的固定版本pull实现会在`sandboxConfig=nil`时直接选default snapshotter，仅设置image runtimeHandler不足以证明Kata准备完成。
+P1b1已约束的`runtime_platforms`只表示配置意图。固定2.3.5的Status(verbose)只读回runtime配置，不包含独立images配置；实际PullImage的local／transfer路径仍须核实其使用的宿主平台与所选manifest，不能从映射声明推断。NRI缺省启用，安装器已显式禁用，但这不代替daemon实际读回，具体官方来源与本批边界见[交付](host-image-runtime-profile-delivery-20261016.md)。
 非nil受控sandbox配置、runtime handler／profile和实际native snapshotter证据须一起验证；不通过就保持该组合不支持，不回退成default后报READY。
 lease API存在不等于完整生命周期已经接好；content／snapshot标签引用、根对象、GC调度及CRI自身删除／解包行为都在P1逐项追源码、P3/P4真实故障测试。
 准备须落在真实CRI使用的namespace；固定版本默认`k8s.io`，不能在独立namespace写完内容后直接声称kubelet会命中。

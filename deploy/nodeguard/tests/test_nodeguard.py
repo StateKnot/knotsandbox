@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import tomllib
 import unittest
 import uuid
 from datetime import datetime,timezone,timedelta
@@ -31,7 +32,7 @@ def settings():
 
 def configs():
     kata={'hypervisor':{'qemu':{'enable_annotations':[],'enable_debug':False,'shared_fs':'virtio-fs','path':'/opt/kata/bin/qemu-system-x86_64','virtio_fs_daemon':'/opt/kata/libexec/virtiofsd'}},'runtime':{'sandbox_cgroup_only':True,'disable_new_netns':False},'factory':{'enable_template':False,'vm_cache_number':0}}
-    containerd={'version':4,'disabled_plugins':['io.containerd.monitor.container.v1.restart'],'plugins':{'io.containerd.cri.v1.runtime':{'containerd':{'default_runtime_name':'runc','runtimes':{'runc':{'options':{'SystemdCgroup':True}},'kata-qemu':{'runtime_type':'io.containerd.kata.v2','options':{'ConfigPath':str(host_profile.KATA_CONFIG)}}}}}}}
+    containerd={'version':4,'root':'/var/lib/containerd','state':'/run/containerd','disabled_plugins':['io.containerd.monitor.container.v1.restart'],'plugins':{'io.containerd.cri.v1.runtime':{'containerd':{'default_runtime_name':'runc','runtimes':{'runc':{'options':{'SystemdCgroup':True}},'kata-qemu':{'runtime_type':'io.containerd.kata.v2','options':{'ConfigPath':str(host_profile.KATA_CONFIG)}}}}},'io.containerd.cri.v1.images':{'snapshotter':'overlayfs','runtime_platforms':{'kata-qemu':{'platform':'linux/amd64','snapshotter':'overlayfs'}}},'io.containerd.nri.v1.nri':{'disable':True}}}
     kubelet='containerRuntimeEndpoint: unix:///run/sandbox-nodeguard/cri.sock\nimageServiceEndpoint: unix:///run/containerd/containerd.sock\ncgroupDriver: systemd\n'
     return kata,containerd,kubelet
 
@@ -55,6 +56,12 @@ class NodeguardPlanTests(unittest.TestCase):
                     self.assertEqual(host['kubelet_config_extra_args']['imageServiceEndpoint'],host_profile.IMAGE_ENDPOINT)
                     self.assertIn('sandbox.platform/unverified=true:NoSchedule',host['node_taints'])
                     self.assertEqual(len(host['containerd_additional_runtimes']),1)
+                    self.assertEqual(host['containerd_snapshotter'], 'overlayfs')
+                    self.assertIs(host['nri_enabled'], False)
+                    extra = tomllib.loads(host['containerd_extra_args'])
+                    self.assertEqual(extra['disabled_plugins'], ['io.containerd.monitor.container.v1.restart'])
+                    self.assertEqual(extra['plugins']['io.containerd.cri.v1.images']['runtime_platforms'],
+                                     {'kata-qemu': {'platform': 'linux/amd64', 'snapshotter': 'overlayfs'}})
                 else:self.assertNotIn('cri_socket',host)
             self.assertFalse(any(p.name.endswith('.key') for p in (path/'guarded').rglob('*')))
             with self.assertRaises(ValueError):nodeguard.plan(path/'bootstrap',path/'guard.json',path/'guarded',check_files=False)
@@ -86,6 +93,88 @@ class NodeguardPlanTests(unittest.TestCase):
             with self.assertRaises(ValueError):host_profile.validate_configurations(k,c,kubelet)
         for altered in [kubelet.replace(host_profile.RUNTIME_ENDPOINT,host_profile.IMAGE_ENDPOINT),kubelet+'containerRuntimeEndpoint: unix:///other.sock\n',kubelet.replace('imageServiceEndpoint','missingEndpoint')]:
             with self.assertRaises(ValueError):host_profile.validate_configurations(kata,containerd,altered)
+
+    def test_actual_configuration_requires_the_explicit_kata_image_platform_mapping(self):
+        kata, containerd, kubelet = configs()
+        containerd['plugins']['io.containerd.cri.v1.images'].pop('runtime_platforms')
+        with self.assertRaises(ValueError):
+            host_profile.validate_configurations(kata, containerd, kubelet)
+
+    def test_actual_configuration_rejects_imported_or_redirected_daemon_configuration(self):
+        kata, containerd, kubelet = configs()
+        mutations = [
+            ('floating-config-version', lambda c: c.update(version=4.0)),
+            ('imports', lambda c: c.update(imports=['/etc/containerd/override.toml'])),
+            ('root', lambda c: c.update(root='/var/lib/another-containerd')),
+            ('state', lambda c: c.update(state='/run/another-containerd')),
+            ('grpc-address', lambda c: c.update(grpc={'address': '/run/another-containerd.sock'})),
+            ('grpc-tcp', lambda c: c.update(grpc={'tcp_address': '127.0.0.1:1234'})),
+            ('v4-grpc-plugin', lambda c: c['plugins'].update({
+                'io.containerd.server.v1.grpc': {'address': '/run/another-containerd.sock'}})),
+            ('snapshotter-root', lambda c: c['plugins'].update({
+                'io.containerd.snapshotter.v1.overlayfs': {'root_path': '/var/lib/another-snapshotter'}})),
+            ('unverified-converter', lambda c: c.update(stream_processors={
+                'public-test-converter': {'accepts': ['application/example.encrypted'],
+                                          'returns': 'application/vnd.oci.image.layer.v1.tar',
+                                          'path': '/usr/local/bin/unverified-converter'}})),
+            ('nri-enabled', lambda c: c['plugins']['io.containerd.nri.v1.nri'].update(disable=False)),
+            ('nri-integer', lambda c: c['plugins']['io.containerd.nri.v1.nri'].update(disable=1)),
+            ('nri-missing', lambda c: c['plugins'].pop('io.containerd.nri.v1.nri')),
+            ('nri-executable', lambda c: c['plugins']['io.containerd.nri.v1.nri'].update(
+                plugin_path='/usr/local/libexec/unverified-nri')),
+        ]
+        for name, mutation in mutations:
+            with self.subTest(configuration=name):
+                changed = copy.deepcopy(containerd)
+                mutation(changed)
+                with self.assertRaises(ValueError):
+                    host_profile.validate_configurations(kata, changed, kubelet)
+
+    def test_actual_configuration_rejects_conflicting_or_incomplete_image_platforms(self):
+        kata, containerd, kubelet = configs()
+        mutations = [
+            ('global-snapshotter', lambda images: images.update(snapshotter='devmapper')),
+            ('missing-mapping', lambda images: images.update(runtime_platforms={})),
+            ('extra-handler', lambda images: images['runtime_platforms'].update(
+                {'runc': {'platform': 'linux/amd64', 'snapshotter': 'overlayfs'}})),
+            ('different-handler', lambda images: images.update(runtime_platforms={
+                'kata-alt': {'platform': 'linux/amd64', 'snapshotter': 'overlayfs'}})),
+            ('different-platform', lambda images: images['runtime_platforms']['kata-qemu'].update(platform='linux/arm64')),
+            ('implicit-variant', lambda images: images['runtime_platforms']['kata-qemu'].update(platform='linux/amd64/v1')),
+            ('conflicting-snapshotter', lambda images: images['runtime_platforms']['kata-qemu'].update(snapshotter='native')),
+            ('missing-platform', lambda images: images['runtime_platforms']['kata-qemu'].pop('platform')),
+            ('missing-snapshotter', lambda images: images['runtime_platforms']['kata-qemu'].pop('snapshotter')),
+        ]
+        for name, mutation in mutations:
+            with self.subTest(configuration=name):
+                changed = copy.deepcopy(containerd)
+                mutation(changed['plugins']['io.containerd.cri.v1.images'])
+                with self.assertRaises(ValueError):
+                    host_profile.validate_configurations(kata, changed, kubelet)
+        changed = copy.deepcopy(containerd)
+        changed['plugins'].pop('io.containerd.cri.v1.images')
+        with self.assertRaises(ValueError):
+            host_profile.validate_configurations(kata, changed, kubelet)
+
+    def test_matching_legacy_snapshotter_and_explicit_unix_endpoint_remain_compatible(self):
+        kata, containerd, kubelet = configs()
+        for legacy in [None, '', 'overlayfs']:
+            with self.subTest(legacy_snapshotter=legacy):
+                changed = copy.deepcopy(containerd)
+                changed['imports'] = []
+                changed['grpc'] = {'address': '/run/containerd/containerd.sock', 'tcp_address': ''}
+                runtime = changed['plugins']['io.containerd.cri.v1.runtime']['containerd']['runtimes']['kata-qemu']
+                if legacy is not None:
+                    runtime['snapshotter'] = legacy
+                self.assertEqual(host_profile.validate_configurations(kata, changed, kubelet)['shared_fs'], 'virtio-fs')
+        for key, value in [('snapshotter', 'devmapper'),
+                           ('runtime_path', '/usr/local/bin/unverified-shim'),
+                           ('base_runtime_spec', '/etc/containerd/unverified-base.json')]:
+            with self.subTest(runtime_override=key):
+                changed = copy.deepcopy(containerd)
+                changed['plugins']['io.containerd.cri.v1.runtime']['containerd']['runtimes']['kata-qemu'][key] = value
+                with self.assertRaises(ValueError):
+                    host_profile.validate_configurations(kata, changed, kubelet)
 
     def test_host_installation_never_removes_quarantine_or_creates_runtimeclass(self):
         play=yaml.safe_load((ROOT/'install.yaml').read_text())[0]
