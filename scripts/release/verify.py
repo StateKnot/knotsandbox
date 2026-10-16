@@ -69,7 +69,8 @@ def verify_candidate(directory, repository, tag, commit, current=None, *, histor
     if manifest['version'] >= 3:
         validate_sqlx_notices(load(safe_child(directory, SQLX_POSTGRES_NOTICES), NOTICES_MAX_BYTES))
     if manifest['version'] == 4:
-        validate_native_notices(load(safe_child(directory, NATIVE_PROTOCOL_NOTICES), NATIVE_NOTICES_MAX_BYTES))
+        validate_native_notices(load(safe_child(directory, NATIVE_PROTOCOL_NOTICES), NATIVE_NOTICES_MAX_BYTES),
+                                historical=historical)
     # Historical checks are only used by verify_previous after current pinned
     # Cosign authenticates the exact external identity. They never emit an
     # installation lock or claim current vulnerability safety. This is not a

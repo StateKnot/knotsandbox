@@ -8,7 +8,9 @@ from pathlib import Path
 from common import dump, require, safe_child, sha
 
 MAX_BYTES = 64 * 1024
-FIXED = {
+# Keep the exact previous contract for already-authenticated v4 history. A new
+# source input must never silently change what an older signed notice means.
+FIXED_V1 = {
     'schema_version': 1,
     'protocols': {
         'containerd': {
@@ -41,6 +43,14 @@ FIXED = {
         },
     },
 }
+FIXED = copy.deepcopy(FIXED_V1)
+FIXED['schema_version'] = 2
+FIXED['protocols']['containerd']['inputs_sha256'].update({
+    'api/services/snapshots/v1/snapshots.proto': '6e23ec19b971e1088f3984b7a07ee4238d6ad56b85173750c38b0c911803bc23',
+    'api/types/mount.proto': 'c7a31fa848f002cead05a23adfdd9e29a459cd01ae573b7b61b060b3056754d7',
+})
+FIXED['protocols']['containerd']['derived_messages'].append(
+    'src/nodeguard/generated/containerd.services.snapshots.v1.rs')
 VENDORS = {
     'containerd': 'vendor/containerd/v2.3.5',
     'protobuf-well-known': 'vendor/protobuf/protoc-bin-vendored-3.2.0',
@@ -51,13 +61,14 @@ LICENSES = {
 }
 
 
-def validate(value):
+def validate(value, *, historical=False):
     # Validation is source-independent so an authenticated historical v4 can
     # still be verified after checkout inputs evolve. No text omission or
     # replacement is authorized by merely recomputing the release file hash.
-    require(isinstance(value, dict) and set(value) == set(FIXED) | {'licenses'}
+    fixed = FIXED_V1 if historical and isinstance(value, dict) and value.get('schema_version') == 1 else FIXED
+    require(isinstance(value, dict) and set(value) == set(fixed) | {'licenses'}
             and type(value.get('schema_version')) is int
-            and all(value.get(key) == expected for key, expected in FIXED.items()),
+            and all(value.get(key) == expected for key, expected in fixed.items()),
             'NATIVE_PROTOCOL_NOTICES_PROVENANCE')
     licenses = value['licenses']
     require(isinstance(licenses, dict) and set(licenses) == set(LICENSES),

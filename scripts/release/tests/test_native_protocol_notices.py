@@ -1,7 +1,10 @@
 """Offline distribution contracts; no real signature or image build claims."""
 import copy
+import contextlib
+import io
 import json
 from pathlib import Path
+import runpy
 import shutil
 import sys
 import tempfile
@@ -18,6 +21,7 @@ from native_protocol_notices import create, validate, FIXED, LICENSES, MAX_BYTES
 from test_release import COMMIT, FIXTURE_TIME, REPO, TAG, fixture, rewrite
 from test_sqlite_build import native_trust_fixture
 from verify import verify_candidate
+import verify
 
 
 class NativeProtocolNoticesReleaseTest(unittest.TestCase):
@@ -41,16 +45,132 @@ class NativeProtocolNoticesReleaseTest(unittest.TestCase):
         manifest['files'][NATIVE_PROTOCOL_NOTICES] = {'sha256': sha(path), 'size': path.stat().st_size}
         rewrite(manifest_path, manifest)
 
+    def previous_schema_notice(self):
+        # Exact released schema 1: the original six inputs and four generated
+        # files. Do not take the historical expectation from today's FIXED.
+        value = load(self.directory / NATIVE_PROTOCOL_NOTICES)
+        value['schema_version'] = 1
+        containerd = value['protocols']['containerd']
+        for name in ('api/services/snapshots/v1/snapshots.proto', 'api/types/mount.proto'):
+            containerd['inputs_sha256'].pop(name)
+        containerd['derived_messages'].remove('src/nodeguard/generated/containerd.services.snapshots.v1.rs')
+        return value
+
     def test_current_v4_delivers_complete_fixed_provenance_and_license_texts(self):
         self.assertEqual(self.verify()['version'], 4)
         self.assertEqual(self.verify(historical=True)['version'], 4)
         value = load(self.directory / NATIVE_PROTOCOL_NOTICES, MAX_BYTES)
         validate(value)
+        self.assertEqual(value['schema_version'], 2)
         self.assertEqual(value['protocols'], FIXED['protocols'])
+        inputs = value['protocols']['containerd']['inputs_sha256']
+        self.assertEqual(inputs['api/services/snapshots/v1/snapshots.proto'],
+                         '6e23ec19b971e1088f3984b7a07ee4238d6ad56b85173750c38b0c911803bc23')
+        self.assertEqual(inputs['api/types/mount.proto'],
+                         'c7a31fa848f002cead05a23adfdd9e29a459cd01ae573b7b61b060b3056754d7')
+        self.assertEqual(sum(len(item['inputs_sha256']) for item in value['protocols'].values()), 8)
         self.assertLessEqual((self.directory / NATIVE_PROTOCOL_NOTICES).stat().st_size, MAX_BYTES)
         for name, relative in VENDORS.items():
             self.assertEqual(value['licenses'][name].encode(),
                              (ROOT.parent.parent / relative / 'LICENSE').read_bytes())
+
+    def test_original_schema1_v4_is_only_read_as_authenticated_history(self):
+        original = self.previous_schema_notice()
+        self.rehash(original)
+        self.assertEqual(validate(original, historical=True), original)
+        with self.assertRaisesRegex(ValueError, 'NATIVE_PROTOCOL_NOTICES_PROVENANCE'):
+            self.verify()
+        with self.assertRaisesRegex(ValueError, 'NATIVE_PROTOCOL_NOTICES_PROVENANCE'):
+            create_manifest(self.directory, REPO, TAG, COMMIT, '42',
+                            {'first_release': True, 'previous': None})
+        # Only the cryptographic seam is mocked. Original v4 inventory, hashes,
+        # OCI, native, scanner and both complete license checks still execute.
+        with patch('verify.cosign_arguments', return_value=['pinned-cosign']), \
+             patch('console_assets.run') as crypto, patch('verify.verify_statement'):
+            previous = verify_previous(self.directory, Path('/tools'), REPO, TAG, COMMIT)
+        self.assertEqual(previous['version'], 4)
+        crypto.assert_called_once_with(['pinned-cosign'], timeout=60)
+        self.assertFalse((self.directory / 'deployment-lock.json').exists())
+        with patch('verify.cosign_arguments', return_value=['pinned-cosign']), \
+             patch('console_assets.run', side_effect=ValueError('SIGNATURE_REJECTED')), \
+             patch('verify.verify_candidate') as candidate, \
+             self.assertRaisesRegex(ValueError, 'SIGNATURE_REJECTED'):
+            verify_previous(self.directory, Path('/tools'), REPO, TAG, COMMIT)
+        candidate.assert_not_called()
+
+    def test_current_and_historical_reject_missing_or_mixed_snapshot_provenance(self):
+        current = load(self.directory / NATIVE_PROTOCOL_NOTICES)
+        changes = (
+            lambda value: value['protocols']['containerd']['inputs_sha256'].pop(
+                'api/services/snapshots/v1/snapshots.proto'),
+            lambda value: value['protocols']['containerd']['inputs_sha256'].pop('api/types/mount.proto'),
+            lambda value: value['protocols']['containerd']['derived_messages'].remove(
+                'src/nodeguard/generated/containerd.services.snapshots.v1.rs'),
+            lambda value: value['protocols']['containerd']['inputs_sha256'].update(
+                {'api/services/snapshots/v1/snapshots.proto': 'a' * 64}),
+            lambda value: value.update(schema_version=1),
+            lambda value: value.update(schema_version=3),
+        )
+        for mutate in changes:
+            value = copy.deepcopy(current)
+            mutate(value)
+            self.rehash(value)
+            for historical in (False, True):
+                with self.subTest(value=value, historical=historical), \
+                     self.assertRaisesRegex(ValueError, 'NATIVE_PROTOCOL_NOTICES_PROVENANCE'):
+                    self.verify(historical=historical)
+        old = self.previous_schema_notice()
+        old['protocols']['containerd']['inputs_sha256']['api/types/descriptor.proto'] = 'a' * 64
+        self.rehash(old)
+        with self.assertRaisesRegex(ValueError, 'NATIVE_PROTOCOL_NOTICES_PROVENANCE'):
+            self.verify(historical=True)
+
+    def test_original_schema1_history_still_requires_complete_license_and_limit(self):
+        old = self.previous_schema_notice()
+        for name in LICENSES:
+            value = copy.deepcopy(old)
+            value['licenses'][name] = value['licenses'][name][:-1]
+            self.rehash(value)
+            with self.subTest(license=name), \
+                 self.assertRaisesRegex(ValueError, 'NATIVE_PROTOCOL_NOTICES_LICENSE_BYTES'):
+                self.verify(historical=True)
+        old['licenses']['containerd'] = 'x' * (MAX_BYTES + 1)
+        self.rehash(old)
+        with self.assertRaisesRegex(ValueError, 'JSON_LIMIT'):
+            self.verify(historical=True)
+
+    def test_installer_cannot_reuse_an_old_or_forged_lock_for_schema1(self):
+        self.rehash(self.previous_schema_notice())
+        old_lock = self.directory / 'deployment-lock.json'
+        rewrite(old_lock, {'manifest_sha256': sha(self.directory / 'release-manifest.json')})
+        destination = self.directory / 'installed'
+        outputs = []
+        def current_verifier(args, **kwargs):
+            self.assertEqual(Path(args[1]), ROOT / 'verify.py')
+            output = Path(args[args.index('--output') + 1])
+            self.assertNotEqual(output, old_lock)
+            self.assertFalse(output.exists())
+            outputs.append(output)
+            # Execute the real current verifier, mocking signature material only.
+            with patch('sys.argv', ['verify.py', *map(str, args[2:])]), \
+                 patch('verify.cosign_arguments', return_value=['pinned-cosign']), \
+                 patch('verify.run') as crypto, patch('verify.verify_statement'), \
+                 patch('verify.now', return_value=FIXTURE_TIME):
+                try:
+                    verify.main()
+                finally:
+                    crypto.assert_called_once()
+        argv = ['install.py', '--directory', str(self.directory), '--tools', '/tools',
+                '--repository', REPO, '--tag', TAG, '--commit', COMMIT,
+                '--destination', str(destination)]
+        with patch('sys.argv', argv), patch('common.run', side_effect=current_verifier), \
+             contextlib.redirect_stdout(io.StringIO()), \
+             self.assertRaisesRegex(ValueError, 'NATIVE_PROTOCOL_NOTICES_PROVENANCE'):
+            runpy.run_path(str(ROOT / 'install.py'), run_name='__main__')
+        self.assertEqual(len(outputs), 1)
+        self.assertFalse(outputs[0].exists())
+        self.assertFalse(destination.exists())
+        self.assertTrue(old_lock.is_file())
 
     def test_v4_cannot_drop_native_notices_from_inventory(self):
         manifest_path = self.directory / 'release-manifest.json'

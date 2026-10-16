@@ -1,6 +1,8 @@
 # Rust 沙箱平台分阶段开发表
 
-最新开发检查点（2026-10-16，P1b5 CRI当前索引身份）：新增root本机 `image-artifact inspect-cri`，同一固定UDS／k8s.io／原5秒总预算核对前后CRI精确引用、已验OCI config摘要及最终原生根；回执仅为CRI索引配置身份，所有审批／pull选择／handler／snapshotter／unpack／GC／准备标志为false。普通Rust65程序513通过／0失败／291环境ignored，两平台严格Clippy／fmt、Python11、实际新CRI及四项原生回归、旧Docker CLI七场景通过。真实测试发现的本地超时分类缺陷已按typed TimeoutExpired修复，精确RED／GREEN及远端同文案Cancelled反例保留；首轮编译OOM已恢复前轮原swap配置并降编译并发后通过，不扩大功能期限／权限／栈。基线e3debc5精确CI五job／71step全绿，本片提交CI独立核对。完整P1的实际pull选择／snapshotter、原生引用／GC及准备硬限与P2—P6仍待完成，pre-pull关闭；云／Kata／CSI／GPU／性能未认证。见[本批交付](cri-image-identity-delivery-20261016.md)。
+最新开发检查点（2026-10-16，P1b6快照与配置引用元数据）：新增公共inspect_snapshot／本机admin inspect-snapshot，认证DiffID派生ChainID／直接父链，固定overlayfs的Stat与config引用标签前后核对；原固定UDS／k8s.io及5秒总预算保持。最终普通Rust65程序520通过／0失败／291环境ignored、两平台严格Clippy／fmt、新快照加五项原生回归、离线Docker CLI七场景通过；release104及协议重生成、实际Linux许可producer／四Docker COPY路径56文件通过。首轮CLI格式失败保留，格式修正后最终制品已重新构建并完整回归。基线ee3eeac精确CI五job／72step全绿，新提交CI独立核对。空committed快照也可通过本检查，故不证明真实层apply、GC保护、pull选择或准备许可。下一完整门为受限准备执行者／硬限、实际pull及原生保护闭包；pre-pull仍关闭，云／Kata／CSI／GPU／性能未认证。见[本批交付](snapshot-reference-metadata-delivery-20261016.md)。
+
+前序开发检查点（2026-10-16，P1b5 CRI当前索引身份）：新增root本机 `image-artifact inspect-cri`，同一固定UDS／k8s.io／原5秒总预算核对前后CRI精确引用、已验OCI config摘要及最终原生根；回执仅为CRI索引配置身份，所有审批／pull选择／handler／snapshotter／unpack／GC／准备标志为false。普通Rust65程序513通过／0失败／291环境ignored，两平台严格Clippy／fmt、Python11、实际新CRI及四项原生回归、旧Docker CLI七场景通过。真实测试发现的本地超时分类缺陷已按typed TimeoutExpired修复，精确RED／GREEN及远端同文案Cancelled反例保留；首轮编译OOM已恢复前轮原swap配置并降编译并发后通过，不扩大功能期限／权限／栈。基线e3debc5精确CI五job／71step全绿，本片提交CI独立核对。完整P1的实际pull选择／snapshotter、原生引用／GC及准备硬限与P2—P6仍待完成，pre-pull关闭；云／Kata／CSI／GPU／性能未认证。见[本批交付](cri-image-identity-delivery-20261016.md)。
 
 前序开发检查点（2026-10-16，P1b4原生已存元数据）：新增root本机 `image-artifact inspect-native`，固定UDS／k8s.io，原生Get／Info／Read与原离线命令共享OCI验证，5秒I/O预算、1MiB单块／3MiB元数据，前后根身份核对；不读层、不pull／unpack／写lease或签发准备许可。普通Rust65程序509通过／0失败／291环境ignored、两平台strict Clippy／fmt、最终真实native CLI及三项原生回归、旧Docker CLI七场景均通过。新增协议许可已接当前manifest v4／原签名与安装链，历史v3含义保持；release100项及实际Linux producer／Docker四路径48文件通过，独立最终审查Standards累计1项P2已修复／遗留0项，Spec发现0项。基线32910f0精确CI五job／69step全绿，新提交CI独立核对。实际CRI pull选择、引用／GC和硬限、P2—P6及云／Kata／CSI／GPU／性能仍待完成，pre-pull关闭。见[本批交付](native-image-metadata-delivery-20261016.md)。
 
@@ -330,7 +332,7 @@ b66177be完整CI已确认资源容量与18组PG等前置门通过，但真实诊
 
 ### 12.8 批准镜像节点预准备：后续有序实施（2026-10-15）
 
-本节按P0—P6顺序推进。**P0a—P0c2b只读观察与同一原生整链、P1a元数据校验、P1b1宿主配置准入、P1b2启动时runtime读回、P1b3重连身份、P1b4原生已存元数据及P1b5 CRI当前索引身份已完成本地验收；完整P1及P2—P6仍未完成／未认证。** 基线e3debc5精确CI run38853793783的5 job／71 step全绿；本轮新源码CI独立核对。详见[生产实施计划](image-preparation-production-plan-20261015.md)及[固定版本官方源码核对](image-preparation-native-sources-20261015.md)。范围是批准OCI镜像准备，不预造CPU／GPU VM池，不产生普通launch许可。
+本节按P0—P6顺序推进。**P0a—P0c2b只读观察与同一原生整链、P1a元数据校验、P1b1宿主配置准入、P1b2启动时runtime读回、P1b3重连身份、P1b4原生已存元数据、P1b5 CRI当前索引身份及P1b6快照／配置引用元数据已完成本地验收；完整P1及P2—P6仍未完成／未认证。** 基线ee3eeac精确CI run38861416715的5 job／72 step全绿；本轮新源码CI独立核对。详见[生产实施计划](image-preparation-production-plan-20261015.md)及[固定版本官方源码核对](image-preparation-native-sources-20261015.md)。范围是批准OCI镜像准备，不预造CPU／GPU VM池，不产生普通launch许可。
 
 | 顺序／工作包 | 开发内容与接口 | 退出门／依赖 |
 | --- | --- | --- |
@@ -346,7 +348,8 @@ b66177be完整CI已确认资源容量与18组PG等前置门通过，但真实诊
 | P1b3已本地验收；G1-04/G1-09 | 固定UDS目录／socket对象及root peer PID／start绑定；CRI重连冲突永久拒绝并排空原任务门，镜像观察各自绑定 | 最终实际重连、启动配置及镜像mTLS三个case各1通过，501普通／291ignored、Python11、两平台strict Clippy／fmt、自有清理通过；未认证daemon二进制／持续配置或真实PID复用，不清coverage或释放配额，见[交付](runtime-peer-binding-delivery-20261016.md) |
 | P1b4已本地验收；G1-04/G1-09 | 实际admin inspect-native及固定k8s.io的原生Get／Info／Read；独立expected／精确平台与共享OCI内核，前后根身份、有界流和元数据-only回执；完整协议许可接v4分发 | 509普通／291ignored、4真实wire含15类否例、两平台strict Clippy／fmt、新native及三原生回归、旧Docker CLI七场景通过；release100及实际许可producer／四Docker路径48文件通过。仅已有对象元数据，不是实际pull选择／snapshotter或引用保护，见[交付](native-image-metadata-delivery-20261016.md) |
 | P1b5已本地验收；G1-04/G1-09 | 公共inspect_cri／实际admin消费者；前后CRI精确引用ID与已验OCI config、最终根在原5秒内核对，全部准备证明标志false | 513普通／291ignored、4wire含14坏路径／双平台错配、新CRI及四原生回归、旧Docker CLI七场景和两平台质量门通过；typed期限缺陷已按精确RED／GREEN闭合，首轮OOM保留，见[交付](cri-image-identity-delivery-20261016.md) |
-| P1b后续待开发；G1-04/G1-09/G1-12 | 准确image平台／namespace／snapshotter及原生lease／content／snapshot引用、GC和真实存储／内存／FD／网络硬限组合；配置持续漂移另补 | 官方固定版本源码和真实backend证据；Status不含独立images插件配置，handler平台声明不替代实际pull选择。nil sandbox config会选default；未核实支持保持关闭，P1a／P1b1—P1b4均不签发准备许可 |
+| P1b6已本地验收；G1-04/G1-09 | 认证DiffID派生ChainID／直接父链；固定overlayfs Stat与config引用标签前后核对，公共inspect_snapshot及本机admin消费者 | 520普通／291ignored、7新增合同含31类wire坏路径，两平台质量门、新快照及五原生回归、离线Docker CLI七场景、release104与许可56文件通过；空快照正例只证明元数据，非apply／GC／准备许可，见[交付](snapshot-reference-metadata-delivery-20261016.md) |
+| P1b后续待开发；G1-04/G1-09/G1-12 | 受限准备执行者及runtime保留量，准确image平台／namespace／snapshotter、lease／content／snapshot保护闭包、GC与真实存储／inode／临时目录／内存／FD／网络硬限组合；配置持续漂移另补 | 官方固定版本源码和真实backend证据；Status不含独立images插件配置，handler平台声明不替代实际pull选择。nil sandbox config会选default；未核实支持保持关闭，P1a／P1b1—P1b6均不签发准备许可 |
 | P2/P3；G2-01/G2-13/G1-12 | PG准备意图／预算及最小权限；独立准备授权、准确node／boot/profile/epoch；批准index＋selected manifest＋platform；短时凭据及有硬限的下载／解包 | P1通过后才pre-pull；瞬态headroom、inode／metadata／并发上界与真实写入硬限同时守住；不能拼普通launch许可 |
 | P4；G2-07/G4-02/G4-06 | 同键lost ACK／重启恢复、到期／撤销、活动共享引用保护、只释放本产品native引用和GC／物理对账 | UNKNOWN保留必要预算；引用释放不等于物理回收，RemoveImage不能盲删共享alias；不清全局目录／他人镜像 |
 | P5/P6；G0-07/G3-03/G4-05/G4-09 | placement后才复核HIT／MISS／UNKNOWN；普通启动许可和Ready原合同保持；真实本地协议与目标环境冷暖基线 | Docker可验PG／registry／containerd及硬限，不代Kata／GPU／云p95/p99、72h成本及生产隔离认证；无实测不承诺加速或节省比例 |

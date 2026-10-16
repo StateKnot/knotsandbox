@@ -524,6 +524,32 @@ impl VerifiedImageMetadata {
         &self.config.digest
     }
 
+    /// Derive the final and immediate parent ChainID only from authenticated
+    /// config DiffIDs, in layer order. An empty rootfs has no snapshot key.
+    #[cfg(any(target_os = "linux", test))]
+    pub(crate) fn rootfs_chain(&self) -> Option<RootfsChain> {
+        let mut layers = self.layers.iter();
+        let mut chain_id = layers.next()?.diff_id.clone();
+        let mut parent_chain_id = None;
+        for layer in layers {
+            parent_chain_id = Some(chain_id.clone());
+            let mut digest = Sha256::new();
+            digest.update(chain_id.as_bytes());
+            digest.update(b" ");
+            digest.update(layer.diff_id.as_bytes());
+            chain_id = format!("sha256:{}", hex::encode(digest.finalize()));
+        }
+        Some(RootfsChain {
+            chain_id,
+            parent_chain_id,
+        })
+    }
+
+    #[cfg(any(target_os = "linux", test))]
+    pub(crate) fn config_matches(&self, digest: &str, size: i64) -> bool {
+        size >= 0 && self.config.digest == digest && self.config.size_bytes == size.to_string()
+    }
+
     /// Bind a native Images.Get target to the closure's authenticated root.
     /// This comparison grants neither preparation authority nor approval.
     #[cfg(any(target_os = "linux", test))]
@@ -533,6 +559,13 @@ impl VerifiedImageMetadata {
             && self.root.digest == digest
             && self.root.size_bytes == size.to_string()
     }
+}
+
+#[cfg(any(target_os = "linux", test))]
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) struct RootfsChain {
+    pub(crate) chain_id: String,
+    pub(crate) parent_chain_id: Option<String>,
 }
 
 struct MetadataBudget {
@@ -930,6 +963,7 @@ impl Layout {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use anyhow::Context;
 
     const ROOT: &str = "sha256:bbcc60ed9423dd84b19a56d09759aec31ee3db1b729455f9414646808b624379";
     const MANIFEST: &str =
@@ -1002,6 +1036,107 @@ mod tests {
         assert_eq!(receipt.metadata_bytes_read, "916");
         assert_eq!(receipt.layers.len(), 2);
         assert_eq!(receipt.unique_declared_layer_bytes, "31");
+        Ok(())
+    }
+
+    fn verified_diff_ids(diff_ids: &[String]) -> Result<VerifiedImageMetadata, ImageArtifactError> {
+        let config = serde_json::json!({
+            "os":"linux", "architecture":"amd64",
+            "rootfs":{"type":"layers", "diff_ids":diff_ids},
+        })
+        .to_string()
+        .into_bytes();
+        let config_digest = format!("sha256:{}", hex::encode(Sha256::digest(&config)));
+        let layers: Vec<_> = diff_ids
+            .iter()
+            .map(|diff_id| {
+                serde_json::json!({"mediaType":"application/vnd.oci.image.layer.v1.tar",
+                    "digest":diff_id, "size":17})
+            })
+            .collect();
+        let manifest = serde_json::json!({
+            "schemaVersion":2, "mediaType":OCI_MANIFEST,
+            "config":{"mediaType":OCI_CONFIG,"digest":config_digest,"size":config.len()},
+            "layers":layers,
+        })
+        .to_string()
+        .into_bytes();
+        let manifest_digest = format!("sha256:{}", hex::encode(Sha256::digest(&manifest)));
+        MetadataPlan::from_root(&manifest, &manifest_digest, "linux/amd64", 0)?
+            .with_manifest(None)?
+            .finish(&config)
+    }
+
+    #[test]
+    fn authenticated_diff_ids_derive_ordered_chain_and_immediate_parent() -> anyhow::Result<()> {
+        let diffs: Vec<_> = ['a', 'b', 'c']
+            .iter()
+            .map(|value| format!("sha256:{}", value.to_string().repeat(64)))
+            .collect();
+        let first = verified_diff_ids(&diffs[..1])?
+            .rootfs_chain()
+            .context("one authenticated layer has a ChainID")?;
+        assert_eq!(first.chain_id, diffs[0]);
+        assert_eq!(first.parent_chain_id, None);
+        // Independently calculated OCI identity vectors, not another call to
+        // the implementation under test or compressed layer descriptor hashes.
+        let two = verified_diff_ids(&diffs[..2])?
+            .rootfs_chain()
+            .context("two authenticated layers have a ChainID")?;
+        assert_eq!(
+            two.chain_id,
+            "sha256:ccd722928bd92476ba1745586fed6e45a102504185ad88cd89e01ff116fd146c"
+        );
+        assert_eq!(two.parent_chain_id.as_deref(), Some(diffs[0].as_str()));
+        let three = verified_diff_ids(&diffs)?
+            .rootfs_chain()
+            .context("three authenticated layers have a ChainID")?;
+        assert_eq!(
+            three.chain_id,
+            "sha256:c1377126441fb2f5ec2c21ae2a60255331d639e830f0ee1b40a36e52d4c40588"
+        );
+        assert_eq!(three.parent_chain_id, Some(two.chain_id.clone()));
+        assert_ne!(
+            verified_diff_ids(&[diffs[1].clone(), diffs[0].clone()])?
+                .rootfs_chain()
+                .context("reversed authenticated layers have a ChainID")?
+                .chain_id,
+            two.chain_id
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn empty_authenticated_rootfs_has_no_snapshot_key() -> anyhow::Result<()> {
+        let metadata = verified_diff_ids(&[])?;
+        assert_eq!(metadata.rootfs_chain(), None);
+        assert!(metadata.config_matches(
+            metadata.config_digest(),
+            metadata.config.size_bytes.parse()?
+        ));
+        assert!(!metadata.config_matches(metadata.config_digest(), -1));
+        assert!(!metadata.config_matches(ROOT, metadata.config.size_bytes.parse()?));
+        Ok(())
+    }
+
+    #[test]
+    fn snapshot_chain_derivation_obeys_the_existing_authenticated_layer_limit() -> anyhow::Result<()>
+    {
+        let diff_ids = vec![format!("sha256:{}", "a".repeat(64)); MAX_LAYERS];
+        let chain = verified_diff_ids(&diff_ids)?
+            .rootfs_chain()
+            .context("the maximum authenticated layer count has a ChainID")?;
+        assert_eq!(
+            chain.chain_id,
+            "sha256:7b1ada5e5929b10511be68a8b487a327f9f343b3b6ff3f2a61ffd7e24084595d"
+        );
+        assert!(chain.parent_chain_id.is_some());
+        let mut excessive = diff_ids;
+        excessive.push(format!("sha256:{}", "a".repeat(64)));
+        assert!(matches!(
+            verified_diff_ids(&excessive),
+            Err(ImageArtifactError::MetadataLimitExceeded)
+        ));
         Ok(())
     }
 

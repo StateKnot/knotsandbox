@@ -18,7 +18,7 @@ retain their Apache-2.0 provenance.
 
 ## containerd native metadata protocol
 
-`vendor/containerd/v2.3.5/` retains the official containerd images/content
+`vendor/containerd/v2.3.5/` retains the official containerd images/content/snapshots
 protocol definitions, their notices and [Apache License 2.0](vendor/containerd/v2.3.5/LICENSE).
 [Provenance and fixed digests](vendor/containerd/v2.3.5/README.md) identify the
 unchanged inputs. The derived `containerd.*.rs` messages in

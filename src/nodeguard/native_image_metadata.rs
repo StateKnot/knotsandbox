@@ -29,6 +29,25 @@ pub struct NativeCriImageMetadata {
     native: NativeImageMetadata,
 }
 
+/// Current committed snapshot and config-reference metadata, never a proof of
+/// layer application, pull selection, a lease or future GC protection.
+#[derive(Debug, Serialize)]
+pub struct NativeSnapshotMetadata {
+    scope: &'static str,
+    snapshotter: &'static str,
+    chain_id: String,
+    parent_chain_id: Option<String>,
+    reference_label_matches: bool,
+    snapshot_committed_observed: bool,
+    approval_checked: bool,
+    pull_selection_checked: bool,
+    runtime_handler_checked: bool,
+    layer_payloads_verified: bool,
+    gc_protection_checked: bool,
+    preparation_allowed: bool,
+    native: NativeImageMetadata,
+}
+
 /// Errors contain only stable codes, never a provider status, reference or path.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum NativeImageMetadataError {
@@ -56,6 +75,16 @@ pub enum NativeImageMetadataError {
     CriImageMismatch,
     #[error("CRI_IMAGE_CHANGED")]
     CriImageChanged,
+    #[error("SNAPSHOT_NOT_APPLICABLE")]
+    SnapshotNotApplicable,
+    #[error("SNAPSHOT_UNAVAILABLE")]
+    SnapshotUnavailable,
+    #[error("SNAPSHOT_IDENTITY_MISMATCH")]
+    SnapshotIdentityMismatch,
+    #[error("SNAPSHOT_REFERENCE_MISMATCH")]
+    SnapshotReferenceMismatch,
+    #[error("SNAPSHOT_CHANGED")]
+    SnapshotChanged,
     #[error("{0}")]
     Metadata(#[from] ImageArtifactError),
 }
@@ -74,8 +103,36 @@ impl NativeImageMetadataError {
             Self::CriImageUnavailable => "CRI_IMAGE_UNAVAILABLE",
             Self::CriImageMismatch => "CRI_IMAGE_MISMATCH",
             Self::CriImageChanged => "CRI_IMAGE_CHANGED",
+            Self::SnapshotNotApplicable => "SNAPSHOT_NOT_APPLICABLE",
+            Self::SnapshotUnavailable => "SNAPSHOT_UNAVAILABLE",
+            Self::SnapshotIdentityMismatch => "SNAPSHOT_IDENTITY_MISMATCH",
+            Self::SnapshotReferenceMismatch => "SNAPSHOT_REFERENCE_MISMATCH",
+            Self::SnapshotChanged => "SNAPSHOT_CHANGED",
             Self::Metadata(error) => error.code(),
         }
+    }
+}
+
+/// Observe an existing overlayfs snapshot and the authenticated configuration's
+/// current reference to it. The snapshotter and namespace are fixed, and this
+/// operation neither establishes the pull-time backend nor protects resources.
+pub async fn inspect_snapshot(
+    reference: &str,
+    expected_digest: &str,
+    platform: &str,
+) -> Result<NativeSnapshotMetadata, NativeImageMetadataError> {
+    crate::image_artifact::validate_request(expected_digest, platform)?;
+    validate_reference(reference, expected_digest)?;
+    #[cfg(target_os = "linux")]
+    {
+        if !rustix::process::geteuid().is_root() {
+            return Err(NativeImageMetadataError::UnsupportedRuntime);
+        }
+        backend::inspect_snapshot_local(reference, expected_digest, platform).await
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err(NativeImageMetadataError::UnsupportedRuntime)
     }
 }
 
@@ -156,7 +213,7 @@ fn validate_reference(reference: &str, expected: &str) -> Result<(), NativeImage
 mod backend {
     use super::*;
     use crate::{
-        image_artifact::{MetadataBlobRequest, MetadataPlan},
+        image_artifact::{MetadataBlobRequest, MetadataPlan, RootfsChain},
         nodeguard::{
             cri_proto::{
                 ImageSpec, ImageStatusRequest, ImageStatusResponse, VersionRequest, VersionResponse,
@@ -176,6 +233,10 @@ mod backend {
     const MAX_FRAMES: usize = 64;
     const MAX_CRI_ALIASES: usize = 128;
     const MAX_CRI_ALIAS_BYTES: usize = 48 * 1024;
+    const SNAPSHOTTER: &str = "overlayfs";
+    const SNAPSHOT_REFERENCE_LABEL: &str = "containerd.io/gc.ref.snapshot.overlayfs";
+    const MAX_LABELS: usize = 128;
+    const MAX_LABEL_BYTES: usize = 48 * 1024;
 
     // Upstream-generated messages stay private. No generated RPC client or
     // writer is exposed, including to the host administrator's CLI consumer.
@@ -201,11 +262,16 @@ mod backend {
                         include!("generated/containerd.services.content.v1.rs");
                     }
                 }
+                pub mod snapshots {
+                    pub mod v1 {
+                        include!("generated/containerd.services.snapshots.v1.rs");
+                    }
+                }
             }
         }
     }
     use wire::containerd::{
-        services::{content::v1 as content, images::v1 as images},
+        services::{content::v1 as content, images::v1 as images, snapshots::v1 as snapshots},
         types::Descriptor,
     };
 
@@ -265,6 +331,18 @@ mod backend {
     ) -> Result<NativeCriImageMetadata, NativeImageMetadataError> {
         with_local_channel(|channel, deadline| {
             inspect_cri_channel(channel, reference, expected, platform, deadline)
+        })
+        .await
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) async fn inspect_snapshot_local(
+        reference: &str,
+        expected: &str,
+        platform: &str,
+    ) -> Result<NativeSnapshotMetadata, NativeImageMetadataError> {
+        with_local_channel(|channel, deadline| {
+            inspect_snapshot_channel(channel, reference, expected, platform, deadline)
         })
         .await
     }
@@ -552,6 +630,167 @@ mod backend {
     }
 
     #[derive(Debug, Eq, PartialEq)]
+    struct ObservationTimes {
+        created: (i64, i32),
+        updated: (i64, i32),
+    }
+
+    fn observation_times(
+        created: Option<&wire::google::protobuf::Timestamp>,
+        updated: Option<&wire::google::protobuf::Timestamp>,
+    ) -> Result<ObservationTimes, NativeImageMetadataError> {
+        fn stamp(
+            value: Option<&wire::google::protobuf::Timestamp>,
+        ) -> Result<(i64, i32), NativeImageMetadataError> {
+            let value = value.ok_or(NativeImageMetadataError::ResponseInvalid)?;
+            // The protobuf Timestamp's specified year 0001 through 9999 range.
+            if !(-62_135_596_800..=253_402_300_799).contains(&value.seconds)
+                || !(0..=999_999_999).contains(&value.nanos)
+            {
+                return Err(NativeImageMetadataError::ResponseInvalid);
+            }
+            Ok((value.seconds, value.nanos))
+        }
+        let times = ObservationTimes {
+            created: stamp(created)?,
+            updated: stamp(updated)?,
+        };
+        if times.updated < times.created {
+            return Err(NativeImageMetadataError::ResponseInvalid);
+        }
+        Ok(times)
+    }
+
+    fn bounded_labels(
+        labels: &std::collections::HashMap<String, String>,
+    ) -> Result<(), NativeImageMetadataError> {
+        if labels.len() > MAX_LABELS {
+            return Err(NativeImageMetadataError::ResponseInvalid);
+        }
+        let mut total = 0usize;
+        for (key, value) in labels {
+            let bytes = key.len().saturating_add(value.len());
+            if key.is_empty() || bytes > 4096 {
+                return Err(NativeImageMetadataError::ResponseInvalid);
+            }
+            total = total.saturating_add(bytes);
+            if total > MAX_LABEL_BYTES {
+                return Err(NativeImageMetadataError::ResponseInvalid);
+            }
+        }
+        Ok(())
+    }
+
+    async fn config_snapshot_reference(
+        channel: Channel,
+        metadata: &VerifiedImageMetadata,
+        chain: &RootfsChain,
+        deadline: Instant,
+    ) -> Result<ObservationTimes, NativeImageMetadataError> {
+        let reply: content::InfoResponse = unary(
+            channel,
+            content::InfoRequest {
+                digest: metadata.config_digest().to_owned(),
+            },
+            "/containerd.services.content.v1.Content/Info",
+            SMALL_REPLY,
+            deadline,
+        )
+        .await?;
+        let info = reply
+            .info
+            .ok_or(NativeImageMetadataError::ResponseInvalid)?;
+        if !metadata.config_matches(&info.digest, info.size) {
+            return Err(NativeImageMetadataError::ResponseInvalid);
+        }
+        bounded_labels(&info.labels)?;
+        let times = observation_times(info.created_at.as_ref(), info.updated_at.as_ref())?;
+        if info.labels.get(SNAPSHOT_REFERENCE_LABEL) != Some(&chain.chain_id) {
+            return Err(NativeImageMetadataError::SnapshotReferenceMismatch);
+        }
+        Ok(times)
+    }
+
+    async fn snapshot_observation(
+        channel: Channel,
+        chain: &RootfsChain,
+        deadline: Instant,
+    ) -> Result<ObservationTimes, NativeImageMetadataError> {
+        let reply: snapshots::StatSnapshotResponse = unary(
+            channel,
+            snapshots::StatSnapshotRequest {
+                snapshotter: SNAPSHOTTER.to_owned(),
+                key: chain.chain_id.clone(),
+            },
+            "/containerd.services.snapshots.v1.Snapshots/Stat",
+            SMALL_REPLY,
+            deadline,
+        )
+        .await
+        .map_err(|error| {
+            if error == NativeImageMetadataError::MetadataUnavailable {
+                NativeImageMetadataError::SnapshotUnavailable
+            } else {
+                error
+            }
+        })?;
+        let info = reply
+            .info
+            .ok_or(NativeImageMetadataError::ResponseInvalid)?;
+        bounded_labels(&info.labels)?;
+        if info.name != chain.chain_id
+            || info.parent != chain.parent_chain_id.as_deref().unwrap_or_default()
+            || info.kind != snapshots::Kind::Committed as i32
+        {
+            return Err(NativeImageMetadataError::SnapshotIdentityMismatch);
+        }
+        observation_times(info.created_at.as_ref(), info.updated_at.as_ref())
+    }
+
+    async fn inspect_snapshot_channel(
+        channel: Channel,
+        reference: &str,
+        expected: &str,
+        platform: &str,
+        deadline: Instant,
+    ) -> Result<NativeSnapshotMetadata, NativeImageMetadataError> {
+        verify_version(channel.clone(), deadline).await?;
+        let (initial, metadata) =
+            read_metadata(channel.clone(), reference, expected, platform, deadline).await?;
+        let chain = metadata
+            .rootfs_chain()
+            .ok_or(NativeImageMetadataError::SnapshotNotApplicable)?;
+        let config_before =
+            config_snapshot_reference(channel.clone(), &metadata, &chain, deadline).await?;
+        let snapshot_before = snapshot_observation(channel.clone(), &chain, deadline).await?;
+        let snapshot_after = snapshot_observation(channel.clone(), &chain, deadline).await?;
+        let config_after =
+            config_snapshot_reference(channel.clone(), &metadata, &chain, deadline).await?;
+        if snapshot_before != snapshot_after || config_before != config_after {
+            return Err(NativeImageMetadataError::SnapshotChanged);
+        }
+        // These reads are observations, not an atomic transaction or a lease.
+        // The final native root still brackets all added snapshot/reference RPCs.
+        let native =
+            finish_metadata(channel, reference, expected, initial, metadata, deadline).await?;
+        Ok(NativeSnapshotMetadata {
+            scope: "NATIVE_SNAPSHOT_REFERENCE_METADATA_ONLY",
+            snapshotter: SNAPSHOTTER,
+            chain_id: chain.chain_id,
+            parent_chain_id: chain.parent_chain_id,
+            reference_label_matches: true,
+            snapshot_committed_observed: true,
+            approval_checked: false,
+            pull_selection_checked: false,
+            runtime_handler_checked: false,
+            layer_payloads_verified: false,
+            gc_protection_checked: false,
+            preparation_allowed: false,
+            native,
+        })
+    }
+
+    #[derive(Debug, Eq, PartialEq)]
     struct CriIdentity {
         image_id: String,
         exact_reference_present: bool,
@@ -667,3 +906,7 @@ mod cli_tests;
 #[cfg(all(test, target_os = "linux"))]
 #[path = "cri_image_metadata_cli_tests.rs"]
 mod cri_cli_tests;
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "snapshot_image_metadata_cli_tests.rs"]
+mod snapshot_cli_tests;

@@ -18,3 +18,54 @@ pub struct Descriptor {
         ::prost::alloc::string::String,
     >,
 }
+/// Mount describes mounts for a container.
+///
+/// This type is the lingua franca of ContainerD. All services provide mounts
+/// to be used with the container at creation time.
+///
+/// The Mount type follows the structure of the mount syscall, including a type,
+/// source, target and options.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Mount {
+    /// Type defines the nature of the mount.
+    #[prost(string, tag = "1")]
+    pub r#type: ::prost::alloc::string::String,
+    /// Source specifies the name of the mount. Depending on mount type, this
+    /// may be a volume name or a host path, or even ignored.
+    #[prost(string, tag = "2")]
+    pub source: ::prost::alloc::string::String,
+    /// Target path in container
+    #[prost(string, tag = "3")]
+    pub target: ::prost::alloc::string::String,
+    /// Options specifies zero or more fstab style mount options.
+    #[prost(string, repeated, tag = "4")]
+    pub options: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ActiveMount {
+    #[prost(message, optional, tag = "1")]
+    pub mount: ::core::option::Option<Mount>,
+    #[prost(message, optional, tag = "2")]
+    pub mounted_at: ::core::option::Option<super::super::google::protobuf::Timestamp>,
+    #[prost(string, tag = "3")]
+    pub mount_point: ::prost::alloc::string::String,
+    #[prost(map = "string, string", tag = "4")]
+    pub data: ::std::collections::HashMap<
+        ::prost::alloc::string::String,
+        ::prost::alloc::string::String,
+    >,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ActivationInfo {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "2")]
+    pub active: ::prost::alloc::vec::Vec<ActiveMount>,
+    #[prost(message, repeated, tag = "3")]
+    pub system: ::prost::alloc::vec::Vec<Mount>,
+    #[prost(map = "string, string", tag = "4")]
+    pub labels: ::std::collections::HashMap<
+        ::prost::alloc::string::String,
+        ::prost::alloc::string::String,
+    >,
+}

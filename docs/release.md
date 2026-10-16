@@ -2,7 +2,7 @@
 
 本仓库提供可执行发布流程，但目前没有本项目的线上签名身份、GHCR 发布或生产验收。`validate` 只产出**未签名候选制品**。本地构建成功、协议测试或官方工具签名验签成功，均不等于本产品发布通过。
 
-当前签名制品合同为 manifest v4，必须包含`sqlx-postgres-notices.json`及`native-protocol-notices.json`。前者保留原SQLx MIT/Apache许可证、原包SHA及BEGIN取消修复出处；后者包含固定containerd协议的Apache及Google protobuf WKT的BSD完整许可证、来源和六份输入摘要。两者都由固定校验的vendor源生成，受原签名file inventory、内容hash、64KiB读取上限与语义校验。离线安装以0444保存两份公开资产，只有八个ELF可以执行。缺资产、改字节或重新hash后截短许可证均拒绝。历史v3仍只要求原SQLx资产，只有前版认证路径可以读取，不改写旧格式含义；v1/v2/v3/v4历史读取都不能绕过当前安装门。四种Docker导出／镜像目标同时携带新增完整源许可证、来源和生成notice，主项目MIT不覆盖第三方许可。
+当前签名制品合同为 manifest v4，必须包含`sqlx-postgres-notices.json`及`native-protocol-notices.json`。前者保留原SQLx MIT/Apache许可证、原包SHA及BEGIN取消修复出处；后者当前notice schema 2包含固定containerd协议的Apache及Google protobuf WKT的BSD完整许可证、来源和八份输入摘要（含Snapshots／Mount）；manifest仍为v4。当前生成、验证与安装严格要求schema 2；仅原先验签后的历史读取可接受固定schema 1旧六输入或固定schema 2，不接受混合来源或任意版本。两者都由固定校验的vendor源生成，受原签名file inventory、内容hash、64KiB读取上限与语义校验。离线安装以0444保存两份公开资产，只有八个ELF可以执行。缺资产、改字节或重新hash后截短许可证均拒绝。历史v3仍只要求原SQLx资产，只有前版认证路径可以读取，不改写旧格式含义；v1/v2/v3/v4历史读取都不能绕过当前安装门。四种Docker导出／镜像目标同时携带新增完整源许可证、来源和生成notice，主项目MIT不覆盖第三方许可。
 
 `python3 scripts/verify-sqlx-postgres-patch.py`在CI与正式镜像构建前验证原116文件、唯一事务补丁、Cargo路径覆盖和Docker上下文；既有三份Rust SBOM必须继续覆盖path版`sqlx-postgres 0.8.6`，不能因Cargo.lock没有registry source而把它排除。镜像和宿主导出目录保留两许可证及补丁说明；新增通知协议的本地回归不等于已经签发正式发行。
 

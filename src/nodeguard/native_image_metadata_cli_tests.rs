@@ -14,15 +14,15 @@ const OUTPUT_LIMIT: usize = 64 * 1024;
 const PUBLIC_ENV_KEY: &str = "PUBLIC_ENV_MARKER";
 const PUBLIC_ENV_VALUE: &str = "DO_NOT_ECHO_NATIVE_METADATA_ENV";
 
-struct Fixture {
-    reference: String,
-    digest: String,
-    platform: String,
-    manifest_reference: String,
-    manifest_digest: String,
+pub(super) struct Fixture {
+    pub(super) reference: String,
+    pub(super) digest: String,
+    pub(super) platform: String,
+    pub(super) manifest_reference: String,
+    pub(super) manifest_digest: String,
 }
 
-fn public_value(name: &str, limit: usize) -> anyhow::Result<String> {
+pub(super) fn public_value(name: &str, limit: usize) -> anyhow::Result<String> {
     let value = std::env::var(name).context("generated public fixture environment required")?;
     ensure!(
         !value.is_empty() && value.len() <= limit && value.is_ascii(),
@@ -32,7 +32,7 @@ fn public_value(name: &str, limit: usize) -> anyhow::Result<String> {
 }
 
 impl Fixture {
-    fn read() -> anyhow::Result<Self> {
+    pub(super) fn read() -> anyhow::Result<Self> {
         ensure!(
             rustix::process::geteuid().is_root(),
             "owned Linux root fixture required"
@@ -102,8 +102,9 @@ pub(super) async fn invoke_command(
     digest: &str,
     platform: &str,
 ) -> anyhow::Result<CliOutput> {
-    let mut child = Command::new(ADMIN)
-        .args([
+    invoke_program(
+        ADMIN,
+        &[
             "image-artifact",
             command,
             "--reference",
@@ -112,7 +113,14 @@ pub(super) async fn invoke_command(
             digest,
             "--platform",
             platform,
-        ])
+        ],
+    )
+    .await
+}
+
+pub(super) async fn invoke_program(program: &str, arguments: &[&str]) -> anyhow::Result<CliOutput> {
+    let mut child = Command::new(program)
+        .args(arguments)
         .env_clear()
         .current_dir("/fixture")
         .stdin(Stdio::null())
@@ -150,7 +158,7 @@ pub(super) async fn invoke_command(
     }
 }
 
-fn receipt(bytes: &[u8], fixture: &Fixture, index: bool) -> anyhow::Result<()> {
+pub(super) fn receipt(bytes: &[u8], fixture: &Fixture, index: bool) -> anyhow::Result<()> {
     ensure!(
         bytes.len() <= OUTPUT_LIMIT,
         "bounded native receipt required"

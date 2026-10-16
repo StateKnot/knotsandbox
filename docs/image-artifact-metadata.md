@@ -98,3 +98,26 @@ Rust 消费者使用同一公共入口 `nodeguard::native_image_metadata::inspec
 新增稳定错误 `CRI_IMAGE_UNAVAILABLE` 表示该精确引用没有可用 CRI 索引项，`CRI_IMAGE_MISMATCH` 表示配置摘要或精确 repository digest 不符，`CRI_IMAGE_CHANGED` 表示本次前后索引身份变化；协议形状、超限、版本及期限继续使用已有错误。失败 stdout 为空，stderr 只给 `Error: CRI image identity inspection failed: <CODE>`。两次索引检查与原生检查不构成跨服务原子快照，也不持有原生保护引用。
 
 成功可以发生在未解包的 metadata-only fixture 上；它没有检查实际 snapshot、layer 载荷、GC 存活、审批或资源硬限，不产生准备、启动或缓存命中许可。实际 pull 选择、原生引用／GC 与准备开销硬限仍须分别完成。
+
+## 核对 snapshotter 与配置引用元数据
+
+Linux root 管理员可以检查固定 `overlayfs` 中的当前 rootfs 快照元数据，以及对应配置上的引用标签：
+
+```sh
+sudo sandbox-admin image-artifact inspect-snapshot \
+  --reference registry.example.com/team/image@sha256:<root-digest> \
+  --expected-digest sha256:<independently-trusted-root-digest> \
+  --platform linux/amd64
+```
+
+Rust 入口为 `nodeguard::native_image_metadata::inspect_snapshot`。输入规则、固定 root UDS／peer／`k8s.io`、containerd 2.3.5、元数据预算和全链共用5秒期限保持；不提供任意 snapshotter、snapshot key、mount、路径或 handler 参数。命令没有 pull、unpack、mount、lease 或 snapshot 写操作。
+
+命令从已验证配置的有序 DiffID 推导 ChainID：首层为该 DiffID，后续为 `sha256(previous ChainID + ASCII space + next DiffID)`；父 ChainID 是去掉最后一层后的结果。它不使用压缩层摘要代替 DiffID。零层 rootfs 返回 `SNAPSHOT_NOT_APPLICABLE`，不会以空 key 查询快照；这不影响原离线／原生命令对零层元数据的支持。
+
+验证顺序为原生元数据读回、config Content.Info A、snapshot Stat A／B、config Content.Info B、最终原生根核对。config 的 digest／大小须与已验配置一致，`containerd.io/gc.ref.snapshot.overlayfs` 须等于 ChainID；快照名称、直接父名称与 `Committed` kind 须匹配，并核对前后创建／更新时间。每个新回复仍限64KiB；标签最多128项、单个键值合计4096字节、累计48KiB。标签正文、mount、目录、物理使用量均不返回。
+
+成功回执固定 `scope: "NATIVE_SNAPSHOT_REFERENCE_METADATA_ONLY"`，包含 `snapshotter`、`chain_id`、可空 `parent_chain_id`、`reference_label_matches: true`、`snapshot_committed_observed: true` 和完整原 `native` 回执。`approval_checked`、`pull_selection_checked`、`runtime_handler_checked`、`layer_payloads_verified`、`gc_protection_checked`、`preparation_allowed` 全为false。
+
+新增错误为 `SNAPSHOT_UNAVAILABLE`、`SNAPSHOT_IDENTITY_MISMATCH`、`SNAPSHOT_REFERENCE_MISMATCH`、`SNAPSHOT_CHANGED`、`SNAPSHOT_NOT_APPLICABLE`；其余版本、协议、元数据和期限错误沿用。失败 stdout 为空，stderr 只给 `Error: native snapshot identity inspection failed: <CODE>`，不能继续沿用旧成功回执。
+
+此检查只观察最终快照和直接父名称，不遍历完整快照祖先或 GC 可达闭包，也不取得保护租约。多次读取不是原子事务。即使空快照被命名成目标 ChainID、标为 Committed 并带匹配标签，也可能通过这项元数据检查；它没有验证层真正 apply 到快照或将被某次启动使用。因此成功不能作为解包完成、实际 pull／Kata snapshotter 选择、内容正确、长期 GC 保护、Ready 或缓存命中证明。

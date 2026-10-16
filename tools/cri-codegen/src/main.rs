@@ -6,7 +6,7 @@ fn main() -> anyhow::Result<()> {
     prost.protoc_executable(protoc_bin_vendored::protoc_bin_path()?);
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     if arguments == ["--containerd"] {
-        // Generate messages only: the production adapter exposes three fixed
+        // Generate messages only: the production adapter exposes fixed
         // read methods, rather than a generated client with write operations.
         prost.compile_well_known_types();
         tonic_prost_build::configure()
@@ -18,6 +18,7 @@ fn main() -> anyhow::Result<()> {
                 &[
                     root.join("vendor/containerd/v2.3.5/api/services/images/v1/images.proto"),
                     root.join("vendor/containerd/v2.3.5/api/services/content/v1/content.proto"),
+                    root.join("vendor/containerd/v2.3.5/api/services/snapshots/v1/snapshots.proto"),
                 ],
                 &[
                     root.join("vendor/containerd/v2.3.5/api"),

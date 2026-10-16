@@ -17,6 +17,8 @@ for name, digest in {
     'api/services/images/v1/images.proto': 'f7943198b308917555040e524251f06d9262b917f856a771159253c51635b056',
     'api/services/content/v1/content.proto': '70aadb447ff3157da276afecc355a5a58ef2e322eb7530d5c2868734d626eea8',
     'api/types/descriptor.proto': 'f98bec409b5e535e2a8d81dacc549180e1dadb31bd6ac46f7aedc6ab0020e447',
+    'api/services/snapshots/v1/snapshots.proto': '6e23ec19b971e1088f3984b7a07ee4238d6ad56b85173750c38b0c911803bc23',
+    'api/types/mount.proto': 'c7a31fa848f002cead05a23adfdd9e29a459cd01ae573b7b61b060b3056754d7',
     'LICENSE': '4bbe3b885e8cd1907ab4cf9a41e862e74e24b5422297a4f2fe524e6a30ada2b4',
 }.items():
     assert hashlib.sha256((native / name).read_bytes()).hexdigest() == digest, name
@@ -33,6 +35,7 @@ for name, digest in known_inputs.items():
 paths = [Path('src/nodeguard/generated') / name for name in (
     'containerd.services.images.v1.rs', 'containerd.services.content.v1.rs',
     'containerd.types.rs', 'google.protobuf.rs',
+    'containerd.services.snapshots.v1.rs',
 )]
 before_native = {path: path.read_bytes() for path in paths}
 subprocess.run(['cargo','run','--locked','--offline','--manifest-path','tools/cri-codegen/Cargo.toml', '--', '--containerd'],check=True)

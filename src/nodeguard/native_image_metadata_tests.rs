@@ -54,6 +54,38 @@ enum Fault {
     CriProviderSecret,
     CriRemoteCancelled,
     CriDeadline,
+    SnapshotTwoLayers,
+    SnapshotZeroLayers,
+    SnapshotAbsent,
+    SnapshotMissingInfo,
+    SnapshotWrongName,
+    SnapshotWrongParent,
+    SnapshotActive,
+    SnapshotView,
+    SnapshotUnknownKind,
+    SnapshotChanged,
+    SnapshotMissingTime,
+    SnapshotInvalidNanos,
+    SnapshotInvalidSeconds,
+    SnapshotReversedTime,
+    SnapshotLabelCount,
+    SnapshotLabelBytes,
+    SnapshotLabelPair,
+    SnapshotOversizedReply,
+    SnapshotProviderSecret,
+    SnapshotRemoteCancelled,
+    SnapshotDeadline,
+    ConfigReferenceMissing,
+    ConfigReferenceWrong,
+    ConfigReferenceChanged,
+    ConfigReferenceTimeChanged,
+    ConfigReferenceDigest,
+    ConfigReferenceSize,
+    ConfigReferenceMissingInfo,
+    ConfigReferenceMissingTime,
+    ConfigReferenceLabelCount,
+    ConfigReferenceLabelBytes,
+    ConfigReferenceLabelPair,
 }
 
 struct Fixture {
@@ -66,6 +98,10 @@ struct Fixture {
 }
 impl Fixture {
     fn new(index: bool) -> Self {
+        Self::with_diff_ids(index, &[format!("sha256:{}", "a".repeat(64))])
+    }
+
+    fn with_diff_ids(index: bool, diff_ids: &[String]) -> Self {
         fn descriptor(bytes: &[u8], media: &str) -> Descriptor {
             Descriptor {
                 digest: format!("sha256:{}", hex::encode(Sha256::digest(bytes))),
@@ -77,14 +113,24 @@ impl Fixture {
         fn json_descriptor(value: &Descriptor) -> serde_json::Value {
             json!({"mediaType":value.media_type,"digest":value.digest,"size":value.size})
         }
-        let layer = format!("sha256:{}", "a".repeat(64));
         let config = json!({"os":"linux","architecture":"amd64",
-            "config":{"Env":[PRIVATE]},"rootfs":{"type":"layers","diff_ids":[layer]}})
+            "config":{"Env":[PRIVATE]},"rootfs":{"type":"layers","diff_ids":diff_ids}})
         .to_string()
         .into_bytes();
         let config_descriptor = descriptor(&config, "application/vnd.oci.image.config.v1+json");
-        let manifest = json!({"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json",
-            "config":json_descriptor(&config_descriptor),"layers":[{"mediaType":"application/vnd.oci.image.layer.v1.tar","digest":layer,"size":17}]}).to_string().into_bytes();
+        let layers: Vec<_> = diff_ids
+            .iter()
+            .map(|diff_id| {
+                json!({
+                    "mediaType":"application/vnd.oci.image.layer.v1.tar","digest":diff_id,"size":17
+                })
+            })
+            .collect();
+        let manifest =
+            json!({"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json",
+            "config":json_descriptor(&config_descriptor),"layers":layers})
+            .to_string()
+            .into_bytes();
         let manifest_descriptor =
             descriptor(&manifest, "application/vnd.oci.image.manifest.v1+json");
         let mut blobs = BTreeMap::from([
@@ -147,6 +193,8 @@ struct State {
     bad_namespace: AtomicBool,
     gets: AtomicUsize,
     cri_gets: AtomicUsize,
+    snapshot_gets: AtomicUsize,
+    config_info_gets: AtomicUsize,
     active_streams: Arc<AtomicUsize>,
 }
 impl State {
@@ -344,21 +392,29 @@ impl tonic::server::UnaryService<content::InfoRequest> for Content {
             if state.fault == Fault::MissingInfo {
                 return Ok(Response::new(content::InfoResponse { info: None }));
             }
-            Ok(Response::new(content::InfoResponse {
-                info: Some(content::Info {
-                    digest: if state.fault == Fault::InfoDigest {
-                        PRIVATE.into()
-                    } else {
-                        request.get_ref().digest.clone()
-                    },
-                    size: if state.fault == Fault::InfoSize {
-                        i64::MAX
-                    } else {
-                        bytes.len() as i64
-                    },
-                    ..Default::default()
-                }),
-            }))
+            let mut info = content::Info {
+                digest: if state.fault == Fault::InfoDigest {
+                    PRIVATE.into()
+                } else {
+                    request.get_ref().digest.clone()
+                },
+                size: if state.fault == Fault::InfoSize {
+                    i64::MAX
+                } else {
+                    bytes.len() as i64
+                },
+                ..Default::default()
+            };
+            if request.get_ref().digest == state.fixture.config {
+                let call = state.config_info_gets.fetch_add(1, Ordering::SeqCst);
+                // Only the new snapshot-reference observations interpret these
+                // fixed fields; the original metadata read stays unchanged.
+                snapshot_config_info(&state, call, &mut info);
+                if call > 0 && state.fault == Fault::ConfigReferenceMissingInfo {
+                    return Ok(Response::new(content::InfoResponse { info: None }));
+                }
+            }
+            Ok(Response::new(content::InfoResponse { info: Some(info) }))
         })
     }
 }
@@ -590,6 +646,17 @@ where
     } else {
         fixture
     };
+    let fixture = match fault {
+        Fault::SnapshotTwoLayers => Fixture::with_diff_ids(
+            index,
+            &[
+                format!("sha256:{}", "a".repeat(64)),
+                format!("sha256:{}", "b".repeat(64)),
+            ],
+        ),
+        Fault::SnapshotZeroLayers => Fixture::with_diff_ids(index, &[]),
+        _ => fixture,
+    };
     let state = Arc::new(State {
         fixture,
         fault,
@@ -597,6 +664,8 @@ where
         bad_namespace: AtomicBool::new(false),
         gets: AtomicUsize::new(0),
         cri_gets: AtomicUsize::new(0),
+        snapshot_gets: AtomicUsize::new(0),
+        config_info_gets: AtomicUsize::new(0),
         active_streams: Arc::new(AtomicUsize::new(0)),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -623,6 +692,7 @@ where
             .add_service(Images(state.clone()))
             .add_service(Content(state.clone()))
             .add_service(CriImages(state.clone()))
+            .add_service(Snapshots(state.clone()))
             .serve_with_incoming_shutdown(incoming, ending.cancelled_owned()),
     );
     let owner = IoOwner(RuntimeTransport::new());
@@ -674,6 +744,8 @@ where
     );
     Ok((outcome, state))
 }
+
+include!("native_snapshot_image_metadata_tests.rs");
 
 #[tokio::test]
 async fn actual_native_protocol_checks_metadata_in_one_fixed_namespace_without_reading_layers()
