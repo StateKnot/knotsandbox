@@ -228,7 +228,7 @@ impl ImageObserver {
         // The optional runtime handshake belongs to this joined background
         // owner, never construction of the original CRI/control listeners.
         #[cfg(target_os = "linux")]
-        let peer = linux::PeerBinding::default();
+        let peer = super::runtime_endpoint::RuntimeEndpoint::default();
         #[cfg(target_os = "linux")]
         let mut backend: Option<linux::RuntimeConnection> = None;
         loop {
@@ -681,20 +681,19 @@ mod tests;
 mod linux {
     use super::*;
     use crate::nodeguard::{
-        cri_transport::RuntimeTransport,
-        host::{HostProfile, parse_start_time},
+        cri_transport::RuntimeTransport, host::HostProfile, runtime_endpoint::RuntimeEndpoint,
     };
     use rustix::fs::{AtFlags, Mode, OFlags, StatxFlags, openat, statx};
     use sha2::{Digest, Sha256};
     use std::{
         fs::File,
-        io,
-        os::unix::fs::{FileExt, FileTypeExt, MetadataExt},
+        os::unix::fs::{FileExt, MetadataExt},
         path::Component,
     };
 
     const MAX_PROFILE_BYTES: usize = 64 * 1024;
     const MAX_CONFIG_BYTES: usize = 1024 * 1024;
+    #[cfg(test)]
     const SOCKET: &str = "/run/containerd/containerd.sock";
 
     fn invalid() -> GuardError {
@@ -968,36 +967,10 @@ mod linux {
             Ok(read.filesystem.and_then(|fs| fs.finish(&self.node).ok()))
         }
     }
-    #[derive(Clone, Copy, Eq, PartialEq)]
-    struct PeerIdentity {
-        pid: i32,
-        start: u64,
-    }
-    fn peer(credentials: tokio::net::unix::UCred) -> Result<PeerIdentity, io::Error> {
-        if credentials.uid() != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "Image runtime peer is not privileged",
-            ));
-        }
-        let pid = credentials
-            .pid()
-            .ok_or_else(|| io::Error::other("Image runtime peer lacks a process identity"))?;
-        let bytes = contents(&File::open(format!("/proc/{pid}/stat"))?, 65536)
-            .map_err(|_| io::Error::other("Image runtime peer identity is unavailable"))?;
-        let start = parse_start_time(
-            std::str::from_utf8(&bytes)
-                .map_err(|_| io::Error::other("Image runtime peer identity is invalid"))?,
-        )
-        .map_err(|_| io::Error::other("Image runtime peer identity is invalid"))?;
-        Ok(PeerIdentity { pid, start })
-    }
-    #[derive(Clone, Default)]
-    pub(super) struct PeerBinding(Arc<Mutex<Option<PeerIdentity>>>);
     pub(super) struct RuntimeConnection {
         transport: RuntimeTransport,
         channel: Option<Channel>,
-        peer: PeerBinding,
+        peer: RuntimeEndpoint,
     }
     impl Drop for RuntimeConnection {
         fn drop(&mut self) {
@@ -1005,7 +978,7 @@ mod linux {
         }
     }
     impl RuntimeConnection {
-        pub(super) fn new(peer: PeerBinding) -> Self {
+        pub(super) fn new(peer: RuntimeEndpoint) -> Self {
             Self {
                 transport: RuntimeTransport::new(),
                 channel: None,
@@ -1017,34 +990,16 @@ mod linux {
         }
         pub(super) async fn initialize(&mut self) -> Result<(), GuardError> {
             let connector_transport = self.transport.clone();
-            let expected = self.peer.0.clone();
+            let endpoint = self.peer.clone();
             let channel = tonic::transport::Endpoint::from_static("http://[::]:50051")
                 .connect_timeout(RPC_TIMEOUT)
                 .buffer_size(1)
                 .concurrency_limit(2)
                 .connect_with_connector(tower::service_fn(move |_| {
                     let transport = connector_transport.clone();
-                    let expected = expected.clone();
+                    let endpoint = endpoint.clone();
                     async move {
-                        let parent = directory(Path::new("/run/containerd")).map_err(|_| {
-                            io::Error::other("Image runtime socket directory is untrusted")
-                        })?;
-                        drop(parent);
-                        let metadata = std::fs::symlink_metadata(SOCKET)?;
-                        if !metadata.file_type().is_socket() || metadata.uid() != 0 {
-                            return Err(io::Error::other("Image runtime socket is untrusted"));
-                        }
-                        let stream = tokio::net::UnixStream::connect(SOCKET).await?;
-                        let actual = peer(stream.peer_cred()?)?;
-                        {
-                            let mut original = expected.lock().map_err(|_| {
-                                io::Error::other("Image runtime peer binding is unavailable")
-                            })?;
-                            if original.is_some_and(|previous| previous != actual) {
-                                return Err(io::Error::other("Image runtime peer changed"));
-                            }
-                            *original = Some(actual);
-                        }
+                        let stream = endpoint.connect().await?;
                         transport.wrap(stream).map(hyper_util::rt::TokioIo::new)
                     }
                 }))
@@ -1083,7 +1038,7 @@ mod linux {
     mod tests {
         use super::*;
         use crate::nodeguard::host::PinnedFile;
-        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 
         struct OwnedRoot {
             path: PathBuf,

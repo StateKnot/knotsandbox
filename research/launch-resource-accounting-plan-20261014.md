@@ -1,5 +1,7 @@
 # 逐次启动资源账本：下一完整交付方案
 
+最新开发检查点（2026-10-16，P1b3重连身份与请求排空）：固定root UDS以目录／socket对象FD及SO_PEERCRED的PID／start绑定，CRI与镜像观察复用算法、各自持有身份。CRI重连冲突进入永久拒绝，沿既有任务门阻止新CRI／CONTROL并取消纯读；不清SQLite coverage或释放资源／配额。普通Rust65程序501通过／0失败／291环境ignored、Python11、两平台严格all-target Clippy／fmt通过；最终Linux制品的重连、启动配置和原生镜像mTLS三个case各1项通过，自有资源清理及源码／制品稳定已核。0755夹具失败、计数断言缺口与ready发布竞态均修复并保留事实。基线cb47bc9精确CI五job／68step全绿，新提交CI独立核对。该片不证明daemon二进制／持续配置或真实PID复用，不产生准备许可；完整P1硬限／引用、P2—P6及云／Kata／CSI／GPU／性能仍待完成，pre-pull关闭。见[本批交付](runtime-peer-binding-delivery-20261016.md)。
+
 状态：**第4步普通CPU可信观察已完成本地验收；37组201项按最终制品分两批通过，已公开；基线18ad317的CI 5 job/62 step已通过。** 当前对外支持可信 `KUBERNETES_API_READBACK` 加非空观察，缺证据保持 `NOT_CAPTURED` 加null。普通原生461项、SDK77项、资源账本Chrome8项、新DB8项＋HTTP组合1项、实际维护及生产镜像各自通过；分批结果不称单轮全跑，也不等于生产上线认证。前轮0045账本单轮27组164项、第3步35组192项分批记录均保留其原范围；恢复草稿仍未计验收。当前实现与最终本地验收范围见[可信观察交付](trusted-launch-resource-observation-20261015.md)，原回读及账本记录分别见[第3步](runtime-class-resource-readback-20261015.md)与[第2/5步](launch-resource-accounting-delivery-20261015.md)。利用率、自动调档、预热和GPU仍未完成。
 
 后续进展（2026-10-16）：节点镜像P0b的发布dcb7554精确CI 5 job/62 step已通过；本轮P0c1持久安装读授权／永久撤权、owner CLI、普通app/JWT授权检查完成本地验收。46条正常迁移及原45条不变、6专项、6组29 PG、正式自动化25、普通Rust475、SDK77均已验。它不代表启动利用率或完整节点查询已完成，P0c2及同一原生整链继续待开发。见[本批交付](installation-operator-access-delivery-20261016.md)。
@@ -11,7 +13,7 @@
 最新后续检查点（2026-10-16，P1b1）：实际安装plan／collect的受支持镜像运行时组合与相同读取字节认证已完成本地验收。14项Python、原版上游完整模板和默认Docker入口20实际CLI／40日志通过；配置换档真实FD屏障拒绝登记、目录FD输出及自有清理已核。基线0721699精确CI 5 job／65 step成功，本批CI另核。它仅证明配置与身份，实际daemon读回、pull／unpack、原生引用和硬限仍待推进，不增加VM或GPU配额、容量和收益声称。见[本批交付](host-image-runtime-profile-delivery-20261016.md)。
 
 
-最新开发检查点（2026-10-16，P1b2启动时runtime读回）：`CriProxy::verify_startup` 在版本核对后、原sandbox／进程覆盖恢复及开放登记前，沿原固定UDS执行有界 `Status(verbose=true)`。固定目录／endpoint、默认runc／两个handler、Kata ConfigPath／类型与安全选项冲突或缺失保持Closed，不输出原配置。普通Rust 65程序501通过／0失败／291环境ignored，其中新增4项含真实gRPC与原5秒deadline；Python runner 11项、Mac／Linux严格all-target Clippy及fmt通过。真正containerd 2.3.5的本地Linux arm64正反例与原生镜像mTLS回归各1项通过，源码／制品不变及自有容器／镜像清理确认。基线686b9b8精确CI 5 job／67 step全通过，本批CI另核。该片仅验证本次启动的runtime配置子集，沿用受控root UDS信任，不证明daemon PID／二进制、持续漂移、images／NRI状态或Kata能力；pull／unpack、原生引用／GC、硬限和GPU／云／CSI／性能仍待验收。见[本批交付](runtime-profile-startup-delivery-20261016.md)。
+前序开发检查点（2026-10-16，P1b2启动时runtime读回）：`CriProxy::verify_startup` 在版本核对后、原sandbox／进程覆盖恢复及开放登记前，沿原固定UDS执行有界 `Status(verbose=true)`。固定目录／endpoint、默认runc／两个handler、Kata ConfigPath／类型与安全选项冲突或缺失保持Closed，不输出原配置。普通Rust 65程序501通过／0失败／291环境ignored，其中新增4项含真实gRPC与原5秒deadline；Python runner 11项、Mac／Linux严格all-target Clippy及fmt通过。真正containerd 2.3.5的本地Linux arm64正反例与原生镜像mTLS回归各1项通过，源码／制品不变及自有容器／镜像清理确认。基线686b9b8精确CI 5 job／67 step全通过，本批CI另核。该片仅验证本次启动的runtime配置子集，沿用受控root UDS信任，不证明daemon PID／二进制、持续漂移、images／NRI状态或Kata能力；pull／unpack、原生引用／GC、硬限和GPU／云／CSI／性能仍待验收。见[本批交付](runtime-profile-startup-delivery-20261016.md)。
 
 ## 数据与身份合同
 

@@ -19,6 +19,8 @@ pub mod metrics;
 #[cfg(target_os = "linux")]
 pub mod metrics_server;
 pub mod protocol;
+#[cfg(target_os = "linux")]
+mod runtime_endpoint;
 #[cfg(any(target_os = "linux", test))]
 mod runtime_observation;
 #[cfg(any(target_os = "linux", test))]

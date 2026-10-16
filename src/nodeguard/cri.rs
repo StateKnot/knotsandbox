@@ -82,12 +82,24 @@ impl CriProxy {
         journal: GateJournal,
         observer: Arc<HostObserver>,
     ) -> anyhow::Result<Self> {
+        let tasks = TaskTracker::new();
+        let read_shutdown = CancellationToken::new();
+        let endpoint = super::runtime_endpoint::RuntimeEndpoint::default();
+        let connector_tasks = tasks.clone();
+        let connector_reads = read_shutdown.clone();
         let channel = Endpoint::from_static("http://[::]:50051")
             .connect_timeout(Duration::from_secs(5))
-            .connect_with_connector(tower::service_fn(|_| async {
-                tokio::net::UnixStream::connect("/run/containerd/containerd.sock")
-                    .await
-                    .map(hyper_util::rt::TokioIo::new)
+            .connect_with_connector(tower::service_fn(move |_| {
+                let endpoint = endpoint.clone();
+                let tasks = connector_tasks.clone();
+                let reads = connector_reads.clone();
+                async move {
+                    let result = endpoint.connect().await;
+                    if endpoint.is_rejected() {
+                        super::cri_work::begin_drain(&tasks, &reads);
+                    }
+                    result.map(hyper_util::rt::TokioIo::new)
+                }
             }))
             .await?;
         let upstream = RuntimeServiceClient::new(channel)
@@ -97,8 +109,8 @@ impl CriProxy {
             journal,
             observer,
             upstream,
-            tasks: TaskTracker::new(),
-            read_shutdown: CancellationToken::new(),
+            tasks,
+            read_shutdown,
         })
     }
     pub async fn verify_startup(&self) -> Result<(), GuardError> {

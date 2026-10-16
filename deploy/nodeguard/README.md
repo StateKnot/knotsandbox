@@ -63,7 +63,9 @@ runtime handler 的 legacy `snapshotter` 可缺省、为空或同为 `overlayfs`
 
 nodeguard 每次进程启动／首次 journal 初始化时，沿原固定 containerd UDS 依次执行版本核对及 `Status(verbose=true)` 的 runtime 配置读回；只有与档案的 Kata ConfigPath、固定根目录／endpoint、默认 runc／两个 handler、Kata shim 类型与受支持安全选项相符，且原 sandbox／进程覆盖恢复通过后，才开放登记。Status 单次仍限 5 秒，独立 protobuf 解码上限 256 KiB、各 info 值 64 KiB；重复已解释 JSON 字段、缺失／冲突配置或错误均拒绝，不输出原始配置／提供方错误。CNI 尚未就绪的 `NetworkReady=false` 不阻断配置核对，`RuntimeReady=true` 也不证明 Kata shim／VM 能力。
 
-这项读回遵循[固定版本 Status 实现](https://github.com/containerd/containerd/blob/v2.3.5/internal/cri/server/status.go)及[配置 JSON 结构](https://github.com/containerd/containerd/blob/v2.3.5/internal/cri/config/config.go)。它仅检查 runtime 配置子集；未解释的顶层设置不被认证，Status 不包含独立 images 配置／NRI 状态。信任仍为既有受控本地 root UDS，不是 daemon PID／二进制身份认证，也不持续检测后续 daemon 重连／漂移。此结果不能作为镜像准备、HIT／READY 或未来拉取许可；实际 pull 平台、namespace／snapshotter、原生引用／GC及硬限仍需独立验收。
+这项读回遵循[固定版本 Status 实现](https://github.com/containerd/containerd/blob/v2.3.5/internal/cri/server/status.go)及[配置 JSON 结构](https://github.com/containerd/containerd/blob/v2.3.5/internal/cri/config/config.go)。它仅检查 runtime 配置子集；未解释的顶层设置不被认证，Status 不包含独立 images 配置／NRI 状态，也不持续检查配置漂移。此结果不能作为镜像准备、HIT／READY 或未来拉取许可；实际 pull 平台、namespace／snapshotter、原生引用／GC及硬限仍需独立验收。
+
+CRI 与镜像观察现在复用固定 UDS 身份算法，但分别持有 binding。连接逐级核 root 所有、无 group／world-write 的目录，socket 正常 0660 可用；保留目录 FD／socket O_PATH 对象，经 procfd 连接后核 SO_PEERCRED uid=0、PID 与 start time。成功绑定后不接受换目录、socket 或观察到的 peer；冲突永久拒绝，后续健康 listener 不能自动恢复。CRI 随即沿原任务门停止新 CRI／CONTROL、取消纯读，已准入 mutation owner 继续原结算规则；不会清 SQLite coverage、生成终止证明或释放配额。每个 Bound binding 固定四个 pin FD，连接另有临时 FD，不能当作 daemon 硬预算。旧已连 FD 可能继续访问旧服务；不认证二进制、同 PID exec／FD 转交或持续配置不变。daemon 换代后须按既有隔离和证据流程处理，不删 journal 或绕过身份门。真实 Linux 重连及既有启动／镜像 mTLS 回归范围见[交付记录](../../research/runtime-peer-binding-delivery-20261016.md)。
 
 首次初始化记录永久 marker 和 FULL-sync SQLite。只允许尚未登记的新节点；已有 marker/config 的节点拒绝重装，防止销毁旧实例证据。部分安装失败后保持隔离，先检查已修改的文件和 journal；不要自动删除 marker 或重建数据库。bootstrap 工具也会记录 guarded-plan 所有权，阻止原 `install/upgrade` 将 kubelet 悄悄改回直连运行时。当前不能对承载租户实例的节点做无损滚动替换。
 
