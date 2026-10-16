@@ -16,6 +16,19 @@ definition and is included in this third-party attribution. The generation tool
 is project code; the upstream definition and its derived generated content
 retain their Apache-2.0 provenance.
 
+## containerd native metadata protocol
+
+`vendor/containerd/v2.3.5/` retains the official containerd images/content
+protocol definitions, their notices and [Apache License 2.0](vendor/containerd/v2.3.5/LICENSE).
+[Provenance and fixed digests](vendor/containerd/v2.3.5/README.md) identify the
+unchanged inputs. The derived `containerd.*.rs` messages in
+`src/nodeguard/generated/` retain that attribution. Generated `google.protobuf.rs`
+well-known types derive from the fixed Google protobuf definitions in
+`vendor/protobuf/protoc-bin-vendored-3.2.0/`; their original copyright,
+BSD three-clause conditions and disclaimer are retained in the definitions and
+[bundled license](vendor/protobuf/protoc-bin-vendored-3.2.0/LICENSE). Project MIT does not
+replace these third-party licenses.
+
 ## Keycloak schemas
 
 `deploy/identity/vendor/26.8.0/` contains upstream Keycloak resources used for

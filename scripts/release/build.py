@@ -16,10 +16,11 @@ import uuid
 from security_packages import validate_dockerfile, validate_lock
 from console_assets import image_files, inventory, stage_context, validate_selection, verify_previous
 from console_security import validate_lock as validate_console_lock, validate_dockerfile as validate_console_dockerfile
-from common import BINARIES, COMPONENTS, SCAN_NAMES, BOM_CDX, ROOT, SQLX_POSTGRES_NOTICES, dump, image_digest, load, now, require, run, safe_child, sha, subject, tool
+from common import BINARIES, COMPONENTS, SCAN_NAMES, BOM_CDX, ROOT, SQLX_POSTGRES_NOTICES, NATIVE_PROTOCOL_NOTICES, dump, image_digest, load, now, require, run, safe_child, sha, subject, tool
 from native import export_dockerfile, record as record_native, validate_runtime
 from elf import validate_file
 from sqlx_notices import create as create_sqlx_notices, validate as validate_sqlx_notices, MAX_BYTES as NOTICES_MAX_BYTES
+from native_protocol_notices import create as create_native_notices, validate as validate_native_notices, MAX_BYTES as NATIVE_NOTICES_MAX_BYTES
 
 
 def scanner_environment(**settings):
@@ -48,9 +49,10 @@ def build_native_export(buildctl_args, source, destination):
 
 def create_manifest(directory, repository, tag, commit, run_id, console_assets):
     validate_sqlx_notices(load(safe_child(directory, SQLX_POSTGRES_NOTICES), NOTICES_MAX_BYTES))
+    validate_native_notices(load(safe_child(directory, NATIVE_PROTOCOL_NOTICES), NATIVE_NOTICES_MAX_BYTES))
     images = {name: {'digest': image_digest(directory / name, name), 'archive': name + '.oci.tar'} for name in COMPONENTS}
     files = {p.name: {'sha256': sha(p), 'size': p.stat().st_size} for p in directory.iterdir() if p.is_file()}
-    manifest = {'version': 3, 'repository': repository, 'tag': tag, 'commit': commit, 'platform': 'linux/amd64',
+    manifest = {'version': 4, 'repository': repository, 'tag': tag, 'commit': commit, 'platform': 'linux/amd64',
         'workflow': '.github/workflows/release.yml', 'workflow_identity': subject(repository, tag, commit),
         'run_id': run_id, 'console_assets': console_assets, 'created_at': now().isoformat(), 'images': images, 'binaries': list(BINARIES), 'files': files}
     dump(directory / 'release-manifest.json', manifest)
@@ -151,6 +153,7 @@ def main():
     require(not args.output.exists(), 'FRESH_OUTPUT_REQUIRED')
     directory = args.output.resolve(); directory.mkdir(parents=True)
     dump(directory / SQLX_POSTGRES_NOTICES, create_sqlx_notices(source))
+    dump(directory / NATIVE_PROTOCOL_NOTICES, create_native_notices(source))
     validate_dockerfile(validate_lock(load(ROOT / 'debian-security.lock.json')), (source / 'Dockerfile').read_text())
     console_lock = load(source / 'deploy/console/versions.lock.json')
     console_dockerfile = (source / 'deploy/console/Dockerfile').read_text()

@@ -10,6 +10,14 @@ vendor/**
 !vendor/sqlx-postgres/
 vendor/sqlx-postgres/**
 !vendor/sqlx-postgres/**
+!vendor/containerd/
+vendor/containerd/**
+!vendor/containerd/v2.3.5/
+!vendor/containerd/v2.3.5/**
+!vendor/protobuf/
+vendor/protobuf/**
+!vendor/protobuf/protoc-bin-vendored-3.2.0/
+!vendor/protobuf/protoc-bin-vendored-3.2.0/**
 !src/
 src/**
 !src/**
@@ -43,6 +51,7 @@ scripts/release/**
 !scripts/release/native-security.lock.json
 !scripts/release/sqlite_build.py
 !scripts/release/common.py
+!scripts/release/native_protocol_notices.py
 # Public, committed certificate/SQL protocol fixtures needed only by the
 # isolated production SQLite acceptance stage; never copied to runtime images.
 !tests/

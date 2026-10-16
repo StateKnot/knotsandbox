@@ -1,4 +1,4 @@
-# 离线镜像元数据校验
+# 镜像元数据校验与原生读回
 
 `sandbox-admin image-artifact verify` 按调用方提供的预期摘要，校验本地 OCI 镜像元数据的身份、平台和必要描述符关系。它只读取元数据，不访问数据库、注册表或运行时，不读取层载荷，不拉取、解包或准备镜像。其他 Rust 模块使用同一公共入口 `sandbox_platform::image_artifact::verify_oci_metadata`，CLI 不维护第二套规则。[实现](../src/image_artifact.rs)、[CLI](../src/admin_image_artifact_cli.rs)
 
@@ -58,3 +58,22 @@ config 的 `rootfs.type` 须为 `layers`，`diff_ids` 与 manifest layers 等长
 | `PLATFORM_MISMATCH`／`AMBIGUOUS_PLATFORM`／`DESCRIPTOR_CONFLICT` | 目标不唯一、不匹配或已知声明冲突 |
 
 该能力不完成签名验证、漏洞扫描、运行硬件兼容认证或下载验证，也不提供新的 HTTP 制备 API。runtime handler／snapshotter／namespace、原生 lease 与引用归属、GC 和守护进程存储硬限仍是后续 P1 门禁。[本批交付证据](../research/image-artifact-delivery-20261016.md)
+
+## 检查本机原生已存元数据
+
+Linux root 主机管理员可以直接检查固定 containerd UDS 在 `k8s.io` 中的已存对象：
+
+```sh
+sudo sandbox-admin image-artifact inspect-native \
+  --reference registry.example.com/team/image@sha256:<root-digest> \
+  --expected-digest sha256:<independently-trusted-root-digest> \
+  --platform linux/amd64
+```
+
+reference 必须是无 tag 的精确 repository@digest，摘要须与独立 expected digest 相同；不推断 registry 名或补全 alias。非 Linux／非 root 拒绝为 `UNSUPPORTED_RUNTIME`。没有远程 socket、namespace、registry 凭据参数；这不是租户或 OAuth API，不改变现有 operator 查询权限。
+
+命令先核固定 containerd 2.3.5 版本，经原生 Images.Get／Content.Info／Read 取得 root、唯一选中 manifest 和 config，再核前后同名根描述符。它与离线命令使用相同 `MetadataPlan → ConfigurationPlan`，原严格 JSON／摘要／大小／平台及描述符冲突规则保持。每块1MiB、累计元数据3MiB，每条Read流最多64帧，小响应64KiB；连接和整个RPC链共用5秒deadline，结束／超时后等待本次I/O收尾。该期限不包括整条CLI的进程启动延迟。
+
+回执增加 `scope: "NATIVE_CONTAINERD_METADATA_ONLY"`、`namespace`、`reference`、`runtime_version`、`observed_at` 和嵌套 `metadata`；metadata 使用原 schema，三个授权／层载荷标志仍全为false。字节统计只计元数据正文，不含RPC开销，不代表物理存储或可释放量。不会输出config的Env／Labels；失败stdout为空，stderr只给 `Error: native image metadata inspection failed: <CODE>`，不能复用旧成功回执。
+
+原生错误包括 `INVALID_IMAGE_REFERENCE`、`RUNTIME_UNAVAILABLE`、`RUNTIME_IDENTITY_MISMATCH`、`RUNTIME_METADATA_UNAVAILABLE`、`RUNTIME_RESPONSE_INVALID`、`RUNTIME_IMAGE_CHANGED`、`RUNTIME_ROOT_MISMATCH`、`RUNTIME_DEADLINE_EXCEEDED`，以及上表已有OCI错误。两次Get不是跨对象原子快照，成功只证明这次读出的元数据符合期望；不读取层载荷、不pull／unpack／写lease，不签发READY、HIT或准备许可，也不证明CRI实际pull平台／snapshotter、快照存在或未来GC保护。[实现和验收边界](../research/native-image-metadata-delivery-20261016.md)

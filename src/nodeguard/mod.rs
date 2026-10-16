@@ -18,6 +18,7 @@ pub mod journal;
 pub mod metrics;
 #[cfg(target_os = "linux")]
 pub mod metrics_server;
+pub mod native_image_metadata;
 pub mod protocol;
 #[cfg(target_os = "linux")]
 mod runtime_endpoint;

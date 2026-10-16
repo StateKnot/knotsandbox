@@ -55,7 +55,7 @@ enum Command {
     NodeImageReader(OperatorGrantArgs),
     /// Read one enrolled node through current OAuth authorization at the API.
     NodeImageStatus(node_image_cli::NodeImageStatusArgs),
-    /// Inspect offline OCI metadata; never grant approval, pull or prepare.
+    /// Inspect offline or local native OCI metadata; never grant approval, pull or prepare.
     ImageArtifact(image_artifact_cli::ImageArtifactArgs),
     /// Enroll one quarantined node through reviewed inventory, live K8s and mTLS.
     EnrollNode(EnrollArgs),
@@ -304,7 +304,7 @@ async fn main() -> anyhow::Result<()> {
             Command::BindServiceIdentity(binding) => bind_service_identity(binding).await,
             Command::NodeImageReader(request) => node_image_reader(request).await,
             Command::NodeImageStatus(request) => node_image_cli::run(request).await,
-            Command::ImageArtifact(request) => image_artifact_cli::run(request),
+            Command::ImageArtifact(request) => image_artifact_cli::run(request).await,
             Command::EnrollNode(enrollment) => enroll(enrollment).await,
             Command::NodeFence(incident) => fence(incident).await,
             Command::GuardContract(contract) => guard_contract(contract).await,

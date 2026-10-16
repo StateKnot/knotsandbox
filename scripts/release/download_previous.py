@@ -3,10 +3,11 @@
 import argparse
 from pathlib import Path
 import subprocess
-from common import SQLX_POSTGRES_NOTICES, load, require, release_file_names, run, subject, tool
+from common import SQLX_POSTGRES_NOTICES, NATIVE_PROTOCOL_NOTICES, load, require, release_file_names, run, subject, tool
 from preflight import github
 from verify import cosign_arguments
 from sqlx_notices import MAX_BYTES as NOTICES_MAX_BYTES
+from native_protocol_notices import MAX_BYTES as NATIVE_NOTICES_MAX_BYTES
 
 
 def download(directory, tools, repository, tag, commit):
@@ -28,14 +29,16 @@ def download(directory, tools, repository, tag, commit):
     fetch(small)
     run(cosign_arguments(directory,tools,repository,tag,commit),timeout=60,stdout=subprocess.DEVNULL)
     manifest=load(directory/'release-manifest.json',1024*1024)
-    require(type(manifest.get('version')) is int and manifest['version'] in (1,2,3),'PREVIOUS_RELEASE_VERSION')
+    require(type(manifest.get('version')) is int and manifest['version'] in (1,2,3,4),'PREVIOUS_RELEASE_VERSION')
     files=release_file_names(legacy=manifest['version']==1, version=manifest['version'],
                              binary_names=manifest['binaries'], historical=True)
     require(set(manifest['files'])==files and files<=set(assets),'PREVIOUS_RELEASE_FILE_COVERAGE')
     require(all(0<assets[n]['size']<=8*1024**3 for n in files) and sum(assets[n]['size'] for n in files)<=16*1024**3,'PREVIOUS_RELEASE_ASSET_LIMIT')
     require(all(manifest['files'][n]['size']==assets[n]['size'] for n in manifest['files']),'PREVIOUS_RELEASE_FILE_SIZE')
-    if manifest['version'] == 3:
+    if manifest['version'] >= 3:
         require(assets[SQLX_POSTGRES_NOTICES]['size']<=NOTICES_MAX_BYTES, 'PREVIOUS_RELEASE_NOTICES_LIMIT')
+    if manifest['version'] == 4:
+        require(assets[NATIVE_PROTOCOL_NOTICES]['size']<=NATIVE_NOTICES_MAX_BYTES, 'PREVIOUS_RELEASE_NATIVE_NOTICES_LIMIT')
     fetch(files)
     # build.py cryptographically rechecks, verifies every hash/OCI/statement and
     # scanner evidence before it interprets any console asset or npm inventory.

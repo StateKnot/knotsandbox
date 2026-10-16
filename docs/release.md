@@ -2,7 +2,7 @@
 
 本仓库提供可执行发布流程，但目前没有本项目的线上签名身份、GHCR 发布或生产验收。`validate` 只产出**未签名候选制品**。本地构建成功、协议测试或官方工具签名验签成功，均不等于本产品发布通过。
 
-当前签名制品合同为 manifest v3，必须包含`sqlx-postgres-notices.json`。该公开资产保存原MIT/Apache许可证全文、0.8.6原包archive SHA及BEGIN取消修复的上游出处；从经固定校验的vendor源生成，同时受签名file inventory、内容hash和许可证语义校验。离线安装把它以0444保留在已验证发行目录，只有八个ELF可以执行。缺资产、改字节、重新hash后截短许可证均拒绝。v1/v2只允许前版历史读取，v3也能作为后续版本的前版；不能用旧协议绕过当前安装门禁。
+当前签名制品合同为 manifest v4，必须包含`sqlx-postgres-notices.json`及`native-protocol-notices.json`。前者保留原SQLx MIT/Apache许可证、原包SHA及BEGIN取消修复出处；后者包含固定containerd协议的Apache及Google protobuf WKT的BSD完整许可证、来源和六份输入摘要。两者都由固定校验的vendor源生成，受原签名file inventory、内容hash、64KiB读取上限与语义校验。离线安装以0444保存两份公开资产，只有八个ELF可以执行。缺资产、改字节或重新hash后截短许可证均拒绝。历史v3仍只要求原SQLx资产，只有前版认证路径可以读取，不改写旧格式含义；v1/v2/v3/v4历史读取都不能绕过当前安装门。四种Docker导出／镜像目标同时携带新增完整源许可证、来源和生成notice，主项目MIT不覆盖第三方许可。
 
 `python3 scripts/verify-sqlx-postgres-patch.py`在CI与正式镜像构建前验证原116文件、唯一事务补丁、Cargo路径覆盖和Docker上下文；既有三份Rust SBOM必须继续覆盖path版`sqlx-postgres 0.8.6`，不能因Cargo.lock没有registry source而把它排除。镜像和宿主导出目录保留两许可证及补丁说明；新增通知协议的本地回归不等于已经签发正式发行。
 
@@ -18,7 +18,7 @@ Linux AMD64 产物包括 `service`、`runner`、`identity-proxy`、`console` OCI
 
 ## ELF 与原生依赖清单
 
-当前发布清单、正常验证、预检和安装要求 version 3。只有已按固定当前 Cosign 信任根认证的内部 `verify_previous` 可以读取已知 version 1/2/3，用于控制台历史资产；它不生成安装锁，也不将旧扫描当作本次安全证明。该先验签历史路径仅接受固定旧七个或当前八个完整 ELF 名单，贯穿文件、原生库存与 OCI 校验；当前新候选始终要求完整八个，不按文件是否存在猜测版本。
+当前发布清单、正常验证、预检和安装要求 version 4。只有已按固定当前 Cosign 信任根认证的内部 `verify_previous` 可以读取已知 version 1/2/3/4，用于控制台历史资产；它不生成安装锁，也不将旧扫描当作本次安全证明。该先验签历史路径仅接受固定旧七个或当前八个完整 ELF 名单，贯穿文件、原生库存与 OCI 校验；当前新候选始终要求完整八个，不按文件是否存在猜测版本。
 
 当前八个 ELF 逐一解析实际 program headers、`PT_INTERP`、dynamic string table 和 `DT_NEEDED`，不执行候选来判断架构。当前 `gnu-dynamic-v1` 固定 AMD64 glibc loader `/lib64/ld-linux-x86-64.so.2`，必须依赖 `libc.so.6`，仅允许该 loader、libc、libm 和 libgcc_s；额外动态库、RPATH/RUNPATH、越界/截断 ELF 均失败。未来 `musl-static-v1` 的解析合同要求完全没有 interpreter 和 dynamic needed，允许静态 PIE；其生产原生收集/构建尚未实现，当前 native contract 会拒绝使用该 profile。
 

@@ -235,6 +235,11 @@ jobs:
           python3 -m unittest discover -s scripts/tests -p 'test_automation_diagnostics.py' -v
           python3 scripts/test-nodeguard-trust-linux.py --self-test
           python3 -m json.tool deploy/keycloak/realm.template.json > /dev/null
+      - name: Verify fixed CRI and native metadata protocol generation
+        run: |
+          df -h .
+          cargo fetch --locked --manifest-path tools/cri-codegen/Cargo.toml
+          CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target/cri-codegen-low-debug" sh scripts/check-cri-generated.sh
       - name: Unit and authentication tests
         run: |
           cargo test --locked --all-targets
@@ -269,6 +274,10 @@ jobs:
         run: |
           df -h .
           python3 scripts/test-image-artifact.py --artifacts .local/review-artifacts.jsonl --evidence-dir .local/image-artifact-ci
+      - name: Native stored OCI metadata through the actual isolated Linux admin CLI
+        run: |
+          df -h .
+          python3 scripts/test-nodeguard-native-metadata.py --artifacts .local/nodeguard-host-artifacts.jsonl --admin-artifacts .local/review-artifacts.jsonl --evidence-dir .local/native-metadata-ci
       - name: Retain non-secret identity and lifecycle regression evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -292,6 +301,8 @@ jobs:
             .local/node-image-query-ci/*.log
             .local/image-artifact-ci/record.json
             .local/image-artifact-ci/*.log
+            .local/native-metadata-ci/record.json
+            .local/native-metadata-ci/*.log
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14

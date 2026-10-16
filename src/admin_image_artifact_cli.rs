@@ -1,4 +1,4 @@
-//! Offline metadata inspection; this command neither checks approval nor prepares an image.
+//! Metadata inspection; this command neither checks approval nor prepares an image.
 use std::path::PathBuf;
 
 use clap::{Args, Subcommand};
@@ -14,6 +14,8 @@ pub struct ImageArtifactArgs {
 enum ImageArtifactCommand {
     /// Verify OCI metadata against an external expected digest and exact platform.
     Verify(VerifyArgs),
+    /// Read existing OCI metadata from this Linux host's fixed containerd endpoint.
+    InspectNative(NativeArgs),
 }
 
 #[derive(Args)]
@@ -29,15 +31,43 @@ struct VerifyArgs {
     platform: String,
 }
 
-pub fn run(args: ImageArtifactArgs) -> anyhow::Result<()> {
-    let ImageArtifactCommand::Verify(args) = args.command;
-    let metadata = verify_oci_metadata(&args.layout, &args.expected_digest, &args.platform)
-        .map_err(|error| {
-            anyhow::anyhow!(
-                "image artifact metadata verification failed: {}",
-                error.code()
+#[derive(Args)]
+struct NativeArgs {
+    /// Exact local repository@sha256 reference. Tags are not accepted.
+    #[arg(long)]
+    reference: String,
+    /// Independently trusted root digest; this command does not check approval.
+    #[arg(long)]
+    expected_digest: String,
+    /// Exact linux/amd64 or linux/arm64 platform, optionally followed by /variant.
+    #[arg(long)]
+    platform: String,
+}
+
+pub async fn run(args: ImageArtifactArgs) -> anyhow::Result<()> {
+    match args.command {
+        ImageArtifactCommand::Verify(args) => {
+            let metadata = verify_oci_metadata(&args.layout, &args.expected_digest, &args.platform)
+                .map_err(|error| {
+                    anyhow::anyhow!(
+                        "image artifact metadata verification failed: {}",
+                        error.code()
+                    )
+                })?;
+            println!("{}", serde_json::to_string(&metadata)?);
+        }
+        ImageArtifactCommand::InspectNative(args) => {
+            let metadata = sandbox_platform::nodeguard::native_image_metadata::inspect(
+                &args.reference,
+                &args.expected_digest,
+                &args.platform,
             )
-        })?;
-    println!("{}", serde_json::to_string(&metadata)?);
+            .await
+            .map_err(|error| {
+                anyhow::anyhow!("native image metadata inspection failed: {}", error.code())
+            })?;
+            println!("{}", serde_json::to_string(&metadata)?);
+        }
+    }
     Ok(())
 }

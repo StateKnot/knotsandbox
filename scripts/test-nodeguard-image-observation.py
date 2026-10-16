@@ -245,10 +245,11 @@ def fixture_dockerfile(base):
     return "FROM " + base + "\nCOPY rootfs/ /\n"
 
 
-def context_manifest(context):
+def context_manifest(context, extra_files=()):
     allowed = {"Dockerfile", "rootfs/usr/local/bin/containerd", "rootfs/usr/local/bin/ctr",
                "rootfs/etc/containerd/config.toml", "rootfs/fixture/host-profile.json",
                "rootfs/fixture/image.tar", "rootfs/fixture/lib-test"}
+    allowed.update(extra_files)
     allowed.update("rootfs/fixture/profile-files/" + name for name in ("qemu", "virtiofs", "shim", "kata_configuration", "kubelet_configuration", "kubelet_environment"))
     actual = {str(path.relative_to(context)) for path in context.rglob("*") if path.is_file()}
     require(actual == allowed, "EXACT_PUBLIC_IMAGE_BUILD_CONTEXT_REQUIRED")

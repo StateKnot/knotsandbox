@@ -1,0 +1,6 @@
+{
+  "include/google/protobuf/empty.proto": "ecef3d54cc9e079673b9816c67bac770f7f3bf6dada2d4596ba69d71daa971e6",
+  "include/google/protobuf/field_mask.proto": "17b0f342cc3a262e317d56884f3f575afbfac512ad0579349cc7450e41f26891",
+  "include/google/protobuf/timestamp.proto": "14052c6042c1dd2d0b50245f2812eaab6eaf82db0b6e8ce483eae527f73b6ee8",
+  "LICENSE": "87a95acbb870e296243a71b67631984702e6e55e9057deaf01018f0bad4ca4e0"
+}

@@ -1,4 +1,4 @@
-//! Bounded, offline verification of an expected OCI image's metadata closure.
+//! Bounded verification of an expected OCI image's metadata closure.
 //!
 //! The caller supplies the expected digest. This module neither establishes
 //! approval nor reads layer payloads, unpacks content, or prepares a runtime.
@@ -242,133 +242,320 @@ pub fn verify_oci_metadata(
     expected_digest: &str,
     platform: &str,
 ) -> Result<VerifiedImageMetadata, ImageArtifactError> {
-    validate_digest(expected_digest)?;
-    let platform = Platform::parse(platform)?;
+    validate_request(expected_digest, platform)?;
     let mut layout = Layout::open(layout)?;
     let layout_marker = layout.marker()?;
     if string(object(&layout_marker)?, "imageLayoutVersion")? != "1.0.0" {
         return Err(ImageArtifactError::UnsupportedLayout);
     }
+    let initial_metadata_bytes = layout.bytes_read;
     let root_bytes = layout.blob(expected_digest, None)?;
-    let root_value = parse_json(&root_bytes)?;
-    let root_object = object(&root_value)?;
-    validate_document(root_object)?;
-    let root = Descriptor::root(
-        string(root_object, "mediaType")?,
+    let plan = MetadataPlan::from_root(
+        &root_bytes,
         expected_digest,
-        root_bytes.len(),
-    );
-    let mut identities = DescriptorRegistry::default();
-    identities.register(&root)?;
-    let (index, manifest, manifest_value) = match root.identity.media_type.as_str() {
-        OCI_MANIFEST => (None, root.clone(), root_value),
-        OCI_INDEX => {
-            let selected = select_manifest(root_object, &platform, &mut identities)?;
-            let bytes = layout.blob(&selected.identity.digest, Some(selected.size))?;
-            let value = parse_json(&bytes)?;
-            if string(object(&value)?, "mediaType")? != OCI_MANIFEST {
-                return Err(ImageArtifactError::UnsupportedMediaType);
+        platform,
+        initial_metadata_bytes,
+    )?;
+    let manifest_bytes = plan
+        .manifest_request()
+        .map(|request| layout.blob(&request.digest, request.size))
+        .transpose()?;
+    let plan = plan.with_manifest(manifest_bytes.as_deref())?;
+    let request = plan.config_request();
+    let config_bytes = layout.blob(&request.digest, request.size)?;
+    plan.finish(&config_bytes)
+}
+
+/// Validate caller-controlled identifiers before any adapter accesses storage.
+pub(crate) fn validate_request(
+    expected_digest: &str,
+    platform: &str,
+) -> Result<(), ImageArtifactError> {
+    validate_digest(expected_digest)?;
+    Platform::parse(platform)?;
+    Ok(())
+}
+
+/// The next metadata blob required by an already authenticated descriptor.
+/// No layer payload is ever requested by a metadata plan.
+pub(crate) struct MetadataBlobRequest {
+    pub(crate) digest: String,
+    pub(crate) size: Option<u64>,
+}
+
+/// Storage-independent OCI verification shared by the offline and native
+/// adapters. Owning each stage keeps the aggregate budget and descriptor
+/// registry attached to the same authenticated root throughout selection.
+pub(crate) struct MetadataPlan {
+    platform: Platform,
+    root: Descriptor,
+    index: Option<DescriptorIdentity>,
+    manifest: Descriptor,
+    direct_manifest: Option<Value>,
+    budget: MetadataBudget,
+    identities: DescriptorRegistry,
+}
+
+impl MetadataPlan {
+    pub(crate) fn from_root(
+        root_bytes: &[u8],
+        expected_digest: &str,
+        platform: &str,
+        initial_metadata_bytes: u64,
+    ) -> Result<Self, ImageArtifactError> {
+        validate_digest(expected_digest)?;
+        let platform = Platform::parse(platform)?;
+        let mut budget = MetadataBudget {
+            bytes_read: initial_metadata_bytes,
+        };
+        budget.verify(root_bytes, expected_digest, None)?;
+        let root_value = parse_json(root_bytes)?;
+        let root_object = object(&root_value)?;
+        validate_document(root_object)?;
+        let root = Descriptor::root(
+            string(root_object, "mediaType")?,
+            expected_digest,
+            root_bytes.len(),
+        );
+        let mut identities = DescriptorRegistry::default();
+        identities.register(&root)?;
+        let (index, manifest, direct_manifest) = match root.identity.media_type.as_str() {
+            OCI_MANIFEST => (None, root.clone(), Some(root_value)),
+            OCI_INDEX => (
+                Some(root.identity.clone()),
+                select_manifest(root_object, &platform, &mut identities)?,
+                None,
+            ),
+            _ => return Err(ImageArtifactError::UnsupportedMediaType),
+        };
+        Ok(Self {
+            platform,
+            root,
+            index,
+            manifest,
+            direct_manifest,
+            budget,
+            identities,
+        })
+    }
+
+    pub(crate) fn manifest_request(&self) -> Option<MetadataBlobRequest> {
+        self.index.as_ref().map(|_| MetadataBlobRequest {
+            digest: self.manifest.identity.digest.clone(),
+            size: Some(self.manifest.size),
+        })
+    }
+
+    pub(crate) fn with_manifest(
+        mut self,
+        bytes: Option<&[u8]>,
+    ) -> Result<ConfigurationPlan, ImageArtifactError> {
+        let manifest_value = match (self.direct_manifest, bytes) {
+            (Some(value), None) => value,
+            (None, Some(bytes)) => {
+                self.budget.verify(
+                    bytes,
+                    &self.manifest.identity.digest,
+                    Some(self.manifest.size),
+                )?;
+                let value = parse_json(bytes)?;
+                if string(object(&value)?, "mediaType")? != OCI_MANIFEST {
+                    return Err(ImageArtifactError::UnsupportedMediaType);
+                }
+                value
             }
-            (Some(root.identity.clone()), selected, value)
-        }
-        _ => return Err(ImageArtifactError::UnsupportedMediaType),
-    };
-    let manifest_object = object(&manifest_value)?;
-    validate_document(manifest_object)?;
-    let config_value = manifest_object
-        .get("config")
-        .ok_or(ImageArtifactError::InvalidMetadata)?;
-    validate_target(object(config_value)?)?;
-    let config = Descriptor::read(config_value)?;
-    if config.identity.media_type != OCI_CONFIG {
-        return Err(ImageArtifactError::UnsupportedMediaType);
-    }
-    identities.register(&config)?;
-    let layers = manifest_object
-        .get("layers")
-        .and_then(Value::as_array)
-        .ok_or(ImageArtifactError::InvalidMetadata)?;
-    if layers.len() > MAX_LAYERS {
-        return Err(ImageArtifactError::MetadataLimitExceeded);
-    }
-    let config_bytes = layout.blob(&config.identity.digest, Some(config.size))?;
-    let config_json = parse_json(&config_bytes)?;
-    if Platform::read(&config_json)? != platform {
-        return Err(ImageArtifactError::PlatformMismatch);
-    }
-    validate_platform_constraints(object(&config_json)?)?;
-    let rootfs = object(&config_json)?
-        .get("rootfs")
-        .ok_or(ImageArtifactError::InvalidMetadata)?;
-    let rootfs = object(rootfs)?;
-    if string(rootfs, "type")? != "layers" {
-        return Err(ImageArtifactError::InvalidMetadata);
-    }
-    let diff_ids = rootfs
-        .get("diff_ids")
-        .and_then(Value::as_array)
-        .ok_or(ImageArtifactError::InvalidMetadata)?;
-    if layers.len() != diff_ids.len() {
-        return Err(ImageArtifactError::InvalidMetadata);
-    }
-    let mut verified_layers = Vec::with_capacity(layers.len());
-    let mut unique_layers = BTreeMap::new();
-    let mut declared_layer_bytes = 0_u64;
-    let mut unique_declared_layer_bytes = 0_u64;
-    for (layer, diff_id) in layers.iter().zip(diff_ids) {
-        validate_target(object(layer)?)?;
-        let layer = Descriptor::read(layer)?;
-        if !matches!(
-            layer.identity.media_type.as_str(),
-            "application/vnd.oci.image.layer.v1.tar"
-                | "application/vnd.oci.image.layer.v1.tar+gzip"
-                | "application/vnd.oci.image.layer.v1.tar+zstd"
-        ) {
+            // Adapters must fetch exactly the stage's requested closure.
+            _ => return Err(ImageArtifactError::InvalidMetadata),
+        };
+        let manifest_object = object(&manifest_value)?;
+        validate_document(manifest_object)?;
+        let config_value = manifest_object
+            .get("config")
+            .ok_or(ImageArtifactError::InvalidMetadata)?;
+        validate_target(object(config_value)?)?;
+        let config = Descriptor::read(config_value)?;
+        if config.identity.media_type != OCI_CONFIG {
             return Err(ImageArtifactError::UnsupportedMediaType);
         }
-        identities.register(&layer)?;
-        let diff_id = diff_id
-            .as_str()
+        self.identities.register(&config)?;
+        let layers = manifest_object
+            .get("layers")
+            .and_then(Value::as_array)
             .ok_or(ImageArtifactError::InvalidMetadata)?;
-        validate_digest(diff_id)?;
-        // An uncompressed tar's manifest digest and DiffID describe the same
-        // byte stream; compressed layer declarations cannot use this check.
-        if layer.identity.media_type == "application/vnd.oci.image.layer.v1.tar"
-            && layer.identity.digest != diff_id
-        {
+        if layers.len() > MAX_LAYERS {
+            return Err(ImageArtifactError::MetadataLimitExceeded);
+        }
+        Ok(ConfigurationPlan {
+            platform: self.platform,
+            root: self.root,
+            index: self.index,
+            manifest: self.manifest,
+            config,
+            manifest_value,
+            budget: self.budget,
+            identities: self.identities,
+        })
+    }
+}
+
+pub(crate) struct ConfigurationPlan {
+    platform: Platform,
+    root: Descriptor,
+    index: Option<DescriptorIdentity>,
+    manifest: Descriptor,
+    config: Descriptor,
+    manifest_value: Value,
+    budget: MetadataBudget,
+    identities: DescriptorRegistry,
+}
+
+impl ConfigurationPlan {
+    pub(crate) fn config_request(&self) -> MetadataBlobRequest {
+        MetadataBlobRequest {
+            digest: self.config.identity.digest.clone(),
+            size: Some(self.config.size),
+        }
+    }
+
+    pub(crate) fn finish(
+        self,
+        config_bytes: &[u8],
+    ) -> Result<VerifiedImageMetadata, ImageArtifactError> {
+        let Self {
+            platform,
+            root,
+            index,
+            manifest,
+            config,
+            manifest_value,
+            mut budget,
+            mut identities,
+        } = self;
+        budget.verify(config_bytes, &config.identity.digest, Some(config.size))?;
+        let manifest_object = object(&manifest_value)?;
+        let layers = manifest_object
+            .get("layers")
+            .and_then(Value::as_array)
+            .ok_or(ImageArtifactError::InvalidMetadata)?;
+        let config_json = parse_json(config_bytes)?;
+        if Platform::read(&config_json)? != platform {
+            return Err(ImageArtifactError::PlatformMismatch);
+        }
+        validate_platform_constraints(object(&config_json)?)?;
+        let rootfs = object(&config_json)?
+            .get("rootfs")
+            .ok_or(ImageArtifactError::InvalidMetadata)?;
+        let rootfs = object(rootfs)?;
+        if string(rootfs, "type")? != "layers" {
             return Err(ImageArtifactError::InvalidMetadata);
         }
-        declared_layer_bytes = declared_layer_bytes
-            .checked_add(layer.size)
-            .ok_or(ImageArtifactError::IntegerOverflow)?;
-        if unique_layers
-            .insert(layer.identity.digest.clone(), layer.size)
-            .is_none()
-        {
-            unique_declared_layer_bytes = unique_declared_layer_bytes
+        let diff_ids = rootfs
+            .get("diff_ids")
+            .and_then(Value::as_array)
+            .ok_or(ImageArtifactError::InvalidMetadata)?;
+        if layers.len() != diff_ids.len() {
+            return Err(ImageArtifactError::InvalidMetadata);
+        }
+        let mut verified_layers = Vec::with_capacity(layers.len());
+        let mut unique_layers = BTreeMap::new();
+        let mut declared_layer_bytes = 0_u64;
+        let mut unique_declared_layer_bytes = 0_u64;
+        for (layer, diff_id) in layers.iter().zip(diff_ids) {
+            validate_target(object(layer)?)?;
+            let layer = Descriptor::read(layer)?;
+            if !matches!(
+                layer.identity.media_type.as_str(),
+                "application/vnd.oci.image.layer.v1.tar"
+                    | "application/vnd.oci.image.layer.v1.tar+gzip"
+                    | "application/vnd.oci.image.layer.v1.tar+zstd"
+            ) {
+                return Err(ImageArtifactError::UnsupportedMediaType);
+            }
+            identities.register(&layer)?;
+            let diff_id = diff_id
+                .as_str()
+                .ok_or(ImageArtifactError::InvalidMetadata)?;
+            validate_digest(diff_id)?;
+            // An uncompressed tar's manifest digest and DiffID describe the same
+            // byte stream; compressed layer declarations cannot use this check.
+            if layer.identity.media_type == "application/vnd.oci.image.layer.v1.tar"
+                && layer.identity.digest != diff_id
+            {
+                return Err(ImageArtifactError::InvalidMetadata);
+            }
+            declared_layer_bytes = declared_layer_bytes
                 .checked_add(layer.size)
                 .ok_or(ImageArtifactError::IntegerOverflow)?;
+            if unique_layers
+                .insert(layer.identity.digest.clone(), layer.size)
+                .is_none()
+            {
+                unique_declared_layer_bytes = unique_declared_layer_bytes
+                    .checked_add(layer.size)
+                    .ok_or(ImageArtifactError::IntegerOverflow)?;
+            }
+            verified_layers.push(LayerIdentity {
+                descriptor: layer.identity,
+                diff_id: diff_id.to_owned(),
+            });
         }
-        verified_layers.push(LayerIdentity {
-            descriptor: layer.identity,
-            diff_id: diff_id.to_owned(),
-        });
+        Ok(VerifiedImageMetadata {
+            scope: "OCI_METADATA_ONLY",
+            approval_checked: false,
+            layer_payloads_verified: false,
+            preparation_allowed: false,
+            platform,
+            root: root.identity,
+            index,
+            selected_manifest: manifest.identity,
+            config: config.identity,
+            layers: verified_layers,
+            declared_layer_bytes: declared_layer_bytes.to_string(),
+            unique_declared_layer_bytes: unique_declared_layer_bytes.to_string(),
+            metadata_bytes_read: budget.bytes_read.to_string(),
+        })
     }
-    Ok(VerifiedImageMetadata {
-        scope: "OCI_METADATA_ONLY",
-        approval_checked: false,
-        layer_payloads_verified: false,
-        preparation_allowed: false,
-        platform,
-        root: root.identity,
-        index,
-        selected_manifest: manifest.identity,
-        config: config.identity,
-        layers: verified_layers,
-        declared_layer_bytes: declared_layer_bytes.to_string(),
-        unique_declared_layer_bytes: unique_declared_layer_bytes.to_string(),
-        metadata_bytes_read: layout.bytes_read.to_string(),
-    })
+}
+
+impl VerifiedImageMetadata {
+    /// Bind a native Images.Get target to the closure's authenticated root.
+    /// This comparison grants neither preparation authority nor approval.
+    #[cfg(any(target_os = "linux", test))]
+    pub(crate) fn root_matches(&self, media: &str, digest: &str, size: i64) -> bool {
+        size >= 0
+            && self.root.media_type == media
+            && self.root.digest == digest
+            && self.root.size_bytes == size.to_string()
+    }
+}
+
+struct MetadataBudget {
+    bytes_read: u64,
+}
+
+impl MetadataBudget {
+    fn verify(
+        &mut self,
+        bytes: &[u8],
+        digest: &str,
+        expected_size: Option<u64>,
+    ) -> Result<(), ImageArtifactError> {
+        if bytes.len() > MAX_BLOB_BYTES {
+            return Err(ImageArtifactError::MetadataLimitExceeded);
+        }
+        if expected_size.is_some_and(|size| size != bytes.len() as u64) {
+            return Err(ImageArtifactError::SizeMismatch);
+        }
+        self.bytes_read = self
+            .bytes_read
+            .checked_add(bytes.len() as u64)
+            .filter(|size| *size <= MAX_METADATA_BYTES)
+            .ok_or(ImageArtifactError::MetadataLimitExceeded)?;
+        if format!("sha256:{:x}", Sha256::digest(bytes)) != digest {
+            return Err(ImageArtifactError::DigestMismatch);
+        }
+        Ok(())
+    }
 }
 
 fn select_manifest(
@@ -642,12 +829,7 @@ impl Layout {
         let name = digest
             .strip_prefix("sha256:")
             .ok_or(ImageArtifactError::InvalidDigest)?;
-        let bytes = read_metadata(&self.blobs, name, MAX_BLOB_BYTES, size)?;
-        self.account(bytes.len())?;
-        if hex::encode(Sha256::digest(&bytes)) != name {
-            return Err(ImageArtifactError::DigestMismatch);
-        }
-        Ok(bytes)
+        read_metadata(&self.blobs, name, MAX_BLOB_BYTES, size)
     }
 
     fn account(&mut self, size: usize) -> Result<(), ImageArtifactError> {
@@ -736,5 +918,163 @@ impl Layout {
 
     fn blob(&mut self, _: &str, _: Option<u64>) -> Result<Vec<u8>, ImageArtifactError> {
         Err(ImageArtifactError::UnsupportedLayout)
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    const ROOT: &str = "sha256:bbcc60ed9423dd84b19a56d09759aec31ee3db1b729455f9414646808b624379";
+    const MANIFEST: &str =
+        "sha256:0a14e0296c0ab0d00e9b8c9053f9cab062c5848a9e763ecd3bb5288dcb8fbb57";
+    const CONFIG: &str = "sha256:7bfed7d6080f5d9aa427991b771a274ee4845f93232f914a49afbe3f895a141c";
+    const ROOT_BYTES: &[u8] = include_bytes!(
+        "../tests/fixtures/image-artifact/blobs/sha256/bbcc60ed9423dd84b19a56d09759aec31ee3db1b729455f9414646808b624379"
+    );
+    const MANIFEST_BYTES: &[u8] = include_bytes!(
+        "../tests/fixtures/image-artifact/blobs/sha256/0a14e0296c0ab0d00e9b8c9053f9cab062c5848a9e763ecd3bb5288dcb8fbb57"
+    );
+    const CONFIG_BYTES: &[u8] = include_bytes!(
+        "../tests/fixtures/image-artifact/blobs/sha256/7bfed7d6080f5d9aa427991b771a274ee4845f93232f914a49afbe3f895a141c"
+    );
+    const MARKER_BYTES: &[u8] = include_bytes!("../tests/fixtures/image-artifact/oci-layout");
+
+    fn from_index(initial_metadata_bytes: u64) -> Result<MetadataPlan, ImageArtifactError> {
+        MetadataPlan::from_root(ROOT_BYTES, ROOT, "linux/amd64", initial_metadata_bytes)
+    }
+
+    #[test]
+    fn storage_adapters_share_selection_receipts_and_root_identity() -> anyhow::Result<()> {
+        let layout = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/image-artifact");
+        let offline = verify_oci_metadata(&layout, ROOT, "linux/amd64")?;
+        let plan = from_index(MARKER_BYTES.len() as u64)?;
+        let request = plan
+            .manifest_request()
+            .ok_or_else(|| anyhow::anyhow!("index must select one manifest"))?;
+        assert_eq!(request.digest, MANIFEST);
+        assert_eq!(request.size, Some(554));
+        let plan = plan.with_manifest(Some(MANIFEST_BYTES))?;
+        let request = plan.config_request();
+        assert_eq!(request.digest, CONFIG);
+        assert_eq!(request.size, Some(362));
+        let shared = plan.finish(CONFIG_BYTES)?;
+        assert_eq!(
+            serde_json::to_value(&shared)?,
+            serde_json::to_value(offline)?
+        );
+        assert!(shared.root_matches(OCI_INDEX, ROOT, 507));
+        for (media, digest, size) in [
+            (OCI_MANIFEST, ROOT, 507),
+            (OCI_INDEX, MANIFEST, 507),
+            (OCI_INDEX, ROOT, -1),
+            (OCI_INDEX, ROOT, 506),
+            (OCI_INDEX, ROOT, 508),
+        ] {
+            assert!(!shared.root_matches(media, digest, size));
+        }
+
+        let native = from_index(0)?
+            .with_manifest(Some(MANIFEST_BYTES))?
+            .finish(CONFIG_BYTES)?;
+        assert_eq!(native.metadata_bytes_read, "1423");
+        assert!(!native.approval_checked);
+        assert!(!native.layer_payloads_verified);
+        assert!(!native.preparation_allowed);
+        Ok(())
+    }
+
+    #[test]
+    fn direct_manifest_requests_only_configuration_and_never_a_layer() -> anyhow::Result<()> {
+        let plan = MetadataPlan::from_root(MANIFEST_BYTES, MANIFEST, "linux/amd64", 0)?;
+        assert!(plan.manifest_request().is_none());
+        let plan = plan.with_manifest(None)?;
+        assert_eq!(plan.config_request().digest, CONFIG);
+        let receipt = plan.finish(CONFIG_BYTES)?;
+        assert!(receipt.root_matches(OCI_MANIFEST, MANIFEST, 554));
+        assert!(receipt.index.is_none());
+        assert_eq!(receipt.metadata_bytes_read, "916");
+        assert_eq!(receipt.layers.len(), 2);
+        assert_eq!(receipt.unique_declared_layer_bytes, "31");
+        Ok(())
+    }
+
+    #[test]
+    fn every_stage_authenticates_its_requested_bytes_before_parsing() -> anyhow::Result<()> {
+        let mut root = ROOT_BYTES.to_vec();
+        root[0] = b' ';
+        assert!(matches!(
+            MetadataPlan::from_root(&root, ROOT, "linux/amd64", 0),
+            Err(ImageArtifactError::DigestMismatch)
+        ));
+        let mut manifest = MANIFEST_BYTES.to_vec();
+        manifest[0] = b' ';
+        assert!(matches!(
+            from_index(0)?.with_manifest(Some(&manifest)),
+            Err(ImageArtifactError::DigestMismatch)
+        ));
+        assert!(matches!(
+            from_index(0)?.with_manifest(Some(&MANIFEST_BYTES[..553])),
+            Err(ImageArtifactError::SizeMismatch)
+        ));
+        let mut config = CONFIG_BYTES.to_vec();
+        config[0] = b' ';
+        assert!(matches!(
+            from_index(0)?
+                .with_manifest(Some(MANIFEST_BYTES))?
+                .finish(&config),
+            Err(ImageArtifactError::DigestMismatch)
+        ));
+        assert!(matches!(
+            from_index(0)?
+                .with_manifest(Some(MANIFEST_BYTES))?
+                .finish(&CONFIG_BYTES[..361]),
+            Err(ImageArtifactError::SizeMismatch)
+        ));
+        assert!(matches!(
+            from_index(0)?.with_manifest(None),
+            Err(ImageArtifactError::InvalidMetadata)
+        ));
+        assert!(matches!(
+            MetadataPlan::from_root(MANIFEST_BYTES, MANIFEST, "linux/amd64", 0)?
+                .with_manifest(Some(MANIFEST_BYTES)),
+            Err(ImageArtifactError::InvalidMetadata)
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn closure_budget_is_carried_across_all_stages_including_adapter_bytes() -> anyhow::Result<()> {
+        let closure_bytes = (ROOT_BYTES.len() + MANIFEST_BYTES.len() + CONFIG_BYTES.len()) as u64;
+        let initial = MAX_METADATA_BYTES - closure_bytes;
+        let receipt = from_index(initial)?
+            .with_manifest(Some(MANIFEST_BYTES))?
+            .finish(CONFIG_BYTES)?;
+        assert_eq!(receipt.metadata_bytes_read, MAX_METADATA_BYTES.to_string());
+        assert!(matches!(
+            from_index(initial + 1)?
+                .with_manifest(Some(MANIFEST_BYTES))?
+                .finish(CONFIG_BYTES),
+            Err(ImageArtifactError::MetadataLimitExceeded)
+        ));
+        assert!(matches!(
+            from_index(u64::MAX),
+            Err(ImageArtifactError::MetadataLimitExceeded)
+        ));
+        assert!(matches!(
+            MetadataPlan::from_root(&vec![b' '; MAX_BLOB_BYTES + 1], ROOT, "linux/amd64", 0),
+            Err(ImageArtifactError::MetadataLimitExceeded)
+        ));
+        assert!(matches!(
+            from_index(0)?.with_manifest(Some(&vec![b' '; MAX_BLOB_BYTES + 1])),
+            Err(ImageArtifactError::MetadataLimitExceeded)
+        ));
+        assert!(matches!(
+            from_index(0)?
+                .with_manifest(Some(MANIFEST_BYTES))?
+                .finish(&vec![b' '; MAX_BLOB_BYTES + 1]),
+            Err(ImageArtifactError::MetadataLimitExceeded)
+        ));
+        Ok(())
     }
 }
