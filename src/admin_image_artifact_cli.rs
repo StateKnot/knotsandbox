@@ -16,6 +16,8 @@ enum ImageArtifactCommand {
     Verify(VerifyArgs),
     /// Read existing OCI metadata from this Linux host's fixed containerd endpoint.
     InspectNative(NativeArgs),
+    /// Match the current CRI image index ID to verified local OCI configuration.
+    InspectCri(NativeArgs),
 }
 
 #[derive(Args)]
@@ -65,6 +67,18 @@ pub async fn run(args: ImageArtifactArgs) -> anyhow::Result<()> {
             .await
             .map_err(|error| {
                 anyhow::anyhow!("native image metadata inspection failed: {}", error.code())
+            })?;
+            println!("{}", serde_json::to_string(&metadata)?);
+        }
+        ImageArtifactCommand::InspectCri(args) => {
+            let metadata = sandbox_platform::nodeguard::native_image_metadata::inspect_cri(
+                &args.reference,
+                &args.expected_digest,
+                &args.platform,
+            )
+            .await
+            .map_err(|error| {
+                anyhow::anyhow!("CRI image identity inspection failed: {}", error.code())
             })?;
             println!("{}", serde_json::to_string(&metadata)?);
         }

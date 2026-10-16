@@ -86,17 +86,26 @@ async fn bounded_output(pipe: impl AsyncRead + Unpin) -> anyhow::Result<Vec<u8>>
     Ok(bytes)
 }
 
-struct CliOutput {
-    success: bool,
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
+pub(super) struct CliOutput {
+    pub(super) success: bool,
+    pub(super) stdout: Vec<u8>,
+    pub(super) stderr: Vec<u8>,
 }
 
 async fn invoke(reference: &str, digest: &str, platform: &str) -> anyhow::Result<CliOutput> {
+    invoke_command("inspect-native", reference, digest, platform).await
+}
+
+pub(super) async fn invoke_command(
+    command: &str,
+    reference: &str,
+    digest: &str,
+    platform: &str,
+) -> anyhow::Result<CliOutput> {
     let mut child = Command::new(ADMIN)
         .args([
             "image-artifact",
-            "inspect-native",
+            command,
             "--reference",
             reference,
             "--expected-digest",

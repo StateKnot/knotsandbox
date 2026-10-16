@@ -77,3 +77,24 @@ reference 必须是无 tag 的精确 repository@digest，摘要须与独立 expe
 回执增加 `scope: "NATIVE_CONTAINERD_METADATA_ONLY"`、`namespace`、`reference`、`runtime_version`、`observed_at` 和嵌套 `metadata`；metadata 使用原 schema，三个授权／层载荷标志仍全为false。字节统计只计元数据正文，不含RPC开销，不代表物理存储或可释放量。不会输出config的Env／Labels；失败stdout为空，stderr只给 `Error: native image metadata inspection failed: <CODE>`，不能复用旧成功回执。
 
 原生错误包括 `INVALID_IMAGE_REFERENCE`、`RUNTIME_UNAVAILABLE`、`RUNTIME_IDENTITY_MISMATCH`、`RUNTIME_METADATA_UNAVAILABLE`、`RUNTIME_RESPONSE_INVALID`、`RUNTIME_IMAGE_CHANGED`、`RUNTIME_ROOT_MISMATCH`、`RUNTIME_DEADLINE_EXCEEDED`，以及上表已有OCI错误。两次Get不是跨对象原子快照，成功只证明这次读出的元数据符合期望；不读取层载荷、不pull／unpack／写lease，不签发READY、HIT或准备许可，也不证明CRI实际pull平台／snapshotter、快照存在或未来GC保护。[实现和验收边界](../research/native-image-metadata-delivery-20261016.md)
+
+## 核对 CRI 当前索引的配置身份
+
+当原生元数据存在，但需要判断 kubelet 使用的 CRI 索引是否也能以同一精确引用解析到预期平台的配置时，Linux root 管理员使用：
+
+```sh
+sudo sandbox-admin image-artifact inspect-cri \
+  --reference registry.example.com/team/image@sha256:<root-digest> \
+  --expected-digest sha256:<independently-trusted-root-digest> \
+  --platform linux/amd64
+```
+
+Rust 消费者使用同一公共入口 `nodeguard::native_image_metadata::inspect_cri`。它保留上述固定 endpoint、namespace、独立 expected digest、精确平台、元数据预算及整个 I/O 链共用5秒期限，并在同一连接身份下核对前后 `ImageStatus(verbose=false)` 与原生元数据。CRI 的非空 ID 必须等于已验证 OCI config 的 digest，返回的 repository digests 必须含精确输入引用；缺失、错平台配置或前后身份变化均不返回成功回执。不会按另一个 alias 或 tag 作为调用身份。
+
+回执为 `scope: "CRI_INDEX_CONFIG_IDENTITY_ONLY"`，`cri_image_id` 为已核对的 config digest，`native` 保留原生命令完整回执。`approval_checked`、`pull_selection_checked`、`runtime_handler_checked`、`snapshotter_checked`、`unpack_checked`、`gc_protection_checked`、`preparation_allowed` 全为false。不回传 CRI 的 tags、用户名、配置正文或不透明 Info；不接受 runtime handler 或 snapshotter 参数。
+
+固定 containerd 2.3.5 的 `ImageStatus` 只使用 `ImageSpec.image` 解析内存索引，不使用 runtime handler；索引的配置 ID 按宿主默认平台生成。多平台根摘要相同，不能证明指定平台就是当前 CRI ID 对应的平台。本命令用已验证 config digest 检出这种差异，但不能把索引匹配解释为某次 pull 已采用请求平台或 Kata snapshotter。[实际 ImageStatus](https://github.com/containerd/containerd/blob/v2.3.5/internal/cri/server/images/image_status.go)、[索引配置身份](https://github.com/containerd/containerd/blob/v2.3.5/internal/cri/store/image/image.go)、[宿主平台初始化](https://github.com/containerd/containerd/blob/v2.3.5/internal/cri/server/images/service.go)
+
+新增稳定错误 `CRI_IMAGE_UNAVAILABLE` 表示该精确引用没有可用 CRI 索引项，`CRI_IMAGE_MISMATCH` 表示配置摘要或精确 repository digest 不符，`CRI_IMAGE_CHANGED` 表示本次前后索引身份变化；协议形状、超限、版本及期限继续使用已有错误。失败 stdout 为空，stderr 只给 `Error: CRI image identity inspection failed: <CODE>`。两次索引检查与原生检查不构成跨服务原子快照，也不持有原生保护引用。
+
+成功可以发生在未解包的 metadata-only fixture 上；它没有检查实际 snapshot、layer 载荷、GC 存活、审批或资源硬限，不产生准备、启动或缓存命中许可。实际 pull 选择、原生引用／GC 与准备开销硬限仍须分别完成。

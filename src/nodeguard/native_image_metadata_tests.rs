@@ -40,6 +40,20 @@ enum Fault {
     StreamError,
     OversizedFrame,
     Deadline,
+    CriMissing,
+    CriWrongConfig,
+    CriOtherPlatform,
+    CriMissingReference,
+    CriChanged,
+    CriReferenceChanged,
+    CriMalformedId,
+    CriTooManyAliases,
+    CriAliasBytes,
+    CriOversizedReply,
+    CriUnexpectedInfo,
+    CriProviderSecret,
+    CriRemoteCancelled,
+    CriDeadline,
 }
 
 struct Fixture {
@@ -47,6 +61,7 @@ struct Fixture {
     root: Descriptor,
     selected: String,
     config: String,
+    other_config: Option<String>,
     blobs: BTreeMap<String, Vec<u8>>,
 }
 impl Fixture {
@@ -91,8 +106,37 @@ impl Fixture {
             root,
             selected: manifest_descriptor.digest,
             config: config_descriptor.digest,
+            other_config: None,
             blobs,
         }
+    }
+
+    fn with_other_platform(mut self) -> anyhow::Result<Self> {
+        let layer = format!("sha256:{}", "a".repeat(64));
+        let config = json!({"os":"linux","architecture":"arm64","rootfs":{"type":"layers","diff_ids":[layer]}}).to_string().into_bytes();
+        let config_digest = format!("sha256:{}", hex::encode(Sha256::digest(&config)));
+        let manifest = json!({"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json",
+            "config":{"mediaType":"application/vnd.oci.image.config.v1+json","digest":config_digest,"size":config.len()},
+            "layers":[{"mediaType":"application/vnd.oci.image.layer.v1.tar","digest":layer,"size":17}]}).to_string().into_bytes();
+        let manifest_digest = format!("sha256:{}", hex::encode(Sha256::digest(&manifest)));
+        let root = self
+            .blobs
+            .remove(&self.root.digest)
+            .context("index fixture required")?;
+        let mut index: serde_json::Value = serde_json::from_slice(&root)?;
+        index["manifests"].as_array_mut().context("index entries")?.push(json!({
+            "mediaType":"application/vnd.oci.image.manifest.v1+json","digest":manifest_digest,"size":manifest.len(),
+            "platform":{"os":"linux","architecture":"arm64"}
+        }));
+        let root = serde_json::to_vec(&index)?;
+        self.root.digest = format!("sha256:{}", hex::encode(Sha256::digest(&root)));
+        self.root.size = root.len() as i64;
+        self.reference = format!("registry.example.test/sandbox/native@{}", self.root.digest);
+        self.blobs.insert(config_digest.clone(), config);
+        self.blobs.insert(manifest_digest, manifest);
+        self.blobs.insert(self.root.digest.clone(), root);
+        self.other_config = Some(config_digest);
+        Ok(self)
     }
 }
 
@@ -102,6 +146,7 @@ struct State {
     calls: Mutex<Vec<&'static str>>,
     bad_namespace: AtomicBool,
     gets: AtomicUsize,
+    cri_gets: AtomicUsize,
     active_streams: Arc<AtomicUsize>,
 }
 impl State {
@@ -138,6 +183,8 @@ struct Versions(Arc<State>);
 struct Images(Arc<State>);
 #[derive(Clone)]
 struct Content(Arc<State>);
+#[derive(Clone)]
+struct CriImages(Arc<State>);
 type Reply<T> = Pin<Box<dyn Future<Output = Result<Response<T>, Status>> + Send>>;
 type HttpReply = Pin<Box<dyn Future<Output = Result<http::Response<Body>, Infallible>> + Send>>;
 impl tonic::server::NamedService for Versions {
@@ -148,6 +195,83 @@ impl tonic::server::NamedService for Images {
 }
 impl tonic::server::NamedService for Content {
     const NAME: &'static str = "containerd.services.content.v1.Content";
+}
+impl tonic::server::NamedService for CriImages {
+    const NAME: &'static str = "runtime.v1.ImageService";
+}
+impl tonic::server::UnaryService<ImageStatusRequest> for CriImages {
+    type Response = ImageStatusResponse;
+    type Future = Reply<ImageStatusResponse>;
+    fn call(&mut self, request: Request<ImageStatusRequest>) -> Self::Future {
+        let state = self.0.clone();
+        Box::pin(async move {
+            state.request(&request, "CRI_STATUS")?;
+            let wanted = request.into_inner();
+            let expected = ImageStatusRequest {
+                image: Some(ImageSpec {
+                    image: state.fixture.reference.clone(),
+                    ..Default::default()
+                }),
+                verbose: false,
+            };
+            if wanted != expected {
+                return Err(Status::invalid_argument(PRIVATE));
+            }
+            let call = state.cri_gets.fetch_add(1, Ordering::SeqCst);
+            if state.fault == Fault::CriProviderSecret {
+                return Err(Status::internal(PRIVATE));
+            }
+            if state.fault == Fault::CriRemoteCancelled {
+                // Matching Tonic's display text cannot manufacture its local
+                // typed TimeoutExpired source across the real HTTP/2 wire.
+                return Err(Status::cancelled("Timeout expired"));
+            }
+            if state.fault == Fault::CriDeadline {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
+            if state.fault == Fault::CriMissing {
+                return Ok(Response::new(ImageStatusResponse::default()));
+            }
+            let mut image = crate::nodeguard::cri_proto::Image {
+                id: state.fixture.config.clone(),
+                repo_digests: vec![state.fixture.reference.clone()],
+                repo_tags: vec!["registry.example.test/sandbox/native:private-alias".into()],
+                size: 17,
+                username: PRIVATE.into(),
+                pinned: true,
+                ..Default::default()
+            };
+            match state.fault {
+                Fault::CriWrongConfig => image.id = format!("sha256:{}", "b".repeat(64)),
+                Fault::CriOtherPlatform => {
+                    image.id = state
+                        .fixture
+                        .other_config
+                        .clone()
+                        .context("other platform fixture")
+                        .map_err(|_| Status::internal(PRIVATE))?
+                }
+                Fault::CriMissingReference => image.repo_digests.clear(),
+                Fault::CriChanged if call > 0 => image.id = format!("sha256:{}", "b".repeat(64)),
+                Fault::CriReferenceChanged if call > 0 => image.repo_digests.clear(),
+                Fault::CriMalformedId => image.id = PRIVATE.into(),
+                Fault::CriTooManyAliases => {
+                    image.repo_tags = vec!["fixture.invalid/image:alias".into(); MAX_CRI_ALIASES]
+                }
+                Fault::CriAliasBytes => image.repo_tags = vec!["x".repeat(2048); 25],
+                Fault::CriOversizedReply => image.username = "x".repeat(SMALL_REPLY + 1),
+                _ => {}
+            }
+            Ok(Response::new(ImageStatusResponse {
+                image: Some(image),
+                info: if state.fault == Fault::CriUnexpectedInfo {
+                    HashMap::from([("info".into(), PRIVATE.into())])
+                } else {
+                    HashMap::new()
+                },
+            }))
+        })
+    }
 }
 impl tonic::server::UnaryService<VersionRequest> for Versions {
     type Response = VersionResponse;
@@ -371,6 +495,12 @@ unary_http!(
     images::GetImageRequest,
     images::GetImageResponse
 );
+unary_http!(
+    CriImages,
+    "/runtime.v1.ImageService/ImageStatus",
+    ImageStatusRequest,
+    ImageStatusResponse
+);
 impl Service<http::Request<Body>> for Content {
     type Response = http::Response<Body>;
     type Error = Infallible;
@@ -412,12 +542,61 @@ async fn actual_wire(
     Result<NativeImageMetadata, NativeImageMetadataError>,
     Arc<State>,
 )> {
+    actual_wire_run(fault, index, |channel, state, deadline| async move {
+        inspect_channel(
+            channel,
+            &state.fixture.reference,
+            &state.fixture.root.digest,
+            "linux/amd64",
+            deadline,
+        )
+        .await
+    })
+    .await
+}
+
+async fn actual_cri_wire(
+    fault: Fault,
+    index: bool,
+) -> anyhow::Result<(
+    Result<NativeCriImageMetadata, NativeImageMetadataError>,
+    Arc<State>,
+)> {
+    actual_wire_run(fault, index, |channel, state, deadline| async move {
+        inspect_cri_channel(
+            channel,
+            &state.fixture.reference,
+            &state.fixture.root.digest,
+            "linux/amd64",
+            deadline,
+        )
+        .await
+    })
+    .await
+}
+
+async fn actual_wire_run<T, F, Fut>(
+    fault: Fault,
+    index: bool,
+    inspect: F,
+) -> anyhow::Result<(Result<T, NativeImageMetadataError>, Arc<State>)>
+where
+    F: FnOnce(Channel, Arc<State>, Instant) -> Fut,
+    Fut: Future<Output = Result<T, NativeImageMetadataError>>,
+{
+    let fixture = Fixture::new(index);
+    let fixture = if fault == Fault::CriOtherPlatform {
+        fixture.with_other_platform()?
+    } else {
+        fixture
+    };
     let state = Arc::new(State {
-        fixture: Fixture::new(index),
+        fixture,
         fault,
         calls: Mutex::new(Vec::new()),
         bad_namespace: AtomicBool::new(false),
         gets: AtomicUsize::new(0),
+        cri_gets: AtomicUsize::new(0),
         active_streams: Arc::new(AtomicUsize::new(0)),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -443,6 +622,7 @@ async fn actual_wire(
             .add_service(Versions(state.clone()))
             .add_service(Images(state.clone()))
             .add_service(Content(state.clone()))
+            .add_service(CriImages(state.clone()))
             .serve_with_incoming_shutdown(incoming, ending.cancelled_owned()),
     );
     let owner = IoOwner(RuntimeTransport::new());
@@ -461,14 +641,7 @@ async fn actual_wire(
             }))
             .await
             .map_err(|_| NativeImageMetadataError::RuntimeUnavailable)?;
-        inspect_channel(
-            channel,
-            &state.fixture.reference,
-            &state.fixture.root.digest,
-            "linux/amd64",
-            deadline,
-        )
-        .await
+        inspect(channel, state.clone(), deadline).await
     })
     .await
     .map_err(|_| NativeImageMetadataError::DeadlineExceeded)
@@ -633,4 +806,232 @@ fn independent_digest_and_repository_request_inputs_reject_tags_and_ambiguous_re
             Err(NativeImageMetadataError::InvalidReference)
         );
     }
+}
+
+#[tokio::test]
+async fn actual_cri_index_identity_binds_config_without_claiming_pull_snapshot_or_gc()
+-> anyhow::Result<()> {
+    for index in [false, true] {
+        let (outcome, state) = actual_cri_wire(Fault::None, index).await?;
+        let report = serde_json::to_value(outcome?)?;
+        ensure!(report["scope"] == "CRI_INDEX_CONFIG_IDENTITY_ONLY");
+        ensure!(report["cri_image_id"] == state.fixture.config);
+        for field in [
+            "approval_checked",
+            "pull_selection_checked",
+            "runtime_handler_checked",
+            "snapshotter_checked",
+            "unpack_checked",
+            "gc_protection_checked",
+            "preparation_allowed",
+        ] {
+            ensure!(
+                report[field] == false,
+                "index observation must not establish {field}"
+            );
+        }
+        let native = &report["native"];
+        ensure!(
+            native["scope"] == "NATIVE_CONTAINERD_METADATA_ONLY" && native["namespace"] == "k8s.io"
+        );
+        ensure!(native["metadata"]["config"]["digest"] == report["cri_image_id"]);
+        ensure!(native["metadata"]["selected_manifest"]["digest"] == state.fixture.selected);
+        ensure!(
+            native["metadata"]["approval_checked"] == false
+                && native["metadata"]["layer_payloads_verified"] == false
+                && native["metadata"]["preparation_allowed"] == false
+        );
+        ensure!(
+            !report.to_string().contains(PRIVATE)
+                && !report.to_string().contains("private-alias")
+                && report.get("size").is_none()
+                && report.get("pinned").is_none()
+        );
+        let calls = state
+            .calls
+            .lock()
+            .map_err(|_| anyhow::anyhow!("fixture lock"))?;
+        let expected = if index {
+            vec![
+                "VERSION",
+                "CRI_STATUS",
+                "GET",
+                "INFO",
+                "READ",
+                "INFO",
+                "READ",
+                "INFO",
+                "READ",
+                "CRI_STATUS",
+                "GET",
+            ]
+        } else {
+            vec![
+                "VERSION",
+                "CRI_STATUS",
+                "GET",
+                "INFO",
+                "READ",
+                "INFO",
+                "READ",
+                "CRI_STATUS",
+                "GET",
+            ]
+        };
+        ensure!(
+            *calls == expected,
+            "both CRI observations and the final native root must bracket one bounded metadata read"
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn actual_cri_index_identity_rejects_unavailable_mismatched_changed_and_unbounded_reports()
+-> anyhow::Result<()> {
+    for (fault, expected) in [
+        (
+            Fault::CriMissing,
+            NativeImageMetadataError::CriImageUnavailable,
+        ),
+        (
+            Fault::CriWrongConfig,
+            NativeImageMetadataError::CriImageMismatch,
+        ),
+        (
+            Fault::CriMissingReference,
+            NativeImageMetadataError::CriImageMismatch,
+        ),
+        (Fault::CriChanged, NativeImageMetadataError::CriImageChanged),
+        (
+            Fault::CriReferenceChanged,
+            NativeImageMetadataError::CriImageChanged,
+        ),
+        (
+            Fault::CriMalformedId,
+            NativeImageMetadataError::ResponseInvalid,
+        ),
+        (
+            Fault::CriTooManyAliases,
+            NativeImageMetadataError::ResponseInvalid,
+        ),
+        (
+            Fault::CriAliasBytes,
+            NativeImageMetadataError::ResponseInvalid,
+        ),
+        (
+            Fault::CriOversizedReply,
+            NativeImageMetadataError::ResponseInvalid,
+        ),
+        (
+            Fault::CriUnexpectedInfo,
+            NativeImageMetadataError::ResponseInvalid,
+        ),
+        (
+            Fault::CriProviderSecret,
+            NativeImageMetadataError::RuntimeUnavailable,
+        ),
+        (
+            Fault::CriRemoteCancelled,
+            NativeImageMetadataError::RuntimeUnavailable,
+        ),
+        (
+            Fault::WrongVersion,
+            NativeImageMetadataError::RuntimeIdentityMismatch,
+        ),
+        (Fault::FinalRoot, NativeImageMetadataError::ImageChanged),
+    ] {
+        let (outcome, state) = actual_cri_wire(fault, true).await?;
+        let error = outcome
+            .err()
+            .with_context(|| format!("fault {fault:?} unexpectedly produced an index receipt"))?;
+        ensure!(
+            error == expected,
+            "wrong index failure classification for {fault:?}: {}",
+            error.code()
+        );
+        ensure!(!error.to_string().contains(PRIVATE) && error.to_string() == error.code());
+        if fault == Fault::CriRemoteCancelled {
+            ensure!(
+                state
+                    .calls
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("fixture lock"))?
+                    .as_slice()
+                    == ["VERSION", "CRI_STATUS"],
+                "an early remote cancellation must fail immediately without native reads or a forged local timeout"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn actual_cri_index_identity_rejects_another_platform_config_in_the_same_index()
+-> anyhow::Result<()> {
+    // This protocol fixture independently contains both platforms. A CRI index
+    // response for arm64 cannot validate the requested amd64 metadata closure.
+    // It does not certify the platform-selection algorithm of a real daemon.
+    let (outcome, state) = actual_cri_wire(Fault::CriOtherPlatform, true).await?;
+    ensure!(matches!(
+        outcome,
+        Err(NativeImageMetadataError::CriImageMismatch)
+    ));
+    let config: serde_json::Value = serde_json::from_slice(
+        state
+            .fixture
+            .blobs
+            .get(&state.fixture.config)
+            .context("requested config")?,
+    )?;
+    let other: serde_json::Value = serde_json::from_slice(
+        state
+            .fixture
+            .blobs
+            .get(
+                state
+                    .fixture
+                    .other_config
+                    .as_ref()
+                    .context("other config identity")?,
+            )
+            .context("other config bytes")?,
+    )?;
+    ensure!(config["architecture"] == "amd64" && other["architecture"] == "arm64");
+    ensure!(state.cri_gets.load(Ordering::SeqCst) == 2);
+    Ok(())
+}
+
+#[tokio::test]
+async fn actual_cri_index_identity_shares_the_original_five_second_budget_and_retires_io()
+-> anyhow::Result<()> {
+    let started = std::time::Instant::now();
+    let (outcome, state) = actual_cri_wire(Fault::CriDeadline, false).await?;
+    ensure!(
+        matches!(outcome, Err(NativeImageMetadataError::DeadlineExceeded)),
+        "expected the original total deadline, actual result={outcome:?}, elapsed={:?}",
+        started.elapsed()
+    );
+    ensure!(
+        started.elapsed() >= Duration::from_secs(4) && started.elapsed() < Duration::from_secs(6),
+        "the original total deadline must not renew between the two delayed CRI observations"
+    );
+    ensure!(
+        state
+            .calls
+            .lock()
+            .map_err(|_| anyhow::anyhow!("fixture lock"))?
+            .as_slice()
+            == [
+                "VERSION",
+                "CRI_STATUS",
+                "GET",
+                "INFO",
+                "READ",
+                "INFO",
+                "READ",
+                "CRI_STATUS"
+            ]
+    );
+    Ok(())
 }

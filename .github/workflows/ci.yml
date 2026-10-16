@@ -278,6 +278,10 @@ jobs:
         run: |
           df -h .
           python3 scripts/test-nodeguard-native-metadata.py --artifacts .local/nodeguard-host-artifacts.jsonl --admin-artifacts .local/review-artifacts.jsonl --evidence-dir .local/native-metadata-ci
+      - name: CRI index configuration identity through the actual isolated Linux admin CLI
+        run: |
+          df -h .
+          python3 scripts/test-nodeguard-cri-metadata.py --artifacts .local/nodeguard-host-artifacts.jsonl --admin-artifacts .local/review-artifacts.jsonl --evidence-dir .local/cri-metadata-ci
       - name: Retain non-secret identity and lifecycle regression evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -295,6 +299,8 @@ jobs:
             .local/nodeguard-runtime-profile/*.log
             .local/nodeguard-runtime-peer/record.json
             .local/nodeguard-runtime-peer/*.log
+            .local/cri-metadata-ci/record.json
+            .local/cri-metadata-ci/*.log
             .local/review-regressions/*.json
             .local/review-regressions/*.log
             .local/node-image-query-ci/*.json

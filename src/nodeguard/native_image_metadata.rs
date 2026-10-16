@@ -13,6 +13,22 @@ pub struct NativeImageMetadata {
     metadata: VerifiedImageMetadata,
 }
 
+/// A current CRI index identity observation, not evidence of how an image was
+/// pulled, which snapshotter was used, or whether its unpacked data still exists.
+#[derive(Debug, Serialize)]
+pub struct NativeCriImageMetadata {
+    scope: &'static str,
+    cri_image_id: String,
+    approval_checked: bool,
+    pull_selection_checked: bool,
+    runtime_handler_checked: bool,
+    snapshotter_checked: bool,
+    unpack_checked: bool,
+    gc_protection_checked: bool,
+    preparation_allowed: bool,
+    native: NativeImageMetadata,
+}
+
 /// Errors contain only stable codes, never a provider status, reference or path.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum NativeImageMetadataError {
@@ -34,6 +50,12 @@ pub enum NativeImageMetadataError {
     RootMismatch,
     #[error("RUNTIME_DEADLINE_EXCEEDED")]
     DeadlineExceeded,
+    #[error("CRI_IMAGE_UNAVAILABLE")]
+    CriImageUnavailable,
+    #[error("CRI_IMAGE_MISMATCH")]
+    CriImageMismatch,
+    #[error("CRI_IMAGE_CHANGED")]
+    CriImageChanged,
     #[error("{0}")]
     Metadata(#[from] ImageArtifactError),
 }
@@ -49,8 +71,34 @@ impl NativeImageMetadataError {
             Self::ImageChanged => "RUNTIME_IMAGE_CHANGED",
             Self::RootMismatch => "RUNTIME_ROOT_MISMATCH",
             Self::DeadlineExceeded => "RUNTIME_DEADLINE_EXCEEDED",
+            Self::CriImageUnavailable => "CRI_IMAGE_UNAVAILABLE",
+            Self::CriImageMismatch => "CRI_IMAGE_MISMATCH",
+            Self::CriImageChanged => "CRI_IMAGE_CHANGED",
             Self::Metadata(error) => error.code(),
         }
+    }
+}
+
+/// Bind this daemon's current CRI index resolution to independently verified
+/// OCI metadata. No runtime handler is accepted: containerd 2.3.5 ImageStatus
+/// ignores it and uses a host-platform image index, not a pull-time selection.
+pub async fn inspect_cri(
+    reference: &str,
+    expected_digest: &str,
+    platform: &str,
+) -> Result<NativeCriImageMetadata, NativeImageMetadataError> {
+    crate::image_artifact::validate_request(expected_digest, platform)?;
+    validate_reference(reference, expected_digest)?;
+    #[cfg(target_os = "linux")]
+    {
+        if !rustix::process::geteuid().is_root() {
+            return Err(NativeImageMetadataError::UnsupportedRuntime);
+        }
+        backend::inspect_cri_local(reference, expected_digest, platform).await
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err(NativeImageMetadataError::UnsupportedRuntime)
     }
 }
 
@@ -110,7 +158,9 @@ mod backend {
     use crate::{
         image_artifact::{MetadataBlobRequest, MetadataPlan},
         nodeguard::{
-            cri_proto::{VersionRequest, VersionResponse},
+            cri_proto::{
+                ImageSpec, ImageStatusRequest, ImageStatusResponse, VersionRequest, VersionResponse,
+            },
             cri_transport::RuntimeTransport,
         },
     };
@@ -124,6 +174,8 @@ mod backend {
     const MAX_BLOB: usize = 1024 * 1024;
     const SMALL_REPLY: usize = 64 * 1024;
     const MAX_FRAMES: usize = 64;
+    const MAX_CRI_ALIASES: usize = 128;
+    const MAX_CRI_ALIAS_BYTES: usize = 48 * 1024;
 
     // Upstream-generated messages stay private. No generated RPC client or
     // writer is exposed, including to the host administrator's CLI consumer.
@@ -158,6 +210,18 @@ mod backend {
     };
 
     fn provider(error: tonic::Status) -> NativeImageMetadataError {
+        // Tonic 0.14 reports its local grpc-timeout expiry as Cancelled while
+        // retaining TimeoutExpired in the source chain. A remote Cancelled,
+        // including the same message text, has no such local typed evidence.
+        if error.code() == Code::Cancelled {
+            let mut source = std::error::Error::source(&error);
+            while let Some(cause) = source {
+                if cause.is::<tonic::TimeoutExpired>() {
+                    return NativeImageMetadataError::DeadlineExceeded;
+                }
+                source = cause.source();
+            }
+        }
         match error.code() {
             Code::NotFound => NativeImageMetadataError::MetadataUnavailable,
             Code::DeadlineExceeded => NativeImageMetadataError::DeadlineExceeded,
@@ -187,6 +251,30 @@ mod backend {
         expected: &str,
         platform: &str,
     ) -> Result<NativeImageMetadata, NativeImageMetadataError> {
+        with_local_channel(|channel, deadline| {
+            inspect_channel(channel, reference, expected, platform, deadline)
+        })
+        .await
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) async fn inspect_cri_local(
+        reference: &str,
+        expected: &str,
+        platform: &str,
+    ) -> Result<NativeCriImageMetadata, NativeImageMetadataError> {
+        with_local_channel(|channel, deadline| {
+            inspect_cri_channel(channel, reference, expected, platform, deadline)
+        })
+        .await
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn with_local_channel<T, F, Fut>(operation: F) -> Result<T, NativeImageMetadataError>
+    where
+        F: FnOnce(Channel, Instant) -> Fut,
+        Fut: std::future::Future<Output = Result<T, NativeImageMetadataError>>,
+    {
         let owner = IoOwner(RuntimeTransport::new());
         let transport = owner.0.clone();
         let endpoint = crate::nodeguard::runtime_endpoint::RuntimeEndpoint::default();
@@ -205,7 +293,7 @@ mod backend {
                 }))
                 .await
                 .map_err(|_| NativeImageMetadataError::RuntimeUnavailable)?;
-            inspect_channel(channel, reference, expected, platform, deadline).await
+            operation(channel, deadline).await
         })
         .await
         .map_err(|_| NativeImageMetadataError::DeadlineExceeded)
@@ -374,15 +462,12 @@ mod backend {
         Ok(bytes)
     }
 
-    async fn inspect_channel(
+    async fn verify_version(
         channel: Channel,
-        reference: &str,
-        expected: &str,
-        platform: &str,
         deadline: Instant,
-    ) -> Result<NativeImageMetadata, NativeImageMetadataError> {
+    ) -> Result<(), NativeImageMetadataError> {
         let version: VersionResponse = unary(
-            channel.clone(),
+            channel,
             VersionRequest {
                 version: "0.1.0".into(),
             },
@@ -397,6 +482,16 @@ mod backend {
         {
             return Err(NativeImageMetadataError::RuntimeIdentityMismatch);
         }
+        Ok(())
+    }
+
+    async fn read_metadata(
+        channel: Channel,
+        reference: &str,
+        expected: &str,
+        platform: &str,
+        deadline: Instant,
+    ) -> Result<(Descriptor, VerifiedImageMetadata), NativeImageMetadataError> {
         let initial = image(channel.clone(), reference, expected, deadline).await?;
         let root = blob(
             channel.clone(),
@@ -418,6 +513,17 @@ mod backend {
         if !metadata.root_matches(&initial.media_type, &initial.digest, initial.size) {
             return Err(NativeImageMetadataError::RootMismatch);
         }
+        Ok((initial, metadata))
+    }
+
+    async fn finish_metadata(
+        channel: Channel,
+        reference: &str,
+        expected: &str,
+        initial: Descriptor,
+        metadata: VerifiedImageMetadata,
+        deadline: Instant,
+    ) -> Result<NativeImageMetadata, NativeImageMetadataError> {
         let final_target = image(channel, reference, expected, deadline).await?;
         if initial != final_target {
             return Err(NativeImageMetadataError::ImageChanged);
@@ -432,6 +538,122 @@ mod backend {
         })
     }
 
+    async fn inspect_channel(
+        channel: Channel,
+        reference: &str,
+        expected: &str,
+        platform: &str,
+        deadline: Instant,
+    ) -> Result<NativeImageMetadata, NativeImageMetadataError> {
+        verify_version(channel.clone(), deadline).await?;
+        let (initial, metadata) =
+            read_metadata(channel.clone(), reference, expected, platform, deadline).await?;
+        finish_metadata(channel, reference, expected, initial, metadata, deadline).await
+    }
+
+    #[derive(Debug, Eq, PartialEq)]
+    struct CriIdentity {
+        image_id: String,
+        exact_reference_present: bool,
+    }
+
+    async fn cri_identity(
+        channel: Channel,
+        reference: &str,
+        deadline: Instant,
+    ) -> Result<CriIdentity, NativeImageMetadataError> {
+        let response: ImageStatusResponse = unary(
+            channel,
+            ImageStatusRequest {
+                image: Some(ImageSpec {
+                    image: reference.to_owned(),
+                    ..Default::default()
+                }),
+                verbose: false,
+            },
+            "/runtime.v1.ImageService/ImageStatus",
+            SMALL_REPLY,
+            deadline,
+        )
+        .await?;
+        if !response.info.is_empty() {
+            return Err(NativeImageMetadataError::ResponseInvalid);
+        }
+        let image = response
+            .image
+            .ok_or(NativeImageMetadataError::CriImageUnavailable)?;
+        if image.id.len() != 71
+            || !image.id.starts_with("sha256:")
+            || !image.id.as_bytes()[7..]
+                .iter()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
+            || image
+                .repo_tags
+                .len()
+                .saturating_add(image.repo_digests.len())
+                > MAX_CRI_ALIASES
+        {
+            return Err(NativeImageMetadataError::ResponseInvalid);
+        }
+        let mut alias_bytes = 0usize;
+        for alias in image.repo_tags.iter().chain(&image.repo_digests) {
+            if alias.is_empty()
+                || alias.len() > 2048
+                || !alias.is_ascii()
+                || alias.bytes().any(|byte| byte.is_ascii_control())
+            {
+                return Err(NativeImageMetadataError::ResponseInvalid);
+            }
+            alias_bytes = alias_bytes.saturating_add(alias.len());
+            if alias_bytes > MAX_CRI_ALIAS_BYTES {
+                return Err(NativeImageMetadataError::ResponseInvalid);
+            }
+        }
+        // Other aliases, user/config fields, size and pinned are neither returned
+        // nor evidence for this exact-reference/config identity observation.
+        Ok(CriIdentity {
+            image_id: image.id,
+            exact_reference_present: image.repo_digests.iter().any(|digest| digest == reference),
+        })
+    }
+
+    async fn inspect_cri_channel(
+        channel: Channel,
+        reference: &str,
+        expected: &str,
+        platform: &str,
+        deadline: Instant,
+    ) -> Result<NativeCriImageMetadata, NativeImageMetadataError> {
+        verify_version(channel.clone(), deadline).await?;
+        let before = cri_identity(channel.clone(), reference, deadline).await?;
+        if !before.exact_reference_present {
+            return Err(NativeImageMetadataError::CriImageMismatch);
+        }
+        let (initial, metadata) =
+            read_metadata(channel.clone(), reference, expected, platform, deadline).await?;
+        let after = cri_identity(channel.clone(), reference, deadline).await?;
+        if before != after {
+            return Err(NativeImageMetadataError::CriImageChanged);
+        }
+        if before.image_id != metadata.config_digest() {
+            return Err(NativeImageMetadataError::CriImageMismatch);
+        }
+        let native =
+            finish_metadata(channel, reference, expected, initial, metadata, deadline).await?;
+        Ok(NativeCriImageMetadata {
+            scope: "CRI_INDEX_CONFIG_IDENTITY_ONLY",
+            cri_image_id: before.image_id,
+            approval_checked: false,
+            pull_selection_checked: false,
+            runtime_handler_checked: false,
+            snapshotter_checked: false,
+            unpack_checked: false,
+            gc_protection_checked: false,
+            preparation_allowed: false,
+            native,
+        })
+    }
+
     #[cfg(test)]
     mod tests {
         include!("native_image_metadata_tests.rs");
@@ -441,3 +663,7 @@ mod backend {
 #[cfg(all(test, target_os = "linux"))]
 #[path = "native_image_metadata_cli_tests.rs"]
 mod cli_tests;
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "cri_image_metadata_cli_tests.rs"]
+mod cri_cli_tests;

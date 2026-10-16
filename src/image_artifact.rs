@@ -518,6 +518,12 @@ impl ConfigurationPlan {
 }
 
 impl VerifiedImageMetadata {
+    /// Identity of the authenticated configuration, never a preparation permit.
+    #[cfg(any(target_os = "linux", test))]
+    pub(crate) fn config_digest(&self) -> &str {
+        &self.config.digest
+    }
+
     /// Bind a native Images.Get target to the closure's authenticated root.
     /// This comparison grants neither preparation authority nor approval.
     #[cfg(any(target_os = "linux", test))]
