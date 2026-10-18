@@ -14,6 +14,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from proxy import configuration
 from master import configure_master
 from verify import Admin,NoRedirect
+from proxy_readiness import wait_for_proxy
 
 private=Path(sys.argv[1]);binary=Path(sys.argv[2]).resolve()
 assert 'HAProxy version 3.2.25-' in subprocess.run([str(binary),'-v'],capture_output=True,check=True).stdout.decode()
@@ -44,12 +45,7 @@ def get(path,public=False):
         c.request('GET',path);r=c.getresponse();return r.status,r.read(),dict(r.getheaders())
     finally:c.close()
 try:
-    for _ in range(50):
-        try:
-            if get('/realms/master/.well-known/openid-configuration')[0]==200:break
-        except OSError:pass
-        time.sleep(.1)
-    else:raise AssertionError('Proxy TLS not ready')
+    wait_for_proxy(lambda: get('/realms/master/.well-known/openid-configuration')[0], process, 'Proxy TLS not ready')
     password=(private/'password').read_text()
     form=parse.urlencode({'client_id':'admin-cli','grant_type':'password','username':'isolated-test-bootstrap','password':password}).encode()
     def login():
