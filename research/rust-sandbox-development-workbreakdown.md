@@ -1,6 +1,8 @@
 # Rust 沙箱平台分阶段开发表
 
-最新开发检查点（2026-10-16，P1b6快照与配置引用元数据）：新增公共inspect_snapshot／本机admin inspect-snapshot，认证DiffID派生ChainID／直接父链，固定overlayfs的Stat与config引用标签前后核对；原固定UDS／k8s.io及5秒总预算保持。最终普通Rust65程序520通过／0失败／291环境ignored、两平台严格Clippy／fmt、新快照加五项原生回归、离线Docker CLI七场景通过；release104及协议重生成、实际Linux许可producer／四Docker COPY路径56文件通过。首轮CLI格式失败保留，格式修正后最终制品已重新构建并完整回归。基线ee3eeac精确CI五job／72step全绿，新提交CI独立核对。空committed快照也可通过本检查，故不证明真实层apply、GC保护、pull选择或准备许可。下一完整门为受限准备执行者／硬限、实际pull及原生保护闭包；pre-pull仍关闭，云／Kata／CSI／GPU／性能未认证。见[本批交付](snapshot-reference-metadata-delivery-20261016.md)。
+最新检查点（2026-10-18，BFF 测试库关闭诊断）：基线 `4e517ab` 的精确 CI 38871811699 在 BFF retention 原 2 秒关闭门失败，根因仍 UNKNOWN。本轮仅补测试夹具固定阶段、独立样本年龄和 UNKNOWN 诊断，必跑 BFF 计数由 4 改为 5；原期限、100ms 轮询、安全谓词和零连接后普通 DROP 保持。真实 RED 后，最终 Mac/Linux arm64 TLS BFF 各 5 项、普通 Rust 65 程序 520/0/292 ignored、两平台 strict Clippy/fmt 通过。共享 PG 整轮为 149 通过/4 项备份 stale 失败/37 未执行，未到 BFF；后续 fresh challenge 过期与短暂时钟偏差不能倒推原 409 根因。同一 Linux VM 时钟域的末五组 20 项随后一次通过，47 迁移/源码/ELF/自有清理已核，不改写原整轮失败。本片不称 CI 修复完成，新提交须独立核对精确 CI。P1 后续受限准备执行者/硬限/pull/原生保护及 GPU/云/Kata/CSI/性能认证继续待完成，pre-pull 关闭。见[本批记录](bff-drain-diagnostics-delivery-20261016.md)。
+
+前序开发检查点（2026-10-16，P1b6快照与配置引用元数据）：新增公共inspect_snapshot／本机admin inspect-snapshot，认证DiffID派生ChainID／直接父链，固定overlayfs的Stat与config引用标签前后核对；原固定UDS／k8s.io及5秒总预算保持。最终普通Rust65程序520通过／0失败／291环境ignored、两平台严格Clippy／fmt、新快照加五项原生回归、离线Docker CLI七场景通过；release104及协议重生成、实际Linux许可producer／四Docker COPY路径56文件通过。首轮CLI格式失败保留，格式修正后最终制品已重新构建并完整回归。基线ee3eeac精确CI五job／72step全绿，新提交CI独立核对。空committed快照也可通过本检查，故不证明真实层apply、GC保护、pull选择或准备许可。下一完整门为受限准备执行者／硬限、实际pull及原生保护闭包；pre-pull仍关闭，云／Kata／CSI／GPU／性能未认证。见[本批交付](snapshot-reference-metadata-delivery-20261016.md)。
 
 前序开发检查点（2026-10-16，P1b5 CRI当前索引身份）：新增root本机 `image-artifact inspect-cri`，同一固定UDS／k8s.io／原5秒总预算核对前后CRI精确引用、已验OCI config摘要及最终原生根；回执仅为CRI索引配置身份，所有审批／pull选择／handler／snapshotter／unpack／GC／准备标志为false。普通Rust65程序513通过／0失败／291环境ignored，两平台严格Clippy／fmt、Python11、实际新CRI及四项原生回归、旧Docker CLI七场景通过。真实测试发现的本地超时分类缺陷已按typed TimeoutExpired修复，精确RED／GREEN及远端同文案Cancelled反例保留；首轮编译OOM已恢复前轮原swap配置并降编译并发后通过，不扩大功能期限／权限／栈。基线e3debc5精确CI五job／71step全绿，本片提交CI独立核对。完整P1的实际pull选择／snapshotter、原生引用／GC及准备硬限与P2—P6仍待完成，pre-pull关闭；云／Kata／CSI／GPU／性能未认证。见[本批交付](cri-image-identity-delivery-20261016.md)。
 
@@ -332,11 +334,11 @@ b66177be完整CI已确认资源容量与18组PG等前置门通过，但真实诊
 
 ### 12.8 批准镜像节点预准备：后续有序实施（2026-10-15）
 
-本节按P0—P6顺序推进。**P0a—P0c2b只读观察与同一原生整链、P1a元数据校验、P1b1宿主配置准入、P1b2启动时runtime读回、P1b3重连身份、P1b4原生已存元数据、P1b5 CRI当前索引身份及P1b6快照／配置引用元数据已完成本地验收；完整P1及P2—P6仍未完成／未认证。** 基线ee3eeac精确CI run38861416715的5 job／72 step全绿；本轮新源码CI独立核对。详见[生产实施计划](image-preparation-production-plan-20261015.md)及[固定版本官方源码核对](image-preparation-native-sources-20261015.md)。范围是批准OCI镜像准备，不预造CPU／GPU VM池，不产生普通launch许可。
+本节按P0—P6顺序推进。**P0a—P0c2b只读观察与同一原生整链、P1a元数据校验、P1b1宿主配置准入、P1b2启动时runtime读回、P1b3重连身份、P1b4原生已存元数据、P1b5 CRI当前索引身份及P1b6快照／配置引用元数据已完成本地验收；完整P1及P2—P6仍未完成／未认证。** 历史基线ee3eeac的CI run38861416715为5 job／72 step全绿；随后公开4e517ab的精确CI run38871811699在BFF关闭门失败，不能沿用旧成功。当前先补关闭诊断与限定验收，原超时根因仍UNKNOWN，共享PG整轮149/4/37失败保留；P1后续门未开放。见[BFF诊断记录](bff-drain-diagnostics-delivery-20261016.md)。详见[生产实施计划](image-preparation-production-plan-20261015.md)及[固定版本官方源码核对](image-preparation-native-sources-20261015.md)。范围是批准OCI镜像准备，不预造CPU／GPU VM池，不产生普通launch许可。
 
 | 顺序／工作包 | 开发内容与接口 | 退出门／依赖 |
 | --- | --- | --- |
-| 0；G4-01/G4-02 | 核对当前CI及失败回执，先修复已发布输入；每90分钟继续最前未闭合切片 | console准确COPY、fresh角色初始化和测试JWT签发顺序已修复；真实console镜像／TLS与39组203项最终分批回归通过，原生461／0／279ignored、严格Clippy／fmt通过；18ad317精确CI run38762694677首次5 job／62 step成功；不沿用旧结果证明新源码 |
+| 0；G4-01/G4-02 | 核对当前CI及失败回执，先修复已发布输入；每90分钟继续最前未闭合切片 | console准确COPY、fresh角色初始化和测试JWT签发顺序已修复；真实console镜像／TLS与39组203项最终分批回归通过，原生461／0／279ignored、严格Clippy／fmt通过；18ad317精确CI run38762694677首次5 job／62 step成功；不沿用旧结果证明新源码。当前4e517ab整套CI失败与本轮149/4/37共享批次失败保留，诊断子组通过不代表全门完成 |
 | P0a宿主子项；G0-08/G1-09/G3-12 | 固定UDS、只读有界ImageService、profile/boot/peer/同FD与mount身份；独立后台owner与scraper CA的`GET /v1/node-image-status`，默认关闭 | 普通原生472／0／279ignored（最终62制品SHA相同复用）；Linux70项、native1项、Python11项、两平台strict Clippy／fmt通过，精确自有清理；真实containerd→独立mTLS无VM诊断，不等于完整P0。见[本批交付](node-image-observation-delivery-20261015.md) |
 | P0b；G0-08/G1-09/G3-12 | 独立`/metrics/node-images`、显式profile绑定、node allowlist/预算、同Prom双Agent与受控失联/组件报告告警 | 本地Linux74项、native1项、Python27、schema28对象、锁定promtool原38+新38、完整观测入口49.658秒及strict Clippy/fmt通过；原时间过滤后HA去重、UNKNOWN清值/独立失败恢复已验。原生后端和真实管线分别验收，不称同一原生整链，见[本批交付](node-image-pipeline-delivery-20261016.md) |
 | P0c1已本地验收；G0-08/G1-09/G3-12 | 持久安装读授权／永久撤权、owner CLI、普通app窄EXEC、真实JWT `GET /v1/operator/access`与schema/ACL预检 | 6专项、6组29 PG、正式自动化25、普通Rust475、SDK77、OpenAPI13、strict Clippy/fmt通过；身份/client/epoch ABA、锁后到期和写权漂移已验。只返回授权元数据，见[交付](installation-operator-access-delivery-20261016.md) |

@@ -15,7 +15,7 @@ use base64::{
 };
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use serde_json::{Value, json};
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use sqlx::{Connection, PgPool, postgres::PgPoolOptions};
 use std::{
     collections::BTreeMap,
     convert::Infallible,
@@ -61,6 +61,103 @@ struct FixturePeer {
     state: String,
     wait: String,
     xact_open: bool,
+}
+
+// Keep only fixed classifications and monotonic timings. A completed old
+// observation remains a sample; it never establishes the state at timeout.
+#[derive(Clone, Copy)]
+enum FixtureDrainStage {
+    PeersQuery,
+    OwnerQuery,
+    ObservationComplete,
+    Sleeping,
+    AfterSleep,
+}
+
+struct FixtureDrainProgress {
+    started: tokio::time::Instant,
+    deadline: tokio::time::Instant,
+    stage: FixtureDrainStage,
+    stage_started: tokio::time::Instant,
+    stage_remaining_ms: u128,
+    completed_rounds: u64,
+    // Sample time, total peers, exact idle owners, exact idle runtimes.
+    peers: Option<(tokio::time::Instant, usize, usize, usize)>,
+    owner: Option<(tokio::time::Instant, bool)>,
+    last_sleep: Option<(u128, u128, u128)>,
+}
+
+impl FixtureDrainProgress {
+    fn new(deadline: tokio::time::Instant) -> Self {
+        let now = tokio::time::Instant::now();
+        Self {
+            started: now,
+            deadline,
+            stage: FixtureDrainStage::PeersQuery,
+            stage_started: now,
+            stage_remaining_ms: deadline.saturating_duration_since(now).as_millis(),
+            completed_rounds: 0,
+            peers: None,
+            owner: None,
+            last_sleep: None,
+        }
+    }
+
+    fn enter(&mut self, stage: FixtureDrainStage) {
+        let now = tokio::time::Instant::now();
+        self.stage = stage;
+        self.stage_started = now;
+        self.stage_remaining_ms = self.deadline.saturating_duration_since(now).as_millis();
+    }
+
+    fn after_sleep(&mut self) {
+        let now = tokio::time::Instant::now();
+        self.last_sleep = Some((
+            now.duration_since(self.stage_started).as_millis(),
+            self.stage_remaining_ms,
+            self.deadline.saturating_duration_since(now).as_millis(),
+        ));
+        self.enter(FixtureDrainStage::AfterSleep);
+    }
+
+    fn describe(&self) -> String {
+        let now = tokio::time::Instant::now();
+        let stage = match self.stage {
+            FixtureDrainStage::PeersQuery => "PEERS_QUERY",
+            FixtureDrainStage::OwnerQuery => "OWNER_QUERY",
+            FixtureDrainStage::ObservationComplete => "OBSERVATION_COMPLETE",
+            FixtureDrainStage::Sleeping => "SLEEPING",
+            FixtureDrainStage::AfterSleep => "AFTER_SLEEP",
+        };
+        let peers = match self.peers {
+            Some((at, total, owner, runtime)) => format!(
+                "peers={total} owner_idle={owner} runtime_idle={runtime} unexpected={} peers_age_ms={}",
+                total - owner - runtime,
+                now.duration_since(at).as_millis(),
+            ),
+            None => "peers=UNKNOWN owner_idle=UNKNOWN runtime_idle=UNKNOWN unexpected=UNKNOWN peers_age_ms=UNKNOWN".into(),
+        };
+        let owner = match self.owner {
+            Some((at, matches)) => format!(
+                "owner_matches={matches} owner_age_ms={}",
+                now.duration_since(at).as_millis(),
+            ),
+            None => "owner_matches=UNKNOWN owner_age_ms=UNKNOWN".into(),
+        };
+        let sleep = match self.last_sleep {
+            Some((elapsed, before, after)) => format!(
+                "last_sleep_ms={elapsed} last_sleep_before_remaining_ms={before} last_sleep_after_remaining_ms={after}",
+            ),
+            None => "last_sleep_ms=UNKNOWN last_sleep_before_remaining_ms=UNKNOWN last_sleep_after_remaining_ms=UNKNOWN".into(),
+        };
+        format!(
+            "BFF_FIXTURE_DRAIN stage={stage} completed_rounds={} elapsed_ms={} stage_elapsed_ms={} stage_remaining_ms={} {peers} {owner} {sleep}",
+            self.completed_rounds,
+            now.duration_since(self.started).as_millis(),
+            now.duration_since(self.stage_started).as_millis(),
+            self.stage_remaining_ms,
+        )
+    }
 }
 
 // A tag identifies a tail we may wait for; it never authorizes DROP or termination.
@@ -227,6 +324,188 @@ async fn browser_fixture_tagged_pools_drain_before_ordinary_database_drop() -> a
     println!("BFF_FIXTURE_TAGGED_BACKENDS_DRAINED_ORDINARY_DROP_VERIFIED");
     Ok(())
 }
+
+#[tokio::test]
+#[ignore = "requires disposable local PostgreSQL with ordinary owner/runtime roles"]
+async fn browser_fixture_drain_distinguishes_unobserved_query_and_observed_idle_tail()
+-> anyhow::Result<()> {
+    // Occupy exactly the fixture's two admin permits. The independent direct
+    // observer stays usable and has no connection to the child database.
+    let f = Fixture::start().await?;
+    let name = f.database_name.clone();
+    let admin_options = f.admin.connect_options();
+    let mut observer = sqlx::PgConnection::connect_with(&admin_options).await?;
+    let first = f.admin.acquire().await?;
+    let second = f.admin.acquire().await?;
+    let result = f.close().await;
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname=$1)")
+            .bind(&name)
+            .fetch_one(&mut observer)
+            .await?;
+    let peers: i64 = sqlx::query_scalar("SELECT count(*) FROM pg_stat_activity WHERE datname=$1")
+        .bind(&name)
+        .fetch_one(&mut observer)
+        .await?;
+    first.close().await?;
+    second.close().await?;
+    anyhow::ensure!(
+        exists && peers == 0,
+        "unobserved drain must retain the empty child database"
+    );
+    sqlx::query(&format!("DROP DATABASE {name}"))
+        .execute(&mut observer)
+        .await?;
+    let exists_after: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname=$1)")
+            .bind(&name)
+            .fetch_one(&mut observer)
+            .await?;
+    observer.close().await?;
+    anyhow::ensure!(
+        !exists_after,
+        "ordinary observer-case DROP must remove the child database"
+    );
+    println!("BFF_FIXTURE_DRAIN_UNOBSERVED_EMPTY_CHILD_ORDINARY_DROP_VERIFIED");
+    let detail = format!(
+        "{:#}",
+        result
+            .err()
+            .ok_or_else(|| anyhow::anyhow!("occupied observer must fail closed"))?
+    );
+    assert!(detail.starts_with("fixture backend drain deadline exceeded"));
+    assert!(
+        detail.contains("stage=PEERS_QUERY"),
+        "missing stage: {detail}"
+    );
+    assert!(
+        detail.contains("completed_rounds=0"),
+        "unexpected completed observation: {detail}"
+    );
+    assert!(
+        detail.contains("peers=UNKNOWN"),
+        "unobserved peers cannot become zero: {detail}"
+    );
+    assert!(
+        detail.contains("owner_matches=UNKNOWN"),
+        "unobserved owner cannot become known: {detail}"
+    );
+
+    // This precise tagged owner is deliberately outside the fixture pool.
+    // Closing the pool cannot retire it, and must never authorize a DROP.
+    let f = Fixture::start().await?;
+    let name = f.database_name.clone();
+    let owner_options = f.owner.connect_options();
+    let owner_role = owner_options.get_username().to_owned();
+    let owner_tag = owner_options
+        .get_application_name()
+        .ok_or_else(|| anyhow::anyhow!("fixture owner tag required"))?
+        .to_owned();
+    let mut held = sqlx::PgConnection::connect_with(&owner_options).await?;
+    let mut observer = sqlx::PgConnection::connect_with(&f.admin.connect_options()).await?;
+    let result = f.close().await;
+    let still_usable: i32 = sqlx::query_scalar("SELECT 1").fetch_one(&mut held).await?;
+    let (exists, peers, exact_idle): (bool, i64, i64) = sqlx::query_as(
+        "SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname=$1),count(*),count(*) FILTER (WHERE usename=$2 AND application_name=$3 AND state='idle' AND xact_start IS NULL AND (wait_event IS NULL OR wait_event='ClientRead')) FROM pg_stat_activity WHERE datname=$1",
+    )
+    .bind(&name)
+    .bind(owner_role)
+    .bind(owner_tag)
+    .fetch_one(&mut observer)
+    .await?;
+    held.close().await?;
+    // This separate cleanup phase begins only after the tested close has
+    // already failed under its original deadline and the live client is released.
+    // Sending Terminate does not synchronously acknowledge server retirement.
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let after_release: i64 =
+                sqlx::query_scalar("SELECT count(*) FROM pg_stat_activity WHERE datname=$1")
+                    .bind(&name)
+                    .fetch_one(&mut observer)
+                    .await?;
+            if after_release == 0 {
+                return Ok::<_, anyhow::Error>(());
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .context("held-owner cleanup observation deadline exceeded")??;
+    sqlx::query(&format!("DROP DATABASE {name}"))
+        .execute(&mut observer)
+        .await?;
+    let exists_after: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname=$1)")
+            .bind(&name)
+            .fetch_one(&mut observer)
+            .await?;
+    observer.close().await?;
+    anyhow::ensure!(
+        still_usable == 1 && exists && peers == 1 && exact_idle == 1,
+        "bounded drain must retain the exact live idle owner without terminating it"
+    );
+    anyhow::ensure!(
+        !exists_after,
+        "ordinary tail-case DROP must remove the child database"
+    );
+    let error = result
+        .err()
+        .ok_or_else(|| anyhow::anyhow!("live owner tail must fail closed"))?;
+    let detail = format!("{error:#}");
+    assert!(
+        detail.starts_with("fixture backend drain deadline exceeded")
+            || detail
+                .starts_with("fixture closed pools still have server backends after bounded drain")
+    );
+    // Read this context itself, not the colon-separated display of the
+    // complete anyhow chain, whose separator is not part of a timing value.
+    let diagnostic = error
+        .chain()
+        .find_map(|cause| {
+            let value = cause.to_string();
+            value.starts_with("BFF_FIXTURE_DRAIN ").then_some(value)
+        })
+        .ok_or_else(|| anyhow::anyhow!("bounded drain context required"))?;
+    let field = |name: &str| {
+        let prefix = format!("{name}=");
+        diagnostic
+            .split_whitespace()
+            .find_map(|part| part.strip_prefix(&prefix))
+    };
+    assert!(matches!(
+        field("stage"),
+        Some("PEERS_QUERY" | "OWNER_QUERY" | "OBSERVATION_COMPLETE")
+    ));
+    assert!(
+        field("completed_rounds")
+            .and_then(|v| v.parse::<u64>().ok())
+            .is_some_and(|v| v > 0)
+    );
+    assert_eq!(field("peers"), Some("1"));
+    assert_eq!(field("owner_idle"), Some("1"));
+    assert_eq!(field("runtime_idle"), Some("0"));
+    assert_eq!(field("unexpected"), Some("0"));
+    assert_eq!(field("owner_matches"), Some("true"));
+    for name in [
+        "peers_age_ms",
+        "owner_age_ms",
+        "elapsed_ms",
+        "stage_elapsed_ms",
+        "stage_remaining_ms",
+        "last_sleep_ms",
+        "last_sleep_before_remaining_ms",
+        "last_sleep_after_remaining_ms",
+    ] {
+        assert!(
+            field(name).and_then(|v| v.parse::<u128>().ok()).is_some(),
+            "missing bounded timing {name}: {detail}"
+        );
+    }
+    println!("BFF_FIXTURE_DRAIN_OBSERVER_AND_IDLE_TAIL_DIAGNOSTICS_VERIFIED");
+    Ok(())
+}
+
 fn jwt(value: Value, id: bool) -> String {
     let mut header = Header::new(Algorithm::RS256);
     header.kid = Some("key-a".into());
@@ -627,23 +906,64 @@ impl Fixture {
         drop(self.runtime);
         drop(self.keys);
         let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        let mut progress = FixtureDrainProgress::new(deadline);
         loop {
+            progress.enter(FixtureDrainStage::PeersQuery);
             let (peers, actual_owner) = tokio::time::timeout_at(deadline, async {
                 let peers = fixture_peers(&self.admin, &self.database_name).await?;
+                let owner_idle = peers
+                    .iter()
+                    .filter(|peer| {
+                        peer.role == owner_role
+                            && peer.pool == owner_pool
+                            && idle_owned_tail(
+                                peer,
+                                &owner_role,
+                                &owner_pool,
+                                &runtime_role,
+                                &runtime_pool,
+                            )
+                    })
+                    .count();
+                let runtime_idle = peers
+                    .iter()
+                    .filter(|peer| {
+                        peer.role == runtime_role
+                            && peer.pool == runtime_pool
+                            && idle_owned_tail(
+                                peer,
+                                &owner_role,
+                                &owner_pool,
+                                &runtime_role,
+                                &runtime_pool,
+                            )
+                    })
+                    .count();
+                progress.peers = Some((
+                    tokio::time::Instant::now(),
+                    peers.len(),
+                    owner_idle,
+                    runtime_idle,
+                ));
+                progress.enter(FixtureDrainStage::OwnerQuery);
                 let actual_owner: String = sqlx::query_scalar(
                     "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname=$1",
                 )
                 .bind(&self.database_name)
                 .fetch_one(&self.admin)
                 .await?;
+                progress.owner = Some((tokio::time::Instant::now(), actual_owner == owner_role));
+                progress.completed_rounds += 1;
+                progress.enter(FixtureDrainStage::ObservationComplete);
                 Ok::<_, anyhow::Error>((peers, actual_owner))
             })
             .await
+            .map_err(|error| anyhow::Error::new(error).context(progress.describe()))
             .context("fixture backend drain deadline exceeded")??;
-            anyhow::ensure!(
-                tokio::time::Instant::now() < deadline,
-                "fixture backend drain deadline exceeded"
-            );
+            if tokio::time::Instant::now() >= deadline {
+                return Err(anyhow::anyhow!(progress.describe())
+                    .context("fixture backend drain deadline exceeded"));
+            }
             let cleanup_safe = actual_owner == owner_role
                 && peers.iter().all(|peer| {
                     idle_owned_tail(peer, &owner_role, &owner_pool, &runtime_role, &runtime_pool)
@@ -701,11 +1021,14 @@ impl Fixture {
             if peers.is_empty() {
                 break;
             }
-            anyhow::ensure!(
-                tokio::time::Instant::now() < deadline,
-                "fixture closed pools still have server backends after bounded drain"
-            );
+            if tokio::time::Instant::now() >= deadline {
+                return Err(anyhow::anyhow!(progress.describe()).context(
+                    "fixture closed pools still have server backends after bounded drain",
+                ));
+            }
+            progress.enter(FixtureDrainStage::Sleeping);
             tokio::time::sleep(Duration::from_millis(100)).await;
+            progress.after_sleep();
         }
         // Use only an ordinary DROP. An idle migration-owner socket can survive
         // until process exit; retain that fixture and record separate cleanup.

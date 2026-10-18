@@ -72,7 +72,7 @@ SUITES = [
 ]
 # A broader local acceptance caller may supply exact expected counts. The
 # standalone review matrix retains its established selection and resources.
-EXPECTED_COUNTS = {"fresh_database_setup": 1, "output_startup": 1, "resource_accounting": 9, "resource_accounting_http": 3, "pod_observation": 8, "pod_observation_http": 1, "db_cancellation": 1, "bff_pg": 4, "automation_upgrade": 1, "worker_dispatch": 3, "worker_continuation": 6}
+EXPECTED_COUNTS = {"fresh_database_setup": 1, "output_startup": 1, "resource_accounting": 9, "resource_accounting_http": 3, "pod_observation": 8, "pod_observation_http": 1, "db_cancellation": 1, "bff_pg": 5, "automation_upgrade": 1, "worker_dispatch": 3, "worker_continuation": 6}
 
 
 def public_fingerprints():
