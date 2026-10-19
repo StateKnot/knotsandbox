@@ -193,6 +193,22 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
+      - name: Verify Docker license context before compilation
+        timeout-minutes: 6
+        run: python3 scripts/test-docker-license-context.py --evidence-dir .local/docker-license-context
+      - name: Retain Docker license context evidence
+        if: always() && hashFiles('.local/docker-license-context/receipt.json') != ''
+        timeout-minutes: 2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: docker-license-context-${{ github.sha }}
+          path: |
+            .local/docker-license-context/receipt.json
+            .local/docker-license-context/*.log
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
       - name: Install the locked Rust toolchain
         run: rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0

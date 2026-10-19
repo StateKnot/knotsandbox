@@ -52,6 +52,17 @@ scripts/release/**
 !scripts/release/sqlite_build.py
 !scripts/release/common.py
 !scripts/release/native_protocol_notices.py
+!scripts/release/oci_payload_notices.py
+!licenses/
+licenses/**
+!licenses/oci-payload/
+licenses/oci-payload/**
+!licenses/oci-payload/README.md
+!licenses/oci-payload/adler2-2.0.1-MIT.txt
+!licenses/oci-payload/crc32fast-1.5.2-MIT.txt
+!licenses/oci-payload/flate2-1.1.10-MIT.txt
+!licenses/oci-payload/miniz_oxide-0.9.1-MIT.txt
+!licenses/oci-payload/simd-adler32-0.3.10-MIT.txt
 # Public, committed certificate/SQL protocol fixtures needed only by the
 # isolated production SQLite acceptance stage; never copied to runtime images.
 !tests/

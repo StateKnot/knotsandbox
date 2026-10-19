@@ -27,3 +27,9 @@
 Linux严格all-target Clippy退出0；源码输入、73个ELF及锁定的独立Python依赖前后校验一致。完整测试使用与上述节点指标组相同的测试容器限制，使用既有 `CLUSTER_PYTHON` 与四个锁定wheel包的只读依赖目录；未复制旧虚拟环境。构建仍为原4GiB内存／8GiB内存与swap总额、2 CPU、256 PID和单Cargo job。未另跑doctest；不能称为云、Kata、CSI、GPU或性能认证。完整记录位于 `.local/p1-executor-20261019/ci-future-timestamp/validation-final.json`。
 
 发布范围仅为测试源码、本文、P1b7a后续CI事实及四份开发表／状态文档，共7文件；生产代码、锁文件、权限、时限、ignored与线程栈不变。发布后须按新提交的精确head独立核对CI，不重跑原失败提交、不沿用基线绿灯；本次本地通过不改写原CI失败或UNKNOWN事实。原失败记录、P1b7a的独立本地载荷验收及其权限关闭边界保留。完整准备执行者／硬限、真实pull／原生保护、云／Kata／CSI／GPU／性能仍未认证；pre-pull关闭。
+
+## 新提交精确 CI 的后续事实
+
+以上7文件已发布为 `e9b779c9d9c226ac60e303075a880160591f435c`，远端完整1143文件与已审本地树一致。该提交的精确 [CI 39199647925](https://github.com/StateKnot/knotsandbox/actions/runs/39199647925) 中，原失败的单元与认证步骤已通过，原生运行时／实际OCI与CRI／PG／Keycloak／浏览器／自动化等后续验收也通过；但最终镜像构建首先在许可目录COPY缺失处失败，整轮仍为4个job成功、1个失败。不能将时间夹具步骤通过称为整轮CI成功，原始时钟差仍UNKNOWN。
+
+生产Docker上下文遗漏与前轮scratch许可验收未覆盖实际过滤的范围缺口，见[后续交付](docker-license-context-delivery-20261019.md)。原失败和本片局部通过证据均保留，新修复提交的完整CI仍须独立核对。
