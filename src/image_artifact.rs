@@ -3,7 +3,8 @@
 //! The caller supplies the expected digest. Metadata inspection leaves payloads
 //! unread; the separate payload interface requires explicit byte budgets. No
 //! operation establishes approval, interprets tar entries, unpacks content, or
-//! prepares a runtime.
+//! prepares a runtime. A separate exporter writes only a canonical approved-root
+//! OCI closure for an externally restricted bootstrap executor.
 use std::{collections::BTreeMap, path::Path};
 
 use serde::{Deserialize, Serialize, de};
@@ -20,6 +21,10 @@ const MAX_LAYERS: usize = 256;
 
 mod payloads;
 pub use payloads::{PayloadLimits, VerifiedImagePayloads, verify_oci_payloads};
+mod bootstrap_archive;
+pub use bootstrap_archive::{
+    BootstrapArchiveLimits, ExportedBootstrapArchive, export_bootstrap_archive,
+};
 
 /// A metadata-only receipt; no field conveys approval or preparation authority.
 #[derive(Debug, Serialize)]
@@ -84,6 +89,18 @@ pub enum ImageArtifactError {
     DiffIdMismatch,
     #[error("PAYLOAD_DEADLINE_EXCEEDED")]
     PayloadDeadlineExceeded,
+    #[error("INVALID_BOOTSTRAP_ARCHIVE_LIMITS")]
+    InvalidBootstrapArchiveLimits,
+    #[error("INVALID_BOOTSTRAP_REFERENCE")]
+    InvalidBootstrapReference,
+    #[error("UNSUPPORTED_BOOTSTRAP_ROOT")]
+    UnsupportedBootstrapRoot,
+    #[error("BOOTSTRAP_ARCHIVE_LIMIT_EXCEEDED")]
+    BootstrapArchiveLimitExceeded,
+    #[error("BOOTSTRAP_ARCHIVE_DEADLINE_EXCEEDED")]
+    BootstrapArchiveDeadlineExceeded,
+    #[error("BOOTSTRAP_ARCHIVE_WRITE_FAILED")]
+    BootstrapArchiveWriteFailed,
 }
 
 impl ImageArtifactError {
@@ -110,6 +127,12 @@ impl ImageArtifactError {
             Self::InvalidLayerEncoding => "INVALID_LAYER_ENCODING",
             Self::DiffIdMismatch => "DIFF_ID_MISMATCH",
             Self::PayloadDeadlineExceeded => "PAYLOAD_DEADLINE_EXCEEDED",
+            Self::InvalidBootstrapArchiveLimits => "INVALID_BOOTSTRAP_ARCHIVE_LIMITS",
+            Self::InvalidBootstrapReference => "INVALID_BOOTSTRAP_REFERENCE",
+            Self::UnsupportedBootstrapRoot => "UNSUPPORTED_BOOTSTRAP_ROOT",
+            Self::BootstrapArchiveLimitExceeded => "BOOTSTRAP_ARCHIVE_LIMIT_EXCEEDED",
+            Self::BootstrapArchiveDeadlineExceeded => "BOOTSTRAP_ARCHIVE_DEADLINE_EXCEEDED",
+            Self::BootstrapArchiveWriteFailed => "BOOTSTRAP_ARCHIVE_WRITE_FAILED",
         }
     }
 }

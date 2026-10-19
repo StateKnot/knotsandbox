@@ -1,8 +1,11 @@
-//! Read-only artifact inspection; no approval checks or image preparation.
+//! Artifact inspection and canonical bootstrap output; no runtime preparation.
 use std::path::PathBuf;
 
 use clap::{Args, Subcommand};
-use sandbox_platform::image_artifact::{PayloadLimits, verify_oci_metadata, verify_oci_payloads};
+use sandbox_platform::image_artifact::{
+    BootstrapArchiveLimits, PayloadLimits, export_bootstrap_archive, verify_oci_metadata,
+    verify_oci_payloads,
+};
 
 #[derive(Args)]
 pub struct ImageArtifactArgs {
@@ -16,6 +19,8 @@ enum ImageArtifactCommand {
     Verify(VerifyArgs),
     /// Verify actual raw/gzip layer streams and DiffIDs within explicit byte limits.
     VerifyPayloads(PayloadArgs),
+    /// Export a verified direct-manifest OCI archive to binary stdout for bootstrap.
+    ExportBootstrapArchive(BootstrapArchiveArgs),
     /// Read existing OCI metadata from this Linux host's fixed containerd endpoint.
     InspectNative(NativeArgs),
     /// Match the current CRI image index ID to verified local OCI configuration.
@@ -68,6 +73,21 @@ struct PayloadArgs {
     max_total_decoded_bytes: u64,
 }
 
+#[derive(Args)]
+struct BootstrapArchiveArgs {
+    #[command(flatten)]
+    payloads: PayloadArgs,
+    /// Qualified repository@expected-digest; source naming annotations are ignored.
+    #[arg(long)]
+    reference: String,
+    /// Complete USTAR stream byte ceiling, including headers, padding and EOF.
+    #[arg(long)]
+    max_archive_bytes: u64,
+    /// Cooperative export deadline in seconds, positive and at most 300.
+    #[arg(long)]
+    deadline_seconds: u64,
+}
+
 pub async fn run(args: ImageArtifactArgs) -> anyhow::Result<()> {
     match args.command {
         ImageArtifactCommand::Verify(args) => {
@@ -99,6 +119,36 @@ pub async fn run(args: ImageArtifactArgs) -> anyhow::Result<()> {
                 anyhow::anyhow!("image payload verification failed: {}", error.code())
             })?;
             println!("{}", serde_json::to_string(&verified)?);
+        }
+        ImageArtifactCommand::ExportBootstrapArchive(args) => {
+            let result = PayloadLimits::new(
+                args.payloads.max_layer_bytes,
+                args.payloads.max_total_layer_bytes,
+                args.payloads.max_decoded_layer_bytes,
+                args.payloads.max_total_decoded_bytes,
+            )
+            .and_then(|payloads| {
+                BootstrapArchiveLimits::new(
+                    payloads,
+                    args.max_archive_bytes,
+                    std::time::Duration::from_secs(args.deadline_seconds),
+                )
+            })
+            .and_then(|limits| {
+                export_bootstrap_archive(
+                    &args.payloads.image.layout,
+                    &args.payloads.image.expected_digest,
+                    &args.payloads.image.platform,
+                    &args.reference,
+                    limits,
+                    &mut std::io::stdout().lock(),
+                )
+            });
+            // stdout is an archive, never a mixed JSON/diagnostic stream. A
+            // consumer must require exit success before importing any bytes.
+            result.map_err(|error| {
+                anyhow::anyhow!("bootstrap archive export failed: {}", error.code())
+            })?;
         }
         ImageArtifactCommand::InspectNative(args) => {
             let metadata = sandbox_platform::nodeguard::native_image_metadata::inspect(

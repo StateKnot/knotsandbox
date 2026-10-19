@@ -60,6 +60,31 @@ pub struct VerifiedImagePayloads {
     gzip_members_verified: u32,
 }
 
+impl VerifiedImagePayloads {
+    pub(super) fn into_metadata(self) -> VerifiedImageMetadata {
+        self.metadata
+    }
+}
+
+// The bootstrap exporter retains its original layout FDs and supplies its own
+// explicit deadline. The public payload command keeps its five-second budget.
+pub(super) fn verify_in(
+    layout: &Layout,
+    metadata: VerifiedImageMetadata,
+    limits: PayloadLimits,
+    deadline: Instant,
+) -> Result<VerifiedImagePayloads, ImageArtifactError> {
+    #[cfg(unix)]
+    {
+        unix::verify(layout, metadata, limits, deadline)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (layout, metadata, limits, deadline);
+        Err(ImageArtifactError::UnsupportedLayout)
+    }
+}
+
 /// Verify every selected layer's encoded SHA-256 and decoded stream DiffID.
 ///
 /// Only plain tar and gzip streams are supported; zstd is rejected. No tar

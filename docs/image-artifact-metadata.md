@@ -1,5 +1,7 @@
 # 镜像完整性校验与原生读回
 
+单镜像确定性 USTAR 导出另见[归档生产者合同](image-artifact-bootstrap-archive.md)；该接口不授予镜像准备或启动许可。
+
 `sandbox-admin image-artifact verify` 按调用方提供的预期摘要，校验本地 OCI 镜像元数据的身份、平台和必要描述符关系。它只读取元数据，不访问数据库、注册表或运行时，不读取层载荷，不拉取、解包或准备镜像。其他 Rust 模块使用同一公共入口 `sandbox_platform::image_artifact::verify_oci_metadata`，CLI 不维护第二套规则。[实现](../src/image_artifact.rs)、[CLI](../src/admin_image_artifact_cli.rs)
 
 ```sh

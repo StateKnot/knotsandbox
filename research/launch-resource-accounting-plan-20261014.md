@@ -1,6 +1,8 @@
 # 逐次启动资源账本：下一完整交付方案
 
-最新检查点（2026-10-19，Docker生产上下文与许可输入修复）：公开 `e9b779c` 精确CI 39199647925为4 job成功／1失败；时间夹具、单元／原生运行时／PG／Keycloak／浏览器／自动化已通过，首次失败为Docker许可目录COPY缺失。真实ROOT与生产ignore已复现目录及producer被过滤；仅放行固定公开输入，新增CI编译前的真实BuildKit过滤／producer／四目标28文件检查。最终本地GREEN及漏脚本／漏许可／合成私有文件泄漏三个反例已通过，默认拒绝及私有／生成路径排除保持；前轮scratch测试未覆盖原ignore的范围缺口明确保留。566个Rust输入未变，本片不重复Rust／release全量，不把局部验收称完整镜像成功；新提交精确CI独立核对。完整P1执行者／硬限／原生保护及云／Kata／CSI／GPU／性能仍待完成，pre-pull关闭。见[本批交付](docker-license-context-delivery-20261019.md)。
+最新检查点（2026-10-19，P1b7b单镜像归档生产者）：已核公开基线 `01d320d49fc66c1ad3eba0762b2d87b0356be9ee` 精确CI 39203873162为5 job／75 step全通过。新增公共Rust／实际admin二进制USTAR导出，固定单直接manifest／规范引用、只含已验闭包、精确输出预算及流期间文件身份；原载荷／原生5秒期限保持。主机27 CLI／12库、Linux实际65程序573通过／0失败／309既有ignored、两平台strict Clippy及主机fmt通过；真实containerd 2.3.5的导入／overlayfs解包、6原生读回及同一存储重启后proof／快照身份保持通过，无重复导入。部署候选因CAP_SYS_ADMIN／mount硬边界未封闭而不发布，完整P1仍未完成，pre-pull关闭；lease／GC、GPU／云／Kata／CSI／性能认证继续待做。失败与外连探针未执行事实保留；本片新提交完整树与精确CI另核。见[本批交付](image-bootstrap-archive-delivery-20261019.md)。
+
+前序检查点（2026-10-19，Docker生产上下文与许可输入修复）：公开 `e9b779c` 精确CI 39199647925为4 job成功／1失败；时间夹具、单元／原生运行时／PG／Keycloak／浏览器／自动化已通过，首次失败为Docker许可目录COPY缺失。真实ROOT与生产ignore已复现目录及producer被过滤；仅放行固定公开输入，新增CI编译前的真实BuildKit过滤／producer／四目标28文件检查。最终本地GREEN及漏脚本／漏许可／合成私有文件泄漏三个反例已通过，默认拒绝及私有／生成路径排除保持；前轮scratch测试未覆盖原ignore的范围缺口明确保留。566个Rust输入未变，本片不重复Rust／release全量，不把局部验收称完整镜像成功；新提交精确CI独立核对。完整P1执行者／硬限／原生保护及云／Kata／CSI／GPU／性能仍待完成，pre-pull关闭。见[本批交付](docker-license-context-delivery-20261019.md)。
 
 前序检查点（2026-10-19，节点镜像时间夹具与精确CI复验）：发布 `0dd7eb7` 的精确CI 39196350609为4 job成功／1失败，首个失败是原未来时间HTTP夹具；原CI未记录时钟差，实际历史触发原因仍UNKNOWN。固定时钟实际RED后，仅修测试夹具，保留真实HTTP UNKNOWN断言并补真实decoder的5秒边界／相邻浮点值及库存独立性测试；生产代码、期限、权限、ignored和线程栈不变。主机2项、Linux原组9项及实际65个all-target测试程序566通过／0失败／309原生ignored，两平台严格Clippy／主机fmt通过；首轮Docker挂载启动失败（Cargo未运行）保留。新提交精确CI单独核对，不沿用基线绿灯或改写旧失败；完整P1执行者／硬限／原生保护及云／Kata／CSI／GPU／性能仍待完成，pre-pull关闭。见[本批交付](node-image-clock-fixture-delivery-20261019.md)。
 

@@ -228,8 +228,6 @@ fn invoke_payloads(
     digest: &str,
     limits: &[Option<String>; 4],
 ) -> anyhow::Result<Output> {
-    let stdout = tempfile::tempfile()?;
-    let stderr = tempfile::tempfile()?;
     let mut command = Command::new(env!("CARGO_BIN_EXE_sandbox-admin"));
     command
         .args(["image-artifact", "verify-payloads", "--layout"])
@@ -240,6 +238,15 @@ fn invoke_payloads(
             command.arg(flag).arg(value);
         }
     }
+    execute_offline(
+        command,
+        "offline image payload CLI exceeded its fixed five-second budget",
+    )
+}
+
+fn execute_offline(mut command: Command, timeout_message: &str) -> anyhow::Result<Output> {
+    let stdout = tempfile::tempfile()?;
+    let stderr = tempfile::tempfile()?;
     let mut child = command
         .env(
             "SANDBOX_OWNER_DATABASE_URL",
@@ -265,7 +272,7 @@ fn invoke_payloads(
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            anyhow::bail!("offline image payload CLI exceeded its fixed five-second budget");
+            anyhow::bail!("{timeout_message}");
         }
         thread::sleep(Duration::from_millis(10));
     };
@@ -282,6 +289,373 @@ fn invoke_payloads(
     stdout.read_to_end(&mut output.stdout)?;
     stderr.read_to_end(&mut output.stderr)?;
     Ok(output)
+}
+
+fn export_archive(
+    layout: &Path,
+    digest: &str,
+    reference: &str,
+    caps: [u64; 4],
+    max_archive: u64,
+    deadline: u64,
+) -> anyhow::Result<Output> {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_sandbox-admin"));
+    command
+        .args(["image-artifact", "export-bootstrap-archive", "--layout"])
+        .arg(layout)
+        .args([
+            "--expected-digest",
+            digest,
+            "--platform",
+            "linux/amd64",
+            "--max-archive-bytes",
+            &max_archive.to_string(),
+            "--deadline-seconds",
+            &deadline.to_string(),
+        ])
+        .arg(format!("--reference={reference}"));
+    for (flag, value) in LIMIT_FLAGS.into_iter().zip(caps) {
+        command.arg(flag).arg(value.to_string());
+    }
+    execute_offline(
+        command,
+        "bootstrap archive CLI exceeded its five-second test watchdog",
+    )
+}
+
+fn archive_rejected(output: Output, code: &str) -> anyhow::Result<()> {
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stderr)?.trim(),
+        format!("Error: bootstrap archive export failed: {code}")
+    );
+    Ok(())
+}
+
+// Independent minimal POSIX tar reader: assert the transport contract and exact
+// member bytes, rather than calling the archive producer's header helpers.
+fn archive_members(bytes: &[u8]) -> anyhow::Result<BTreeMap<String, Vec<u8>>> {
+    let mut entries = BTreeMap::new();
+    let mut position = 0;
+    loop {
+        let header = bytes
+            .get(position..position + 512)
+            .context("missing tar header")?;
+        if header.iter().all(|byte| *byte == 0) {
+            assert_eq!(bytes.len(), position + 1024);
+            assert!(bytes[position..].iter().all(|byte| *byte == 0));
+            break;
+        }
+        assert_eq!(&header[257..265], b"ustar\0\x30\x30");
+        assert_eq!(header[156], b'0');
+        assert!(header[157..257].iter().all(|byte| *byte == 0));
+        assert!(header[345..500].iter().all(|byte| *byte == 0));
+        let octal = |range: std::ops::Range<usize>| -> anyhow::Result<u64> {
+            Ok(u64::from_str_radix(
+                std::str::from_utf8(&header[range])?.trim_matches(['\0', ' ']),
+                8,
+            )?)
+        };
+        let checksum: u64 = header
+            .iter()
+            .enumerate()
+            .map(|(index, byte)| {
+                if (148..156).contains(&index) {
+                    u64::from(b' ')
+                } else {
+                    u64::from(*byte)
+                }
+            })
+            .sum();
+        assert_eq!(octal(148..156)?, checksum);
+        assert_eq!(octal(100..108)?, 0o444);
+        assert_eq!(octal(108..116)?, 0);
+        assert_eq!(octal(116..124)?, 0);
+        assert_eq!(octal(136..148)?, 0);
+        let name_end = header[..100]
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(100);
+        let name = std::str::from_utf8(&header[..name_end])?.to_owned();
+        let size = usize::try_from(octal(124..136)?)?;
+        let start = position + 512;
+        let data = bytes.get(start..start + size).context("missing tar data")?;
+        assert!(
+            entries.insert(name, data.to_vec()).is_none(),
+            "duplicate tar name"
+        );
+        position = start + size.div_ceil(512) * 512;
+        assert!(bytes[start + size..position].iter().all(|byte| *byte == 0));
+    }
+    Ok(entries)
+}
+
+#[test]
+fn bootstrap_archive_contains_only_the_verified_closure_and_controlled_native_name()
+-> anyhow::Result<()> {
+    let layer = PayloadSpec::fixture("beta.tar.gz")?;
+    let layout = PayloadLayout::new(&[layer.clone(), layer.clone()])?;
+    fs::write(layout.path.join("index.json"), b"PRIVATE_UNRELATED_INDEX")?;
+    fs::write(
+        layout.path.join("blobs/sha256/unrelated"),
+        b"PRIVATE_UNRELATED_BLOB",
+    )?;
+    let mut manifest: Value = serde_json::from_slice(&fs::read(layout.blob_path(&layout.root))?)?;
+    manifest["annotations"] = json!({"io.containerd.image.name":"evil.invalid/override:tag"});
+    let root = PayloadLayout::write_blob(&layout.path, &serde_json::to_vec(&manifest)?)?;
+    let reference = format!("bootstrap.invalid/approved@{root}");
+    let before = snapshot(&layout.path)?;
+    let output = export_archive(&layout.path, &root, &reference, GENEROUS, 1_048_576, 5)?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let mut members = archive_members(&output.stdout)?;
+    assert_eq!(
+        members.len(),
+        5,
+        "duplicate layer must be emitted only once"
+    );
+    assert_eq!(
+        members.remove("oci-layout").context("layout marker")?,
+        br#"{"imageLayoutVersion":"1.0.0"}"#
+    );
+    let wrapper: Value = serde_json::from_slice(&members.remove("index.json").context("wrapper")?)?;
+    assert_eq!(
+        wrapper,
+        json!({
+            "schemaVersion":2,"mediaType":INDEX_TYPE,"manifests":[{
+                "mediaType":MANIFEST_TYPE,"digest":root,
+                "size":fs::metadata(layout.blob_path(&root))?.len(),
+                "platform":{"os":"linux","architecture":"amd64"},
+                "annotations":{"io.containerd.image.name":reference}
+            }]
+        })
+    );
+    let config_digest = manifest["config"]["digest"]
+        .as_str()
+        .context("config digest")?;
+    for digest in [root.as_str(), config_digest, layer.digest.as_str()] {
+        let name = format!("blobs/sha256/{}", &digest[7..]);
+        let actual = members.remove(&name).context("approved blob")?;
+        assert_eq!(actual, fs::read(layout.blob_path(digest))?);
+        assert_eq!(format!("sha256:{:x}", Sha256::digest(&actual)), digest);
+    }
+    assert!(members.is_empty());
+    assert_eq!(snapshot(&layout.path)?, before);
+    let again = export_archive(
+        &layout.path,
+        &root,
+        &reference,
+        GENEROUS,
+        output.stdout.len() as u64,
+        5,
+    )?;
+    assert!(again.status.success());
+    assert_eq!(
+        again.stdout, output.stdout,
+        "canonical output must be deterministic"
+    );
+    archive_rejected(
+        export_archive(
+            &layout.path,
+            &root,
+            &reference,
+            GENEROUS,
+            output.stdout.len() as u64 - 1,
+            5,
+        )?,
+        "BOOTSTRAP_ARCHIVE_LIMIT_EXCEEDED",
+    )?;
+    Ok(())
+}
+
+#[test]
+fn bootstrap_export_rejects_indexes_refs_caps_and_bad_payloads_before_output() -> anyhow::Result<()>
+{
+    let spec = PayloadSpec::fixture("alpha.tar")?;
+    let layout = PayloadLayout::new(std::slice::from_ref(&spec))?;
+    let reference = format!("bootstrap.invalid/approved@{}", layout.root);
+    for invalid in [
+        "bootstrap.invalid/approved:tag".to_owned(),
+        format!("approved@{}", layout.root),
+        format!("bootstrap.invalid/../approved@{}", layout.root),
+        format!("bootstrap.invalid/approved:tag@{}", layout.root),
+        format!("bootstrap.invalid/approved@{ROOT}"),
+        format!("team/image@{}", layout.root),
+        format!("docker.io/ubuntu@{}", layout.root),
+        format!("index.docker.io/library/ubuntu@{}", layout.root),
+        format!("registry.invalid/-repo@{}", layout.root),
+        format!("registry.invalid/repo_@{}", layout.root),
+        format!("registry.invalid/a___b@{}", layout.root),
+        format!("registry.invalid:abc/repo@{}", layout.root),
+        format!("registry.invalid:0/repo@{}", layout.root),
+        format!("registry.invalid:65536/repo@{}", layout.root),
+        format!("-registry.invalid/repo@{}", layout.root),
+        format!("registry..invalid/repo@{}", layout.root),
+    ] {
+        archive_rejected(
+            export_archive(&layout.path, &layout.root, &invalid, GENEROUS, 1_048_576, 5)?,
+            "INVALID_BOOTSTRAP_REFERENCE",
+        )?;
+    }
+    for (bytes, deadline) in [(0, 5), (1_048_576, 0), (1_048_576, 301)] {
+        archive_rejected(
+            export_archive(
+                &layout.path,
+                &layout.root,
+                &reference,
+                GENEROUS,
+                bytes,
+                deadline,
+            )?,
+            "INVALID_BOOTSTRAP_ARCHIVE_LIMITS",
+        )?;
+    }
+    archive_rejected(
+        export_archive(
+            &layout.path,
+            &layout.root,
+            &reference,
+            [0, 1, 1, 1],
+            1_048_576,
+            5,
+        )?,
+        "INVALID_PAYLOAD_LIMITS",
+    )?;
+    archive_rejected(
+        export_archive(
+            &layout.path,
+            &layout.root,
+            &reference,
+            [1, 1, 1, 1],
+            1_048_576,
+            5,
+        )?,
+        "PAYLOAD_LIMIT_EXCEEDED",
+    )?;
+    archive_rejected(
+        export_archive(
+            &fixture(),
+            ROOT,
+            &format!("bootstrap.invalid/approved@{ROOT}"),
+            GENEROUS,
+            1_048_576,
+            5,
+        )?,
+        "UNSUPPORTED_BOOTSTRAP_ROOT",
+    )?;
+    let mut changed = spec.bytes.clone();
+    changed[0] ^= 1;
+    fs::write(layout.blob_path(&spec.digest), changed)?;
+    archive_rejected(
+        export_archive(
+            &layout.path,
+            &layout.root,
+            &reference,
+            GENEROUS,
+            1_048_576,
+            5,
+        )?,
+        "DIGEST_MISMATCH",
+    )?;
+    fs::remove_file(layout.blob_path(&spec.digest))?;
+    archive_rejected(
+        export_archive(
+            &layout.path,
+            &layout.root,
+            &reference,
+            GENEROUS,
+            1_048_576,
+            5,
+        )?,
+        "METADATA_UNAVAILABLE",
+    )?;
+    Ok(())
+}
+
+#[test]
+fn bootstrap_archive_preserves_canonical_names_including_localhost_and_valid_ports()
+-> anyhow::Result<()> {
+    let layout = PayloadLayout::new(&[])?;
+    for repository in [
+        "localhost/seed",
+        "localhost:5000/seed",
+        "registry:5000/team/seed",
+        "registry.invalid:65535/team/seed",
+        "docker.io/library/ubuntu",
+        "bootstrap.invalid/team/seed__one--two.three",
+    ] {
+        let reference = format!("{repository}@{}", layout.root);
+        let output = export_archive(
+            &layout.path,
+            &layout.root,
+            &reference,
+            GENEROUS,
+            1_048_576,
+            5,
+        )?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stderr.is_empty());
+        let mut members = archive_members(&output.stdout)?;
+        let index: Value = serde_json::from_slice(&members.remove("index.json").context("index")?)?;
+        assert_eq!(
+            index["manifests"][0]["annotations"],
+            json!({"io.containerd.image.name":reference})
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn bootstrap_public_receipt_does_not_grant_store_preparation_or_approval() -> anyhow::Result<()> {
+    use sandbox_platform::image_artifact::{
+        BootstrapArchiveLimits, PayloadLimits, export_bootstrap_archive,
+    };
+    let layout = PayloadLayout::new(&[])?;
+    let reference = format!("bootstrap.invalid/scratch@{}", layout.root);
+    let mut output = Vec::new();
+    let limits = BootstrapArchiveLimits::new(
+        PayloadLimits::new(1, 1, 1, 1)?,
+        1_048_576,
+        Duration::from_secs(5),
+    )?;
+    let receipt = export_bootstrap_archive(
+        &layout.path,
+        &layout.root,
+        "linux/amd64",
+        &reference,
+        limits,
+        &mut output,
+    )?;
+    let receipt = serde_json::to_value(receipt)?;
+    assert_eq!(receipt["scope"], "OCI_BOOTSTRAP_ARCHIVE");
+    for field in [
+        "approval_checked",
+        "preparation_allowed",
+        "unpack_performed",
+        "physical_storage_bound_verified",
+        "layer_archive_semantics_checked",
+    ] {
+        assert_eq!(receipt[field], false, "{field}");
+    }
+    assert_eq!(receipt["layer_payloads_verified"], true);
+    assert_eq!(receipt["diff_ids_verified"], true);
+    assert_eq!(receipt["archive_entries"], 4);
+    assert_eq!(receipt["archive_bytes_written"], output.len().to_string());
+    assert_eq!(
+        receipt["archive_digest"],
+        format!("sha256:{:x}", Sha256::digest(&output))
+    );
+    assert_eq!(archive_members(&output)?.len(), 4);
+    Ok(())
 }
 
 #[test]
