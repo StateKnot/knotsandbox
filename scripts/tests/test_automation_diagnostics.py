@@ -60,6 +60,40 @@ class AutomationDiagnosticsTest(unittest.TestCase):
                 text += f"Error: Process test requires formal 1..37+39..{version} and no invented migration38\n"
                 self.assertEqual(self.diagnostic(text, code=101)["classification"], "FORMAL_SCHEMA_MISMATCH")
 
+    def test_acceptance_phase_classifies_an_unknown_private_cause_without_copying_it(self):
+        phases = ("BASELINE", "WORKER_STARTUP", "INTENT_PREPARATION", "QUOTA_BLOCKER",
+                  "REAL_QUOTA_WAIT", "FINAL_FENCE_RELEASE", "REFUSAL_OBSERVATION",
+                  "INTENT_RECOVERY", "PROCESS_DRAIN")
+        secret = "postgresql://PRIVATE_LOGIN:PRIVATE_PASSWORD@private.example/SECRET_BODY"
+        for phase in phases:
+            with self.subTest(phase=phase):
+                text = self.process("test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out;")
+                text += "Error: Automation acceptance phase: " + phase + "\nCaused by: " + secret
+                result = self.diagnostic(text, code=101)
+                self.assertEqual(result["testVerdict"], "EXACT_FAILURE")
+                self.assertEqual(result["classification"], "ACCEPTANCE_" + phase)
+                assertion = result["assertions"][0]
+                self.assertEqual(assertion["sourceFile"], "tests/automation_process/acceptance_faults.rs")
+                source = runner.ROOT / assertion["sourceFile"]
+                self.assertIn("Automation acceptance phase: " + phase,
+                              source.read_text().splitlines()[assertion["sourceLine"] - 1])
+                self.assertEqual(assertion["sourceSha256"], hashlib.sha256(source.read_bytes()).hexdigest())
+                self.assertNotIn("PRIVATE_", json.dumps(result))
+                self.assertNotIn("SECRET_BODY", json.dumps(result))
+
+    def test_unknown_acceptance_phase_stays_unknown_and_cannot_change_test_verdict(self):
+        text = self.process("test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out;")
+        for phase in ("SECRET_BODY", "REAL_QUOTA_WAIT_SECRET_BODY", "REAL_QUOTA_WAIT/SECRET_BODY"):
+            with self.subTest(phase=phase):
+                result = self.diagnostic(text + "Error: Automation acceptance phase: " + phase, code=101)
+                self.assertEqual(result["classification"], "EXACT_FAILURE")
+                self.assertEqual(result["assertions"], [])
+                self.assertNotIn("SECRET_BODY", json.dumps(result))
+        # A context records where an error returned; it cannot create a pass.
+        result = self.diagnostic("Error: Automation acceptance phase: REAL_QUOTA_WAIT", code=101)
+        self.assertEqual(result["testVerdict"], "NO_EXACT_TEST_VERDICT")
+        self.assertEqual(result["classification"], "ACCEPTANCE_REAL_QUOTA_WAIT")
+
     def test_zero_wrong_test_ignored_failed_exit_and_duplicate_summaries_never_pass(self):
         good = "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;"
         cases = ((self.process("test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out;"), 0),

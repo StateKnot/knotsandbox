@@ -42,6 +42,17 @@ TEST_GROUPS = {
     "automation::notification_http_tests": ("notifications-http.log", 1, "automation::notification_http_tests::"),
     "worker_process": ("process.log", 1, PROCESS_TEST),
 }
+ACCEPTANCE_PHASES = (
+    ("BASELINE", "The acceptance trial failed while establishing its exclusive baseline backends."),
+    ("WORKER_STARTUP", "The acceptance trial failed while starting and observing its actual worker."),
+    ("INTENT_PREPARATION", "The acceptance trial failed while creating its genuine original intent."),
+    ("QUOTA_BLOCKER", "The acceptance trial failed while acquiring its owned quota blocker."),
+    ("REAL_QUOTA_WAIT", "The acceptance trial failed while observing the actual quota wait and original intent."),
+    ("FINAL_FENCE_RELEASE", "The acceptance trial failed while changing safe mode or releasing quota within its original window."),
+    ("REFUSAL_OBSERVATION", "The acceptance trial failed while observing rollback, readiness refusal and normal queue finish."),
+    ("INTENT_RECOVERY", "The acceptance trial failed while awaiting natural recovery of its original intent."),
+    ("PROCESS_DRAIN", "The acceptance trial failed while verifying its original process and awaited drain."),
+)
 PROCESS_ASSERTIONS = (
     ("FORMAL_SCHEMA_MISMATCH", "tests/automation_process.rs",
      "Process test requires formal 1..37+39..",
@@ -72,7 +83,10 @@ PROCESS_ASSERTIONS = (
      "Owned process output exceeded fixed bound",
      ("Owned process output exceeded fixed bound",),
      "The owned process output exceeded its existing bound."),
-)
+) + tuple(("ACCEPTANCE_" + phase, "tests/automation_process/acceptance_faults.rs",
+           "Automation acceptance phase: " + phase,
+           ("Automation acceptance phase: " + phase,), summary)
+          for phase, summary in ACCEPTANCE_PHASES)
 PROCESS_PHASES = {
     "CHECK": ("START", "CONNECTED_TLS_BLOCKED", "BACKENDS_ABSENT", "OUTPUT_JOINED"),
     "BIND_ERROR": ("START", "CONNECTED_TLS_BLOCKED", "BACKENDS_ABSENT", "OUTPUT_JOINED"),
@@ -119,7 +133,10 @@ def test_diagnostic(path, group, exit_code, *, timed_out=False):
     markers = []
     if group == "worker_process":
         for classification, filename, anchor, messages, summary in PROCESS_ASSERTIONS:
-            if not any(message in text for message in messages):
+            matched = any(re.search(r"(?m)^(?:Error: )?" + re.escape(message) + r"\r?$", text)
+                          for message in messages) if classification.startswith("ACCEPTANCE_") \
+                else any(message in text for message in messages)
+            if not matched:
                 continue
             source = ROOT / filename
             source_bytes = source.read_bytes()

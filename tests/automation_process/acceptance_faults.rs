@@ -84,17 +84,27 @@ async fn trial(
     mode: AcceptanceFault,
 ) -> anyhow::Result<()> {
     println!("AUTOMATION_PROCESS_STEP {} START", mode.stage());
-    let baseline = sessions(&monitor.pool, None).await?;
-    ensure!(
-        baseline.len() == 1,
-        "Acceptance trial must own the only automation process"
-    );
+    let baseline = async {
+        let baseline = sessions(&monitor.pool, None).await?;
+        ensure!(
+            baseline.len() == 1,
+            "Acceptance trial must own the only automation process"
+        );
+        Ok::<_, anyhow::Error>(baseline)
+    }
+    .await
+    .context("Automation acceptance phase: BASELINE")?;
     let mut owned = Owned::empty();
     let mut quota_lock = None;
     let mut safe_changed = false;
+    // Fixed test-only context survives an unrecognized SQL/HTTP/IO cause. Do not
+    // log that cause or add observations to the timing-sensitive success path.
+    let mut phase = "Automation acceptance phase: WORKER_STARTUP";
     let outcome = async {
         let identity = start_ready(&mut owned, monitor, &baseline, url, pod).await?;
+        phase = "Automation acceptance phase: INTENT_PREPARATION";
         let automation = create_execute(f).await?;
+        phase = "Automation acceptance phase: QUOTA_BLOCKER";
         let deadline = Instant::now() + Duration::from_secs(15);
         quota_lock = Some(tokio::time::timeout_at(deadline, owner.pool.begin()).await
             .context("Acceptance blocker BEGIN exceeded original observer bound")??);
@@ -113,6 +123,7 @@ async fn trial(
         ensure!(accounts.len() == 2, "Only the fixture's exact tenant and project execution accounts may be locked");
         // Prepare does not acquire these accounts; the real accept transaction
         // has inserted operation/execution and is blocked in normal reserve_quota.
+        phase = "Automation acceptance phase: REAL_QUOTA_WAIT";
         let (before, original_accept_deadline) = loop {
             ensure!(owned.child()?.try_wait()?.is_none(), "Acceptance worker exited before real quota blocking");
             let rows = tokio::time::timeout_at(deadline, sessions(&monitor.pool, Some(blocker))).await
@@ -134,6 +145,7 @@ async fn trial(
             tokio::time::sleep(Duration::from_millis(20)).await;
         };
         if matches!(mode, AcceptanceFault::FinalSafeMode) {
+            phase = "Automation acceptance phase: FINAL_FENCE_RELEASE";
             // Set after actual uncommitted operation INSERT, so only the
             // deferred normal final SQL fence should reject the attempted COMMIT.
             safe_changed = true;
@@ -146,6 +158,7 @@ async fn trial(
                 .context("Final-fence quota lock release exceeded original window")??;
             ensure!(Instant::now() < release_deadline, "Final-fence quota ROLLBACK ACK was late");
         }
+        phase = "Automation acceptance phase: REFUSAL_OBSERVATION";
         let probe = client()?;
         let address = owned.address.context("Acceptance worker health address missing")?;
         let failure_deadline = Instant::now() + Duration::from_secs(10);
@@ -174,6 +187,7 @@ async fn trial(
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         println!("AUTOMATION_PROCESS_STEP {} UNKNOWN_ROLLBACK_ALIVE_READY_503", mode.stage());
+        phase = "Automation acceptance phase: INTENT_RECOVERY";
         // Timeout mode deliberately waited for the original runtime 3-second
         // lock timeout; its blocker now releases without changing production settings.
         rollback_lock(&mut quota_lock).await?;
@@ -201,6 +215,7 @@ async fn trial(
                 "Normal retryable acceptance refusal became a permanent failure or duplicate acceptance");
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
+        phase = "Automation acceptance phase: PROCESS_DRAIN";
         ensure!(process_identity(&child_backends(&sessions(&monitor.pool, None).await?, &baseline), pod)? == identity,
             "Recoverable acceptance replaced or restarted the real process");
         let ready = probe.get(format!("http://{address}/health/ready")).send().await?;
@@ -225,7 +240,7 @@ async fn trial(
     };
     let process_cleanup = owned.cleanup(outcome.is_err()).await;
     let absence = require_absent(&monitor.pool, &baseline).await;
-    outcome?;
+    outcome.context(phase)?;
     lock_cleanup?;
     mode_cleanup?;
     absence?;
