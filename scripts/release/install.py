@@ -6,7 +6,7 @@ from pathlib import Path
 import shutil
 import sys
 import tempfile
-from common import ROOT, BINARIES, COMPONENTS, SQLX_POSTGRES_NOTICES, NATIVE_PROTOCOL_NOTICES, load, require, run, safe_child, sha
+from common import ROOT, BINARIES, COMPONENTS, SQLX_POSTGRES_NOTICES, NATIVE_PROTOCOL_NOTICES, OCI_PAYLOAD_NOTICES, load, require, run, safe_child, sha
 
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--directory',type=Path,required=True)
@@ -25,8 +25,8 @@ with tempfile.TemporaryDirectory(prefix='.verified-release-',dir=args.destinatio
     manifest_path=safe_child(args.directory,'release-manifest.json')
     require(sha(manifest_path)==lock['manifest_sha256'],'MANIFEST_CHANGED_AFTER_VERIFICATION')
     manifest=load(manifest_path)
-    require(type(manifest.get('version')) is int and manifest['version']==4,'CURRENT_RELEASE_SCHEMA_REQUIRED')
-    for name in (*BINARIES,*(name+'.oci.tar' for name in COMPONENTS),SQLX_POSTGRES_NOTICES,NATIVE_PROTOCOL_NOTICES):
+    require(type(manifest.get('version')) is int and manifest['version']==5,'CURRENT_RELEASE_SCHEMA_REQUIRED')
+    for name in (*BINARIES,*(name+'.oci.tar' for name in COMPONENTS),SQLX_POSTGRES_NOTICES,NATIVE_PROTOCOL_NOTICES,OCI_PAYLOAD_NOTICES):
         source=safe_child(args.directory,name);target=stage/name
         shutil.copyfile(source,target)
         require(sha(target)==manifest['files'][name]['sha256'],'ARTIFACT_CHANGED_AFTER_VERIFICATION')

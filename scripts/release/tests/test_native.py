@@ -16,7 +16,7 @@ from test_sqlite_build import native_trust_fixture,sqlite_fixture
 import native
 
 
-def native_fixture(directory):
+def native_fixture(directory, *, extra_packages=()):
     """Synthetic protocol inputs, not compiler/runtime certification."""
     directory.mkdir(exist_ok=True);exported=directory/'native-fixture';inputs=exported/'inputs';inputs.mkdir(parents=True)
     (exported/'bin').mkdir();(inputs/'crates').mkdir();(inputs/'crt').mkdir();(inputs/'sysroot').mkdir();(inputs/'sources').mkdir()
@@ -37,7 +37,7 @@ def native_fixture(directory):
             target=source/path;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(value)
         (source/'.cargo-checksum.json').write_text(json.dumps({'package':hashlib.sha256(content).hexdigest(),'files':{path:hashlib.sha256(value).hexdigest() for path,value in files.items()}}))
         packages.append('[[package]]\nname="'+name+'"\nversion="'+version+'"\nsource="registry+https://github.com/rust-lang/crates.io-index"\nchecksum="'+hashlib.sha256(content).hexdigest()+'"\n')
-    lock=''.join(packages);(inputs/'Cargo.lock').write_text(lock);(directory/'Cargo.lock').write_text(lock)
+    lock=''.join([*packages, *extra_packages]);(inputs/'Cargo.lock').write_text(lock);(directory/'Cargo.lock').write_text(lock)
     (inputs/'rustc.txt').write_text('rustc 1.98.1 (public fixture)\nbinary: rustc\ncommit-hash: '+'a'*40+'\ncommit-date: 2026-01-01\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1\nLLVM version: 23.0.0\n')
     (inputs/'gcc.txt').write_text('12.2.0\n');(inputs/'packages.tsv').write_text('libc6-dev:amd64\t2.36-public-fixture\nlibgcc-12-dev:amd64\t12.2.0-public-fixture\n')
     contract=native.load(ROOT/'native-security.lock.json');owners=[]

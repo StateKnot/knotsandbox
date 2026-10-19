@@ -3,11 +3,12 @@
 import argparse
 from pathlib import Path
 import subprocess
-from common import SQLX_POSTGRES_NOTICES, NATIVE_PROTOCOL_NOTICES, load, require, release_file_names, run, subject, tool
+from common import SQLX_POSTGRES_NOTICES, NATIVE_PROTOCOL_NOTICES, OCI_PAYLOAD_NOTICES, load, require, release_file_names, run, subject, tool
 from preflight import github
 from verify import cosign_arguments
 from sqlx_notices import MAX_BYTES as NOTICES_MAX_BYTES
 from native_protocol_notices import MAX_BYTES as NATIVE_NOTICES_MAX_BYTES
+from oci_payload_notices import MAX_BYTES as OCI_NOTICES_MAX_BYTES, MAX_LOCK_BYTES as OCI_LOCK_MAX_BYTES
 
 
 def download(directory, tools, repository, tag, commit):
@@ -29,7 +30,7 @@ def download(directory, tools, repository, tag, commit):
     fetch(small)
     run(cosign_arguments(directory,tools,repository,tag,commit),timeout=60,stdout=subprocess.DEVNULL)
     manifest=load(directory/'release-manifest.json',1024*1024)
-    require(type(manifest.get('version')) is int and manifest['version'] in (1,2,3,4),'PREVIOUS_RELEASE_VERSION')
+    require(type(manifest.get('version')) is int and manifest['version'] in (1,2,3,4,5),'PREVIOUS_RELEASE_VERSION')
     files=release_file_names(legacy=manifest['version']==1, version=manifest['version'],
                              binary_names=manifest['binaries'], historical=True)
     require(set(manifest['files'])==files and files<=set(assets),'PREVIOUS_RELEASE_FILE_COVERAGE')
@@ -37,8 +38,11 @@ def download(directory, tools, repository, tag, commit):
     require(all(manifest['files'][n]['size']==assets[n]['size'] for n in manifest['files']),'PREVIOUS_RELEASE_FILE_SIZE')
     if manifest['version'] >= 3:
         require(assets[SQLX_POSTGRES_NOTICES]['size']<=NOTICES_MAX_BYTES, 'PREVIOUS_RELEASE_NOTICES_LIMIT')
-    if manifest['version'] == 4:
+    if manifest['version'] >= 4:
         require(assets[NATIVE_PROTOCOL_NOTICES]['size']<=NATIVE_NOTICES_MAX_BYTES, 'PREVIOUS_RELEASE_NATIVE_NOTICES_LIMIT')
+    if manifest['version'] >= 5:
+        require(assets[OCI_PAYLOAD_NOTICES]['size']<=OCI_NOTICES_MAX_BYTES, 'PREVIOUS_RELEASE_OCI_NOTICES_LIMIT')
+        require(assets['Cargo.lock']['size']<=OCI_LOCK_MAX_BYTES, 'PREVIOUS_RELEASE_OCI_LOCK_LIMIT')
     fetch(files)
     # build.py cryptographically rechecks, verifies every hash/OCI/statement and
     # scanner evidence before it interprets any console asset or npm inventory.

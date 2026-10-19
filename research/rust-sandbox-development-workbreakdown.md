@@ -1,6 +1,8 @@
 # Rust 沙箱平台分阶段开发表
 
-最新检查点（2026-10-19，自动化进程失败阶段诊断）：已核公开 `d53d7b1` 精确 CI 39120679185：四个job通过，verify的自动化前24项通过、最终进程用例失败；原私有日志未上传、根因仍UNKNOWN。测试专用九种固定阶段上下文与封闭回执已实现，原时限/权限/谓词/清理顺序保持。12项诊断测试、受控最终场景反例及恢复原条件后的Linux完整进程序列1项通过；47迁移、独立零backend、自有清理、主机fmt与本target两平台严格Clippy已核。未重跑完整25项或普通Rust全量，不称原CI已修；新提交CI独立核对。P1受限准备执行者/硬限/原生保护继续待开发，pre-pull关闭；GPU/云/Kata/CSI/性能未认证。见[本批记录](automation-process-diagnostics-delivery-20261019.md)。
+最新检查点（2026-10-19，P1b7a实际层载荷完整性）：基线公开 `510271b` 精确CI 39186957170为5 job／73 step全通过。新增公共Rust／现有admin消费者，实际核编码SHA／大小、完整解码DiffID、四项逻辑字节预算、真实EOF和gzip成员总限；不解析tar、不pull／unpack或授权准备。两平台9库／23 CLI，Linux公开候选63常规程序564通过／0失败／309原生ignored、两平台严格Clippy／主机fmt、release117及四Docker路径28文件许可交付通过。主机全量109项权限拒绝、Linux首轮缺失解释器及release前两轮失败均保留；Spec一项P2已实际修复并复审关闭。v5独立notice保留v1—v4历史含义，新提交精确CI另核。完整P1执行者／硬限／原生保护、GPU／云／Kata／CSI／性能仍待完成，pre-pull关闭。见[本批交付](image-payload-integrity-delivery-20261019.md)。
+
+前序检查点（2026-10-19，自动化进程失败阶段诊断）：已核公开 `d53d7b1` 精确 CI 39120679185：四个job通过，verify的自动化前24项通过、最终进程用例失败；原私有日志未上传、根因仍UNKNOWN。测试专用九种固定阶段上下文与封闭回执已实现，原时限/权限/谓词/清理顺序保持。12项诊断测试、受控最终场景反例及恢复原条件后的Linux完整进程序列1项通过；47迁移、独立零backend、自有清理、主机fmt与本target两平台严格Clippy已核。未重跑完整25项或普通Rust全量，不称原CI已修；新提交CI独立核对。P1受限准备执行者/硬限/原生保护继续待开发，pre-pull关闭；GPU/云/Kata/CSI/性能未认证。见[本批记录](automation-process-diagnostics-delivery-20261019.md)。
 
 前序检查点（2026-10-18，私网身份代理就绪诊断）：已核公开 `d30913ad` 精确 CI 39113057651：4 job 通过、安装合同的私网 TLS 就绪门失败，verify 全部通过；原 BFF 超时及本次代理故障根因均仍 UNKNOWN。测试专用共享循环保留原 50 次、100ms、admin10/native5 秒请求超时和仅200成功，耗尽后输出固定脱敏 HTTP/传输/子进程状态。原安全断言与真实400、证书校验失败、停止后连接拒绝三反例均已通过，真实Keycloak管理链及27项身份测试/37对象schema通过；完整本地证据和边界见交付记录。新提交完整CI另核，不宣称原CI故障已修。P1受限准备执行者/硬限/原生保护仍待开发，pre-pull关闭；GPU/云/Kata/CSI/性能未认证。见[本批记录](identity-proxy-readiness-delivery-20261018.md)。
 
@@ -338,7 +340,7 @@ b66177be完整CI已确认资源容量与18组PG等前置门通过，但真实诊
 
 ### 12.8 批准镜像节点预准备：后续有序实施（2026-10-15）
 
-本节按P0—P6顺序推进。**P0a—P0c2b只读观察与同一原生整链、P1a元数据校验、P1b1宿主配置准入、P1b2启动时runtime读回、P1b3重连身份、P1b4原生已存元数据、P1b5 CRI当前索引身份及P1b6快照／配置引用元数据已完成本地验收；完整P1及P2—P6仍未完成／未认证。** 历史基线ee3eeac的CI run38861416715为5 job／72 step全绿；随后公开4e517ab的精确CI run38871811699在BFF关闭门失败，不能沿用旧成功。随后d30913ad精确CI的verify全部通过，安装合同又在私网TLS就绪门失败；本批补固定脱敏就绪诊断，原BFF/代理故障根因仍UNKNOWN，共享PG整轮149/4/37历史失败保留；P1后续门未开放。见[BFF诊断记录](bff-drain-diagnostics-delivery-20261016.md)。详见[生产实施计划](image-preparation-production-plan-20261015.md)及[固定版本官方源码核对](image-preparation-native-sources-20261015.md)。范围是批准OCI镜像准备，不预造CPU／GPU VM池，不产生普通launch许可。
+本节按P0—P6顺序推进。**P0a—P0c2b只读观察与同一原生整链、P1a元数据校验、P1b1宿主配置准入、P1b2启动时runtime读回、P1b3重连身份、P1b4原生已存元数据、P1b5 CRI当前索引身份、P1b6快照／配置引用元数据及P1b7a实际层载荷完整性已完成各自本地验收；完整P1及P2—P6仍未完成／未认证。** 本轮基线510271b精确CI run39186957170为5 job／73 step全通过，新提交CI独立核对。原BFF／代理／自动化故障根因仍UNKNOWN，共享PG149／4／37等历史失败保留，不能由当前绿灯倒推修复。见[BFF诊断记录](bff-drain-diagnostics-delivery-20261016.md)及本页各历史检查点。详见[生产实施计划](image-preparation-production-plan-20261015.md)及[固定版本官方源码核对](image-preparation-native-sources-20261015.md)。范围是批准OCI镜像准备，不预造CPU／GPU VM池，不产生普通launch许可。
 
 | 顺序／工作包 | 开发内容与接口 | 退出门／依赖 |
 | --- | --- | --- |
@@ -355,7 +357,8 @@ b66177be完整CI已确认资源容量与18组PG等前置门通过，但真实诊
 | P1b4已本地验收；G1-04/G1-09 | 实际admin inspect-native及固定k8s.io的原生Get／Info／Read；独立expected／精确平台与共享OCI内核，前后根身份、有界流和元数据-only回执；完整协议许可接v4分发 | 509普通／291ignored、4真实wire含15类否例、两平台strict Clippy／fmt、新native及三原生回归、旧Docker CLI七场景通过；release100及实际许可producer／四Docker路径48文件通过。仅已有对象元数据，不是实际pull选择／snapshotter或引用保护，见[交付](native-image-metadata-delivery-20261016.md) |
 | P1b5已本地验收；G1-04/G1-09 | 公共inspect_cri／实际admin消费者；前后CRI精确引用ID与已验OCI config、最终根在原5秒内核对，全部准备证明标志false | 513普通／291ignored、4wire含14坏路径／双平台错配、新CRI及四原生回归、旧Docker CLI七场景和两平台质量门通过；typed期限缺陷已按精确RED／GREEN闭合，首轮OOM保留，见[交付](cri-image-identity-delivery-20261016.md) |
 | P1b6已本地验收；G1-04/G1-09 | 认证DiffID派生ChainID／直接父链；固定overlayfs Stat与config引用标签前后核对，公共inspect_snapshot及本机admin消费者 | 520普通／291ignored、7新增合同含31类wire坏路径，两平台质量门、新快照及五原生回归、离线Docker CLI七场景、release104与许可56文件通过；空快照正例只证明元数据，非apply／GC／准备许可，见[交付](snapshot-reference-metadata-delivery-20261016.md) |
-| P1b后续待开发；G1-04/G1-09/G1-12 | 受限准备执行者及runtime保留量，准确image平台／namespace／snapshotter、lease／content／snapshot保护闭包、GC与真实存储／inode／临时目录／内存／FD／网络硬限组合；配置持续漂移另补 | 官方固定版本源码和真实backend证据；Status不含独立images插件配置，handler平台声明不替代实际pull选择。nil sandbox config会选default；未核实支持保持关闭，P1a／P1b1—P1b6均不签发准备许可 |
+| P1b7a已本地验收；G1-04/G1-09/G1-12 | 实际离线层载荷校验／现有admin消费者；编码与解码单层／总逻辑预算、真实EOF、SHA／DiffID和文件身份；v5独立许可分发 | 两平台9库／23 CLI、Linux公开候选63程序564／0／309ignored、两平台严格Clippy／主机fmt、release117和实际四Docker分发通过；主机109项权限拒绝及Linux首轮解释器缺失失败保留，见[交付](image-payload-integrity-delivery-20261019.md)。不是解包／物理硬限／准备许可 |
+| P1b后续待开发；G1-04/G1-09/G1-12 | 受限准备执行者及runtime保留量，准确image平台／namespace／snapshotter、lease／content／snapshot保护闭包、GC与真实存储／inode／临时目录／内存／FD／网络硬限组合；配置持续漂移另补 | 官方固定版本源码和真实backend证据；Status不含独立images插件配置，handler平台声明不替代实际pull选择。nil sandbox config会选default；未核实支持保持关闭，已有独立检查均不签发准备许可 |
 | P2/P3；G2-01/G2-13/G1-12 | PG准备意图／预算及最小权限；独立准备授权、准确node／boot/profile/epoch；批准index＋selected manifest＋platform；短时凭据及有硬限的下载／解包 | P1通过后才pre-pull；瞬态headroom、inode／metadata／并发上界与真实写入硬限同时守住；不能拼普通launch许可 |
 | P4；G2-07/G4-02/G4-06 | 同键lost ACK／重启恢复、到期／撤销、活动共享引用保护、只释放本产品native引用和GC／物理对账 | UNKNOWN保留必要预算；引用释放不等于物理回收，RemoveImage不能盲删共享alias；不清全局目录／他人镜像 |
 | P5/P6；G0-07/G3-03/G4-05/G4-09 | placement后才复核HIT／MISS／UNKNOWN；普通启动许可和Ready原合同保持；真实本地协议与目标环境冷暖基线 | Docker可验PG／registry／containerd及硬限，不代Kata／GPU／云p95/p99、72h成本及生产隔离认证；无实测不承诺加速或节省比例 |

@@ -26,6 +26,7 @@ from test_native import native_fixture, retain_historical_binaries
 from test_sqlite_build import native_trust_fixture
 from sqlx_notices import create as create_sqlx_notices
 from native_protocol_notices import create as create_native_notices
+from oci_payload_notices import create as create_oci_notices, FIXED as OCI_NOTICE_FIXED, REGISTRY as OCI_REGISTRY
 
 def fixture_reference_time(debian_lock, console_lock):
     locks = (debian_lock, console_lock)
@@ -81,7 +82,13 @@ def blob(directory, value, media):
 
 def fixture(directory, *, historical=False):
     # Synthetic protocol fixture. Never used as a signed production artifact.
-    native_fixture(directory)
+    extra_packages = ['[[package]]\nname="' + name + '"\nversion="' + record['version']
+                      + '"\nsource="' + OCI_REGISTRY + '"\nchecksum="' + record['crate_archive_sha256'] + '"\n'
+                      for name, record in OCI_NOTICE_FIXED['crates'].items()]
+    native_fixture(directory, extra_packages=extra_packages)
+    notices = create_oci_notices(ROOT.parent.parent)
+    notices['cargo_lock_sha256'] = sha(directory / 'Cargo.lock')
+    dump(directory / 'oci-payload-notices.json', notices)
     binaries = HISTORICAL_BINARIES if historical else BINARIES
     if historical: retain_historical_binaries(directory)
     (directory/'builder.syft.json').unlink()
@@ -99,6 +106,10 @@ def fixture(directory, *, historical=False):
             else:
                 runtime_binaries=('sandbox-runner',) if name=='runner' else tuple(n for n in binaries if n not in ('sandbox-runner','sandbox-nodeguard'))
                 files={'usr/local/bin/'+n:(directory/n).read_bytes() for n in runtime_binaries}
+                prefix = 'usr/share/sandbox-platform/licenses/'
+                files[prefix + 'oci-payload-notices.json'] = (directory / 'oci-payload-notices.json').read_bytes()
+                files.update({prefix + 'oci-payload/' + n + '-' + record['version'] + '-MIT.txt':
+                              notices['licenses'][n].encode() for n, record in OCI_NOTICE_FIXED['crates'].items()})
             body=io.BytesIO()
             with tarfile.open(fileobj=body,mode='w') as layer:
                 for filename,data in files.items():
@@ -119,6 +130,8 @@ def fixture(directory, *, historical=False):
         dump(directory/(name+'.grype.json'), report)
         if name=='native-components':continue
         sbom={'artifacts':[{'name':'libsqlite3-sys','version':'0.30.1','type':'rust-crate'}, {'name':'ring','version':'0.17.14','type':'rust-crate'}, {'name':'fixture-npm','version':'1.0.0','type':'npm'}, {'name':'zlib','version':'1.3.2-r1','type':'apk'},{'name':'libc6-dev','version':'2.36-public-fixture','type':'deb'},{'name':'libgcc-12-dev','version':'12.2.0-public-fixture','type':'deb'}]}
+        sbom['artifacts'].extend({'name': n, 'version': record['version'], 'type': 'rust-crate'}
+                                 for n, record in OCI_NOTICE_FIXED['crates'].items())
         if name=='builder':sbom['source']={'type':'image','metadata':{'userInput':load(ROOT/'native-security.lock.json')['builder_image'],'architecture':'amd64','os':'linux'}}
         dump(directory/(name+('.cdx.json' if name=='proxy-source' else '.syft.json')),sbom)
         if name != 'proxy-source': dump(directory/(name+'.spdx.json'), {'fixture':True})

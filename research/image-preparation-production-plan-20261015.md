@@ -1,6 +1,8 @@
 # 批准OCI镜像的节点预准备：生产实施计划
 
-最新检查点（2026-10-19，自动化进程失败阶段诊断）：已核公开 `d53d7b1` 精确 CI 39120679185：四个job通过，verify的自动化前24项通过、最终进程用例失败；原私有日志未上传、根因仍UNKNOWN。测试专用九种固定阶段上下文与封闭回执已实现，原时限/权限/谓词/清理顺序保持。12项诊断测试、受控最终场景反例及恢复原条件后的Linux完整进程序列1项通过；47迁移、独立零backend、自有清理、主机fmt与本target两平台严格Clippy已核。未重跑完整25项或普通Rust全量，不称原CI已修；新提交CI独立核对。P1受限准备执行者/硬限/原生保护继续待开发，pre-pull关闭；GPU/云/Kata/CSI/性能未认证。见[本批记录](automation-process-diagnostics-delivery-20261019.md)。
+最新检查点（2026-10-19，P1b7a实际层载荷完整性）：基线公开 `510271b` 精确CI 39186957170为5 job／73 step全通过。新增公共Rust／现有admin消费者，实际核编码SHA／大小、完整解码DiffID、四项逻辑字节预算、真实EOF和gzip成员总限；不解析tar、不pull／unpack或授权准备。两平台9库／23 CLI，Linux公开候选63常规程序564通过／0失败／309原生ignored、两平台严格Clippy／主机fmt、release117及四Docker路径28文件许可交付通过。主机全量109项权限拒绝、Linux首轮缺失解释器及release前两轮失败均保留；Spec一项P2已实际修复并复审关闭。v5独立notice保留v1—v4历史含义，新提交精确CI另核。完整P1执行者／硬限／原生保护、GPU／云／Kata／CSI／性能仍待完成，pre-pull关闭。见[本批交付](image-payload-integrity-delivery-20261019.md)。
+
+前序检查点（2026-10-19，自动化进程失败阶段诊断）：已核公开 `d53d7b1` 精确 CI 39120679185：四个job通过，verify的自动化前24项通过、最终进程用例失败；原私有日志未上传、根因仍UNKNOWN。测试专用九种固定阶段上下文与封闭回执已实现，原时限/权限/谓词/清理顺序保持。12项诊断测试、受控最终场景反例及恢复原条件后的Linux完整进程序列1项通过；47迁移、独立零backend、自有清理、主机fmt与本target两平台严格Clippy已核。未重跑完整25项或普通Rust全量，不称原CI已修；新提交CI独立核对。P1受限准备执行者/硬限/原生保护继续待开发，pre-pull关闭；GPU/云/Kata/CSI/性能未认证。见[本批记录](automation-process-diagnostics-delivery-20261019.md)。
 
 前序检查点（2026-10-18，私网身份代理就绪诊断）：已核公开 `d30913ad` 精确 CI 39113057651：4 job 通过、安装合同的私网 TLS 就绪门失败，verify 全部通过；原 BFF 超时及本次代理故障根因均仍 UNKNOWN。测试专用共享循环保留原 50 次、100ms、admin10/native5 秒请求超时和仅200成功，耗尽后输出固定脱敏 HTTP/传输/子进程状态。原安全断言与真实400、证书校验失败、停止后连接拒绝三反例均已通过，真实Keycloak管理链及27项身份测试/37对象schema通过；完整本地证据和边界见交付记录。新提交完整CI另核，不宣称原CI故障已修。P1受限准备执行者/硬限/原生保护仍待开发，pre-pull关闭；GPU/云/Kata/CSI/性能未认证。见[本批记录](identity-proxy-readiness-delivery-20261018.md)。
 
@@ -14,7 +16,7 @@
 
 前序开发检查点（2026-10-16，P1b3重连身份与请求排空）：固定root UDS以目录／socket对象FD及SO_PEERCRED的PID／start绑定，CRI与镜像观察复用算法、各自持有身份。CRI重连冲突进入永久拒绝，沿既有任务门阻止新CRI／CONTROL并取消纯读；不清SQLite coverage或释放资源／配额。普通Rust65程序501通过／0失败／291环境ignored、Python11、两平台严格all-target Clippy／fmt通过；最终Linux制品的重连、启动配置和原生镜像mTLS三个case各1项通过，自有资源清理及源码／制品稳定已核。0755夹具失败、计数断言缺口与ready发布竞态均修复并保留事实。基线cb47bc9精确CI五job／68step全绿，新提交CI独立核对。该片不证明daemon二进制／持续配置或真实PID复用，不产生准备许可；完整P1硬限／引用、P2—P6及云／Kata／CSI／GPU／性能仍待完成，pre-pull关闭。见[本批交付](runtime-peer-binding-delivery-20261016.md)。
 
-状态：**P0a—P0c2b只读观察及同一原生整链、P1a元数据校验、P1b1宿主配置准入、P1b2启动时runtime读回、P1b3重连身份、P1b4原生已存元数据、P1b5 CRI当前索引身份及P1b6快照／配置引用元数据已完成本地验收；完整P1及P2—P6仍未完成／未认证。** 本文件承接[开发表12.7](rust-sandbox-development-workbreakdown.md#127-可信启动资源观察与原子登记2026-10-15)的可信资源账本；基线ee3eeac的精确CI run38861416715，5 job/72 step已通过，当前按以下依赖推进；新源码CI单独核对。
+状态：**P0a—P0c2b只读观察及同一原生整链、P1a元数据校验、P1b1宿主配置准入、P1b2启动时runtime读回、P1b3重连身份、P1b4原生已存元数据、P1b5 CRI当前索引身份、P1b6快照／配置引用元数据及P1b7a实际层载荷完整性已完成各自本地验收；完整P1及P2—P6仍未完成／未认证。** 本文件承接[开发表12.7](rust-sandbox-development-workbreakdown.md#127-可信启动资源观察与原子登记2026-10-15)的可信资源账本；本轮基线510271b精确CI run39186957170，5 job／73 step已通过，新源码CI单独核对，不沿用历史成功。
 范围仅为批准OCI镜像在准确节点／运行时中的有预算准备，不创建CPU／GPU VM池，不产生用户进程、工作区或普通launch许可。
 每90分钟是触发间隔，不是开发或验证超时；先接续已有在途工作，再持续完成选中的可验证切片，不因下一次触发重复启动。
 失败保存原现场并继续闭合该切片，不能因触发次数或时间到而标记通过，也不能跳过前置门开放拉取。
@@ -94,7 +96,8 @@ P0c1安装授权、P0c2a固定单节点查询／admin和P0c2b同一原生整链�
 | P1b4已本地验收，依赖P1b3 | 原生已有对象的固定namespace／Get／Info／Read与实际admin消费者，共享离线OCI验证；新增协议许可完整接当前manifest v4及四Docker路径 | 509普通、4wire含15类否例、最终新native＋三旧回归、旧Docker CLI七场景、release100及许可48文件均通过，原失败保留 | [交付](native-image-metadata-delivery-20261016.md)明确只查已有元数据，不证明实际CRI pull／snapshotter、layer完整或未来GC保护，未产生准备许可 |
 | P1b5已本地验收，依赖P1b4 | 固定CRI ImageStatus前后与已验OCI config身份核对；公共inspect_cri／实际admin消费者，原native接口保持 | 513普通、4新增wire含14类坏路径／双平台配置错配、精确期限RED／GREEN、新CRI＋四项原生回归、旧Docker CLI七场景及质量门通过 | [交付](cri-image-identity-delivery-20261016.md)仅当前索引身份，不代表实际pull／handler／snapshotter／解包／引用保护，完整P1硬限未过前无准备写能力 |
 | P1b6已本地验收，依赖P1b4 | 认证DiffID派生ChainID／直接父链，固定overlayfs snapshot Stat与config引用标签前后核对；实际admin及公共消费者 | 最终520普通、7新合同含31类wire坏路径、新快照及五原生回归、离线Docker CLI七场景、质量门、release104及四Docker许可56文件通过，格式失败保留 | [交付](snapshot-reference-metadata-delivery-20261016.md)仅快照／引用元数据，不证明真实apply、完整祖先／GC闭包、实际pull或准备许可 |
-| P1b后续待开发，承接P1b1—P1b6 | 受限准备执行者、实际image选择／原生保护闭包和可强制部署硬限合同 | 完整image选择证据、lease／content／snapshot引用、namespace／snapshotter、CRI GC交互、存储／内存／FD／专用网络槽的硬限与临时目录逐项源码及实测；配置持续漂移另补 | 官方来源＋真实backend证据确定一套受支持组合；共享daemon不能隔离准备开销时不开放该组合，P1a／P1b1—P1b6成功不替代本门 |
+| P1b7a已本地验收；依赖P1a | 公共 `verify_oci_payloads`／实际 `verify-payloads` CLI，四项逻辑字节预算、真实EOF、编码SHA／完整解码DiffID；独立v5许可交付 | 两平台9库／23 CLI，Linux公开候选63程序564／0／309ignored、两平台严格Clippy／主机fmt、release117与实际四Docker许可分发通过；主机109项权限拒绝及Linux首轮解释器缺失失败保留 | [交付记录](image-payload-integrity-delivery-20261019.md)；不解析tar、不pull／unpack，无物理硬限或准备许可；仅独立载荷完整性前置能力 |
+| P1b后续待开发，承接P1b1—P1b7a | 受限准备执行者、实际image选择／原生保护闭包和可强制部署硬限合同 | 完整image选择证据、lease／content／snapshot引用、namespace／snapshotter、CRI GC交互、存储／内存／FD／专用网络槽的硬限与临时目录逐项源码及实测；配置持续漂移另补 | 官方来源＋真实backend证据确定一套受支持组合；共享daemon不能隔离准备开销时不开放该组合，已有独立检查不替代本门 |
 | P2，依赖P1 | `src/image_preparation.rs`、`src/image_preparation_budget.rs`、正常新迁移／角色／preflight | 并发预算预留／拒绝、跨租户归因、同键重放、撤权／epoch／节点换代、schema／列授权漂移 | PG意图／预算／身份持久且不可伪造，未派发任务也可安全关闭；没有直接runtime表写权 |
 | P3，依赖P1/P2 | `src/nodeguard/image_preparation.rs`、独立宿主协议／journal及controller adapter | 本地registry实际descriptor与平台选择、凭据隔离、摘要校验、受限下载／解包、native保护引用、内存／FD／网络槽耗尽与取消／崩溃 | 每任务和每节点真实硬限、瞬态headroom及原VM链路保留量守住；只有精确当前授权任务能产生准备回执 |
 | P4，依赖P3 | `src/image_preparation_reconcile.rs`、GC／升级与运维工具 | 实际lost ACK、daemon／controller重启、boot变化、到期／撤销、活动共享引用、GC竞争／回收延迟及内存／FD／网络槽实际退役 | UNKNOWN保留必要预算与引用；确认副作用结束后再释放临时资源槽，只删本产品确定所有权，物理释放单独核验 |

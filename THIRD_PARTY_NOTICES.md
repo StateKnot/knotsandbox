@@ -49,6 +49,15 @@ Upstream: [Cilium v1.20.2](https://github.com/cilium/cilium/tree/v1.20.2),
 
 ## Build and runtime dependencies
 
+OCI layer payload decoding uses `flate2` 1.1.10, `crc32fast` 1.5.2,
+`miniz_oxide` 0.9.1, `adler2` 2.0.1 and `simd-adler32` 0.3.10.
+For each crate this distribution selects the upstream MIT license and retains
+its complete original copyright and license text under
+[licenses/oci-payload/](licenses/oci-payload/README.md). That provenance records
+the published crate checksums, original license filenames and exact text hashes.
+The release's `oci-payload-notices.json` binds the five fixed crates and complete
+texts to its Cargo.lock; binary exports and runtime images carry these notices.
+
 `vendor/sqlx-postgres/` contains the published SQLx Postgres 0.8.6 crate with a
 narrow backport of the upstream cancelled-BEGIN rollback fix. The original
 [MIT](vendor/sqlx-postgres/LICENSE-MIT) and

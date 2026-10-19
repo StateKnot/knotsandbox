@@ -14,7 +14,8 @@ COPY . .
 RUN test "${TARGETARCH}" = amd64 \
     && printf '%s  %s\n' 714d457d580922dbf1d0be8bd35ba236a842b50b0072ae791582a19adef772a5 /etc/ssl/certs/ca-certificates.crt | sha256sum -c - \
     && python3 /build/scripts/verify-sqlx-postgres-patch.py \
-    && python3 /build/scripts/release/native_protocol_notices.py --source /build --output /opt/sandbox-native-protocol-notices.json
+    && python3 /build/scripts/release/native_protocol_notices.py --source /build --output /opt/sandbox-native-protocol-notices.json \
+    && python3 /build/scripts/release/oci_payload_notices.py --source /build --output /opt/sandbox-oci-payload-notices.json
 # SQLite is linked from independently verified official source. Never probe an
 # ambient system library or fall back to the older source in libsqlite3-sys.
 ADD --checksum=sha256:0e9483900e92cd5de8fd48d16bf9200145a61f7fd5be542a5ac81d8a9516eb9c https://www.sqlite.org/2026/sqlite-autoconf-3530400.tar.gz /tmp/sqlite-source.tar.gz
@@ -75,6 +76,8 @@ COPY vendor/sqlx-postgres/LICENSE-MIT vendor/sqlx-postgres/LICENSE-APACHE vendor
 COPY vendor/containerd/v2.3.5/ /licenses/containerd-v2.3.5/
 COPY vendor/protobuf/protoc-bin-vendored-3.2.0/ /licenses/protobuf-well-known/
 COPY --from=builder /opt/sandbox-native-protocol-notices.json /licenses/native-protocol-notices.json
+COPY licenses/oci-payload/ /licenses/oci-payload/
+COPY --from=builder /opt/sandbox-oci-payload-notices.json /licenses/oci-payload-notices.json
 
 FROM scratch AS binaries-export
 COPY --from=builder /artifacts/ /
@@ -83,6 +86,8 @@ COPY vendor/sqlx-postgres/LICENSE-MIT vendor/sqlx-postgres/LICENSE-APACHE vendor
 COPY vendor/containerd/v2.3.5/ /licenses/containerd-v2.3.5/
 COPY vendor/protobuf/protoc-bin-vendored-3.2.0/ /licenses/protobuf-well-known/
 COPY --from=builder /opt/sandbox-native-protocol-notices.json /licenses/native-protocol-notices.json
+COPY licenses/oci-payload/ /licenses/oci-payload/
+COPY --from=builder /opt/sandbox-oci-payload-notices.json /licenses/oci-payload-notices.json
 
 FROM ${RUNTIME_IMAGE} AS runner
 # Reviewed security fixes are content-addressed; dpkg uses no package resolver/network.
@@ -106,6 +111,8 @@ COPY vendor/sqlx-postgres/LICENSE-MIT vendor/sqlx-postgres/LICENSE-APACHE vendor
 COPY vendor/containerd/v2.3.5/ /usr/share/sandbox-platform/licenses/containerd-v2.3.5/
 COPY vendor/protobuf/protoc-bin-vendored-3.2.0/ /usr/share/sandbox-platform/licenses/protobuf-well-known/
 COPY --from=builder /opt/sandbox-native-protocol-notices.json /usr/share/sandbox-platform/licenses/native-protocol-notices.json
+COPY licenses/oci-payload/ /usr/share/sandbox-platform/licenses/oci-payload/
+COPY --from=builder /opt/sandbox-oci-payload-notices.json /usr/share/sandbox-platform/licenses/oci-payload-notices.json
 RUN chmod 0555 /usr/local/bin/sandbox-runner
 USER 1000:1000
 WORKDIR /workspace
@@ -127,6 +134,8 @@ COPY vendor/sqlx-postgres/LICENSE-MIT vendor/sqlx-postgres/LICENSE-APACHE vendor
 COPY vendor/containerd/v2.3.5/ /usr/share/sandbox-platform/licenses/containerd-v2.3.5/
 COPY vendor/protobuf/protoc-bin-vendored-3.2.0/ /usr/share/sandbox-platform/licenses/protobuf-well-known/
 COPY --from=builder /opt/sandbox-native-protocol-notices.json /usr/share/sandbox-platform/licenses/native-protocol-notices.json
+COPY licenses/oci-payload/ /usr/share/sandbox-platform/licenses/oci-payload/
+COPY --from=builder /opt/sandbox-oci-payload-notices.json /usr/share/sandbox-platform/licenses/oci-payload-notices.json
 USER 10001:10001
 WORKDIR /tmp
 STOPSIGNAL SIGTERM

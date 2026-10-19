@@ -631,3 +631,6 @@ fn symlinks_and_fifos_are_rejected_without_following_or_waiting_for_a_writer() -
     layout.rejected(ROOT, "linux/amd64", "METADATA_UNAVAILABLE")?;
     Ok(())
 }
+
+#[path = "image_artifact/payloads.rs"]
+mod payloads;

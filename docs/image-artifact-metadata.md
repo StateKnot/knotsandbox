@@ -1,4 +1,4 @@
-# 镜像元数据校验与原生读回
+# 镜像完整性校验与原生读回
 
 `sandbox-admin image-artifact verify` 按调用方提供的预期摘要，校验本地 OCI 镜像元数据的身份、平台和必要描述符关系。它只读取元数据，不访问数据库、注册表或运行时，不读取层载荷，不拉取、解包或准备镜像。其他 Rust 模块使用同一公共入口 `sandbox_platform::image_artifact::verify_oci_metadata`，CLI 不维护第二套规则。[实现](../src/image_artifact.rs)、[CLI](../src/admin_image_artifact_cli.rs)
 
@@ -58,6 +58,35 @@ config 的 `rootfs.type` 须为 `layers`，`diff_ids` 与 manifest layers 等长
 | `PLATFORM_MISMATCH`／`AMBIGUOUS_PLATFORM`／`DESCRIPTOR_CONFLICT` | 目标不唯一、不匹配或已知声明冲突 |
 
 该能力不完成签名验证、漏洞扫描、运行硬件兼容认证或下载验证，也不提供新的 HTTP 制备 API。runtime handler／snapshotter／namespace、原生 lease 与引用归属、GC 和守护进程存储硬限仍是后续 P1 门禁。[本批交付证据](../research/image-artifact-delivery-20261016.md)
+
+## 校验实际层载荷
+
+`verify-payloads` 在相同元数据闭包校验后，实际读取所选层，核验压缩／原始字节的 descriptor 大小和 SHA-256，以及完整解码字节流的 DiffID。Rust 消费者使用 `verify_oci_payloads` 和经过构造验证的 `PayloadLimits`；它不访问注册表、数据库或运行时。
+
+```sh
+sandbox-admin image-artifact verify-payloads \
+  --layout /srv/image-artifacts/reviewed-image \
+  --expected-digest sha256:<independently-trusted-root-digest> \
+  --platform linux/amd64 \
+  --max-layer-bytes 67108864 \
+  --max-total-layer-bytes 268435456 \
+  --max-decoded-layer-bytes 268435456 \
+  --max-total-decoded-bytes 1073741824
+```
+
+四项上限均必填，单位为字节，必须为正 u64，单层上限不得大于对应总上限。上述数值只是调用示例，部署方须按资源策略明确设置；没有隐式无限值或失败后自动加大预算。编码总量先按 descriptor 预检，解码过程按剩余预算逐块核验；到达精确边界后仍探测真实 EOF，多一个字节也拒绝。DiffID 覆盖整个解码流，包括 tar 结束标记后的字节。[OCI 层与 DiffID](https://github.com/opencontainers/image-spec/blob/v1.1.1/layer.md)
+
+此模式支持原始 tar 字节流和 gzip，接受连接的 gzip 成员并检查各成员 CRC／ISIZE、完整尾部与流结束；整个调用的唯一 blob 合计最多1024个 gzip 成员，空成员也计数。未知编码、zstd、截断和尾随非 gzip 数据拒绝；原 `verify` 对 zstd 元数据的支持保持。它不解释 tar 条目，不确认 tar 格式、路径安全、whiteout 或文件系统展开语义。
+
+原布局目录 FD 保留到调用结束；层按序打开，文件和目录不跟随符号链接，FIFO／目录拒绝。每层读前后比较文件身份、大小及时间，并重新核对原目录中的同名对象，检测变化即拒绝。重复 digest 的一致引用只解码一次，但重新核对文件身份和 DiffID；四项逻辑预算均按每次引用计费，不能通过重复层绕过总量。所有成功统计使用十进制字节字符串。
+
+成功回执将 `scope` 设为 `OCI_PAYLOAD_STREAMS`，`layer_payloads_verified`、`diff_ids_verified` 为 true。`encoded_bytes_read`、`decoded_bytes_read` 是去重后实际验证的载荷正文，`logical_decoded_bytes` 和保序 `decoded_layer_bytes` 包含重复引用；`unique_layers_verified` 和 `gzip_members_verified` 说明实际工作量。原 `declared_layer_bytes`／`unique_declared_layer_bytes` 定义不变；探测越界的失败不产生成功回执。
+
+`archive_semantics_checked`、`unpack_performed`、`physical_storage_bound_verified`、`approval_checked`、`preparation_allowed` 均为 false。固定16KiB读写缓冲和5秒协作检查预算限制流式校验工作；这不是内核 RSS／FD 配额、物理存储硬限或可强制中断的执行者。阻塞的文件系统调用不能由此同步接口抢占；文件元信息比较也不是跨文件原子快照。服务不得把该入口放进异步请求线程后宣称获得完整取消与资源隔离。
+
+通过命令行语法解析后，校验失败的 stdout 为空，stderr 固定为 `Error: image payload verification failed: <CODE>`，不含路径、配置或解码器正文。除原元数据错误外，新增 `INVALID_PAYLOAD_LIMITS`、`PAYLOAD_LIMIT_EXCEEDED`、`UNSUPPORTED_PAYLOAD_MEDIA_TYPE`、`INVALID_LAYER_ENCODING`、`DIFF_ID_MISMATCH`、`PAYLOAD_DEADLINE_EXCEEDED`；缺失／特殊层文件沿用 `METADATA_UNAVAILABLE`，变化沿用 `METADATA_CHANGED`，编码大小／摘要错误沿用 `SIZE_MISMATCH`／`DIGEST_MISMATCH`。失败不能复用旧回执。
+
+这是 P1b7a 的离线载荷完整性前置能力。受限准备执行者、daemon 侧硬限、真实 pull／unpack、原生租约及 GC 归属尚未完成；不得据此签发 READY／HIT 或开启 pre-pull。
 
 ## 检查本机原生已存元数据
 

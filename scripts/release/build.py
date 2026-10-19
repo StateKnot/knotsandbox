@@ -16,11 +16,12 @@ import uuid
 from security_packages import validate_dockerfile, validate_lock
 from console_assets import image_files, inventory, stage_context, validate_selection, verify_previous
 from console_security import validate_lock as validate_console_lock, validate_dockerfile as validate_console_dockerfile
-from common import BINARIES, COMPONENTS, SCAN_NAMES, BOM_CDX, ROOT, SQLX_POSTGRES_NOTICES, NATIVE_PROTOCOL_NOTICES, dump, image_digest, load, now, require, run, safe_child, sha, subject, tool
+from common import BINARIES, COMPONENTS, SCAN_NAMES, BOM_CDX, ROOT, SQLX_POSTGRES_NOTICES, NATIVE_PROTOCOL_NOTICES, OCI_PAYLOAD_NOTICES, dump, image_digest, load, now, require, run, safe_child, sha, subject, tool
 from native import export_dockerfile, record as record_native, validate_runtime
 from elf import validate_file
 from sqlx_notices import create as create_sqlx_notices, validate as validate_sqlx_notices, MAX_BYTES as NOTICES_MAX_BYTES
 from native_protocol_notices import create as create_native_notices, validate as validate_native_notices, MAX_BYTES as NATIVE_NOTICES_MAX_BYTES
+from oci_payload_notices import create as create_oci_notices, validate as validate_oci_notices, read_cargo_lock as read_oci_cargo_lock, validate_distribution as validate_oci_distribution, validate_image as validate_oci_image, MAX_BYTES as OCI_NOTICES_MAX_BYTES
 
 
 def scanner_environment(**settings):
@@ -50,9 +51,11 @@ def build_native_export(buildctl_args, source, destination):
 def create_manifest(directory, repository, tag, commit, run_id, console_assets):
     validate_sqlx_notices(load(safe_child(directory, SQLX_POSTGRES_NOTICES), NOTICES_MAX_BYTES))
     validate_native_notices(load(safe_child(directory, NATIVE_PROTOCOL_NOTICES), NATIVE_NOTICES_MAX_BYTES))
+    validate_oci_notices(load(safe_child(directory, OCI_PAYLOAD_NOTICES), OCI_NOTICES_MAX_BYTES),
+                         read_oci_cargo_lock(directory))
     images = {name: {'digest': image_digest(directory / name, name), 'archive': name + '.oci.tar'} for name in COMPONENTS}
     files = {p.name: {'sha256': sha(p), 'size': p.stat().st_size} for p in directory.iterdir() if p.is_file()}
-    manifest = {'version': 4, 'repository': repository, 'tag': tag, 'commit': commit, 'platform': 'linux/amd64',
+    manifest = {'version': 5, 'repository': repository, 'tag': tag, 'commit': commit, 'platform': 'linux/amd64',
         'workflow': '.github/workflows/release.yml', 'workflow_identity': subject(repository, tag, commit),
         'run_id': run_id, 'console_assets': console_assets, 'created_at': now().isoformat(), 'images': images, 'binaries': list(BINARIES), 'files': files}
     dump(directory / 'release-manifest.json', manifest)
@@ -154,6 +157,7 @@ def main():
     directory = args.output.resolve(); directory.mkdir(parents=True)
     dump(directory / SQLX_POSTGRES_NOTICES, create_sqlx_notices(source))
     dump(directory / NATIVE_PROTOCOL_NOTICES, create_native_notices(source))
+    dump(directory / OCI_PAYLOAD_NOTICES, create_oci_notices(source))
     validate_dockerfile(validate_lock(load(ROOT / 'debian-security.lock.json')), (source / 'Dockerfile').read_text())
     console_lock = load(source / 'deploy/console/versions.lock.json')
     console_dockerfile = (source / 'deploy/console/Dockerfile').read_text()
@@ -183,6 +187,9 @@ def main():
     with tempfile.TemporaryDirectory(prefix='release-binaries-') as temporary:
         binary_dir = Path(temporary)
         build_artifact(base, source, 'binaries-export', binary_dir, True)
+        validate_oci_distribution({str(path.relative_to(binary_dir)): path.read_bytes()
+                                   for path in (binary_dir / 'licenses').rglob('*') if path.is_file()},
+                                  'licenses', load(directory / OCI_PAYLOAD_NOTICES, OCI_NOTICES_MAX_BYTES))
         linkage = load(ROOT / 'native-security.lock.json')['profile']
         for name in BINARIES:
             validate_file(binary_dir / name, linkage)
@@ -216,6 +223,8 @@ def main():
         image_digest(directory / name, name)
         if name in ('service','runner'):
             validate_runtime(directory / name, name, load(directory / 'native-provenance.json'))
+            validate_oci_image(directory / name, name,
+                               load(directory / OCI_PAYLOAD_NOTICES, OCI_NOTICES_MAX_BYTES))
         run([tool(args.tools, 'syft'), 'scan', 'oci-dir:' + str(directory / name), '--select-catalogers', '+rust-cargo-lock-cataloger,+javascript-lock-cataloger', '--config', str(ROOT / 'syft.yaml'), '-o', 'syft-json=' + str(directory / (name + '.syft.json')), '-o', 'spdx-json=' + str(directory / (name + '.spdx.json'))], env=scanner_environment(), timeout=600)
         # Only files/directories produced by the local OCI exporter, no symlinks.
         with tarfile.open(directory / (name + '.oci.tar'), 'w') as archive:

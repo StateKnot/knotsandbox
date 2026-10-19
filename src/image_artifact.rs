@@ -1,7 +1,9 @@
-//! Bounded verification of an expected OCI image's metadata closure.
+//! Bounded verification of an expected OCI image's metadata and layer streams.
 //!
-//! The caller supplies the expected digest. This module neither establishes
-//! approval nor reads layer payloads, unpacks content, or prepares a runtime.
+//! The caller supplies the expected digest. Metadata inspection leaves payloads
+//! unread; the separate payload interface requires explicit byte budgets. No
+//! operation establishes approval, interprets tar entries, unpacks content, or
+//! prepares a runtime.
 use std::{collections::BTreeMap, path::Path};
 
 use serde::{Deserialize, Serialize, de};
@@ -15,6 +17,9 @@ const MAX_BLOB_BYTES: usize = 1024 * 1024;
 const MAX_METADATA_BYTES: u64 = 3 * 1024 * 1024;
 const MAX_INDEX_ENTRIES: usize = 128;
 const MAX_LAYERS: usize = 256;
+
+mod payloads;
+pub use payloads::{PayloadLimits, VerifiedImagePayloads, verify_oci_payloads};
 
 /// A metadata-only receipt; no field conveys approval or preparation authority.
 #[derive(Debug, Serialize)]
@@ -67,6 +72,18 @@ pub enum ImageArtifactError {
     DescriptorConflict,
     #[error("INTEGER_OVERFLOW")]
     IntegerOverflow,
+    #[error("INVALID_PAYLOAD_LIMITS")]
+    InvalidPayloadLimits,
+    #[error("PAYLOAD_LIMIT_EXCEEDED")]
+    PayloadLimitExceeded,
+    #[error("UNSUPPORTED_PAYLOAD_MEDIA_TYPE")]
+    UnsupportedPayloadMediaType,
+    #[error("INVALID_LAYER_ENCODING")]
+    InvalidLayerEncoding,
+    #[error("DIFF_ID_MISMATCH")]
+    DiffIdMismatch,
+    #[error("PAYLOAD_DEADLINE_EXCEEDED")]
+    PayloadDeadlineExceeded,
 }
 
 impl ImageArtifactError {
@@ -87,6 +104,12 @@ impl ImageArtifactError {
             Self::AmbiguousPlatform => "AMBIGUOUS_PLATFORM",
             Self::DescriptorConflict => "DESCRIPTOR_CONFLICT",
             Self::IntegerOverflow => "INTEGER_OVERFLOW",
+            Self::InvalidPayloadLimits => "INVALID_PAYLOAD_LIMITS",
+            Self::PayloadLimitExceeded => "PAYLOAD_LIMIT_EXCEEDED",
+            Self::UnsupportedPayloadMediaType => "UNSUPPORTED_PAYLOAD_MEDIA_TYPE",
+            Self::InvalidLayerEncoding => "INVALID_LAYER_ENCODING",
+            Self::DiffIdMismatch => "DIFF_ID_MISMATCH",
+            Self::PayloadDeadlineExceeded => "PAYLOAD_DEADLINE_EXCEEDED",
         }
     }
 }
@@ -244,6 +267,14 @@ pub fn verify_oci_metadata(
 ) -> Result<VerifiedImageMetadata, ImageArtifactError> {
     validate_request(expected_digest, platform)?;
     let mut layout = Layout::open(layout)?;
+    verify_metadata_in(&mut layout, expected_digest, platform)
+}
+
+fn verify_metadata_in(
+    layout: &mut Layout,
+    expected_digest: &str,
+    platform: &str,
+) -> Result<VerifiedImageMetadata, ImageArtifactError> {
     let layout_marker = layout.marker()?;
     if string(object(&layout_marker)?, "imageLayoutVersion")? != "1.0.0" {
         return Err(ImageArtifactError::UnsupportedLayout);

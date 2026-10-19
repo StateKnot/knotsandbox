@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from build import create_manifest
-from common import (BINARIES, NATIVE_PROTOCOL_NOTICES, SQLX_POSTGRES_NOTICES,
+from common import (BINARIES, NATIVE_PROTOCOL_NOTICES, SQLX_POSTGRES_NOTICES, OCI_PAYLOAD_NOTICES,
                     ROOT, load, release_file_names, sha)
 from console_assets import verify_previous
 from download_previous import download
@@ -56,9 +56,16 @@ class NativeProtocolNoticesReleaseTest(unittest.TestCase):
         containerd['derived_messages'].remove('src/nodeguard/generated/containerd.services.snapshots.v1.rs')
         return value
 
-    def test_current_v4_delivers_complete_fixed_provenance_and_license_texts(self):
-        self.assertEqual(self.verify()['version'], 4)
-        self.assertEqual(self.verify(historical=True)['version'], 4)
+    def as_v4(self):
+        path = self.directory / 'release-manifest.json'
+        manifest = load(path)
+        manifest['version'] = 4
+        manifest['files'].pop(OCI_PAYLOAD_NOTICES)
+        rewrite(path, manifest)
+
+    def test_current_v5_delivers_complete_fixed_provenance_and_license_texts(self):
+        self.assertEqual(self.verify()['version'], 5)
+        self.assertEqual(self.verify(historical=True)['version'], 5)
         value = load(self.directory / NATIVE_PROTOCOL_NOTICES, MAX_BYTES)
         validate(value)
         self.assertEqual(value['schema_version'], 2)
@@ -77,8 +84,9 @@ class NativeProtocolNoticesReleaseTest(unittest.TestCase):
     def test_original_schema1_v4_is_only_read_as_authenticated_history(self):
         original = self.previous_schema_notice()
         self.rehash(original)
+        self.as_v4()
         self.assertEqual(validate(original, historical=True), original)
-        with self.assertRaisesRegex(ValueError, 'NATIVE_PROTOCOL_NOTICES_PROVENANCE'):
+        with self.assertRaisesRegex(ValueError, 'RELEASE_IDENTITY'):
             self.verify()
         with self.assertRaisesRegex(ValueError, 'NATIVE_PROTOCOL_NOTICES_PROVENANCE'):
             create_manifest(self.directory, REPO, TAG, COMMIT, '42',
@@ -126,6 +134,7 @@ class NativeProtocolNoticesReleaseTest(unittest.TestCase):
             self.verify(historical=True)
 
     def test_original_schema1_history_still_requires_complete_license_and_limit(self):
+        self.as_v4()
         old = self.previous_schema_notice()
         for name in LICENSES:
             value = copy.deepcopy(old)
@@ -141,6 +150,7 @@ class NativeProtocolNoticesReleaseTest(unittest.TestCase):
 
     def test_installer_cannot_reuse_an_old_or_forged_lock_for_schema1(self):
         self.rehash(self.previous_schema_notice())
+        self.as_v4()
         old_lock = self.directory / 'deployment-lock.json'
         rewrite(old_lock, {'manifest_sha256': sha(self.directory / 'release-manifest.json')})
         destination = self.directory / 'installed'
@@ -165,7 +175,7 @@ class NativeProtocolNoticesReleaseTest(unittest.TestCase):
                 '--destination', str(destination)]
         with patch('sys.argv', argv), patch('common.run', side_effect=current_verifier), \
              contextlib.redirect_stdout(io.StringIO()), \
-             self.assertRaisesRegex(ValueError, 'NATIVE_PROTOCOL_NOTICES_PROVENANCE'):
+             self.assertRaisesRegex(ValueError, 'RELEASE_IDENTITY'):
             runpy.run_path(str(ROOT / 'install.py'), run_name='__main__')
         self.assertEqual(len(outputs), 1)
         self.assertFalse(outputs[0].exists())
@@ -176,6 +186,7 @@ class NativeProtocolNoticesReleaseTest(unittest.TestCase):
         manifest_path = self.directory / 'release-manifest.json'
         manifest = load(manifest_path)
         manifest['files'].pop(NATIVE_PROTOCOL_NOTICES)
+        manifest['files'].pop(OCI_PAYLOAD_NOTICES)
         rewrite(manifest_path, manifest)
         with self.assertRaisesRegex(ValueError, 'RELEASE_FILE_COVERAGE'):
             self.verify()
@@ -231,6 +242,7 @@ class NativeProtocolNoticesReleaseTest(unittest.TestCase):
         manifest = load(manifest_path)
         manifest['version'] = 3
         manifest['files'].pop(NATIVE_PROTOCOL_NOTICES)
+        manifest['files'].pop(OCI_PAYLOAD_NOTICES)
         (self.directory / NATIVE_PROTOCOL_NOTICES).unlink()
         rewrite(manifest_path, manifest)
         self.assertIn(SQLX_POSTGRES_NOTICES, manifest['files'])
@@ -326,7 +338,8 @@ class NativeProtocolNoticesDownloadTest(unittest.TestCase):
         v3 = release_file_names(version=3)
         self.assertIn(SQLX_POSTGRES_NOTICES, v3)
         self.assertNotIn(NATIVE_PROTOCOL_NOTICES, v3)
-        self.assertEqual(release_file_names(), v3 | {NATIVE_PROTOCOL_NOTICES})
+        self.assertEqual(release_file_names(version=4), v3 | {NATIVE_PROTOCOL_NOTICES})
+        self.assertEqual(release_file_names(), v3 | {NATIVE_PROTOCOL_NOTICES, OCI_PAYLOAD_NOTICES})
         for legacy, version in ((True, 4), (False, 1), (True, 3), (False, True)):
             with self.assertRaisesRegex(ValueError, 'RELEASE_VERSION'):
                 release_file_names(legacy=legacy, version=version)
