@@ -1,6 +1,8 @@
 # 批准OCI镜像的节点预准备：生产实施计划
 
-最新检查点（2026-10-19，P1b7a实际层载荷完整性）：基线公开 `510271b` 精确CI 39186957170为5 job／73 step全通过。新增公共Rust／现有admin消费者，实际核编码SHA／大小、完整解码DiffID、四项逻辑字节预算、真实EOF和gzip成员总限；不解析tar、不pull／unpack或授权准备。两平台9库／23 CLI，Linux公开候选63常规程序564通过／0失败／309原生ignored、两平台严格Clippy／主机fmt、release117及四Docker路径28文件许可交付通过。主机全量109项权限拒绝、Linux首轮缺失解释器及release前两轮失败均保留；Spec一项P2已实际修复并复审关闭。v5独立notice保留v1—v4历史含义，新提交精确CI另核。完整P1执行者／硬限／原生保护、GPU／云／Kata／CSI／性能仍待完成，pre-pull关闭。见[本批交付](image-payload-integrity-delivery-20261019.md)。
+最新检查点（2026-10-19，节点镜像时间夹具与精确CI复验）：发布 `0dd7eb7` 的精确CI 39196350609为4 job成功／1失败，首个失败是原未来时间HTTP夹具；原CI未记录时钟差，实际历史触发原因仍UNKNOWN。固定时钟实际RED后，仅修测试夹具，保留真实HTTP UNKNOWN断言并补真实decoder的5秒边界／相邻浮点值及库存独立性测试；生产代码、期限、权限、ignored和线程栈不变。主机2项、Linux原组9项及实际65个all-target测试程序566通过／0失败／309原生ignored，两平台严格Clippy／主机fmt通过；首轮Docker挂载启动失败（Cargo未运行）保留。新提交精确CI单独核对，不沿用基线绿灯或改写旧失败；完整P1执行者／硬限／原生保护及云／Kata／CSI／GPU／性能仍待完成，pre-pull关闭。见[本批交付](node-image-clock-fixture-delivery-20261019.md)。
+
+前序检查点（2026-10-19，P1b7a实际层载荷完整性）：基线公开 `510271b` 精确CI 39186957170为5 job／73 step全通过。新增公共Rust／现有admin消费者，实际核编码SHA／大小、完整解码DiffID、四项逻辑字节预算、真实EOF和gzip成员总限；不解析tar、不pull／unpack或授权准备。两平台9库／23 CLI，Linux公开候选63常规程序564通过／0失败／309原生ignored、两平台严格Clippy／主机fmt、release117及四Docker路径28文件许可交付通过。主机全量109项权限拒绝、Linux首轮缺失解释器及release前两轮失败均保留；Spec一项P2已实际修复并复审关闭。v5独立notice保留v1—v4历史含义，新提交精确CI另核。完整P1执行者／硬限／原生保护、GPU／云／Kata／CSI／性能仍待完成，pre-pull关闭。见[本批交付](image-payload-integrity-delivery-20261019.md)。
 
 前序检查点（2026-10-19，自动化进程失败阶段诊断）：已核公开 `d53d7b1` 精确 CI 39120679185：四个job通过，verify的自动化前24项通过、最终进程用例失败；原私有日志未上传、根因仍UNKNOWN。测试专用九种固定阶段上下文与封闭回执已实现，原时限/权限/谓词/清理顺序保持。12项诊断测试、受控最终场景反例及恢复原条件后的Linux完整进程序列1项通过；47迁移、独立零backend、自有清理、主机fmt与本target两平台严格Clippy已核。未重跑完整25项或普通Rust全量，不称原CI已修；新提交CI独立核对。P1受限准备执行者/硬限/原生保护继续待开发，pre-pull关闭；GPU/云/Kata/CSI/性能未认证。见[本批记录](automation-process-diagnostics-delivery-20261019.md)。
 
@@ -16,7 +18,7 @@
 
 前序开发检查点（2026-10-16，P1b3重连身份与请求排空）：固定root UDS以目录／socket对象FD及SO_PEERCRED的PID／start绑定，CRI与镜像观察复用算法、各自持有身份。CRI重连冲突进入永久拒绝，沿既有任务门阻止新CRI／CONTROL并取消纯读；不清SQLite coverage或释放资源／配额。普通Rust65程序501通过／0失败／291环境ignored、Python11、两平台严格all-target Clippy／fmt通过；最终Linux制品的重连、启动配置和原生镜像mTLS三个case各1项通过，自有资源清理及源码／制品稳定已核。0755夹具失败、计数断言缺口与ready发布竞态均修复并保留事实。基线cb47bc9精确CI五job／68step全绿，新提交CI独立核对。该片不证明daemon二进制／持续配置或真实PID复用，不产生准备许可；完整P1硬限／引用、P2—P6及云／Kata／CSI／GPU／性能仍待完成，pre-pull关闭。见[本批交付](runtime-peer-binding-delivery-20261016.md)。
 
-状态：**P0a—P0c2b只读观察及同一原生整链、P1a元数据校验、P1b1宿主配置准入、P1b2启动时runtime读回、P1b3重连身份、P1b4原生已存元数据、P1b5 CRI当前索引身份、P1b6快照／配置引用元数据及P1b7a实际层载荷完整性已完成各自本地验收；完整P1及P2—P6仍未完成／未认证。** 本文件承接[开发表12.7](rust-sandbox-development-workbreakdown.md#127-可信启动资源观察与原子登记2026-10-15)的可信资源账本；本轮基线510271b精确CI run39186957170，5 job／73 step已通过，新源码CI单独核对，不沿用历史成功。
+状态：**P0a—P0c2b只读观察及同一原生整链、P1a元数据校验、P1b1宿主配置准入、P1b2启动时runtime读回、P1b3重连身份、P1b4原生已存元数据、P1b5 CRI当前索引身份、P1b6快照／配置引用元数据及P1b7a实际层载荷完整性已完成各自本地验收；完整P1及P2—P6仍未完成／未认证。** 本文件承接[开发表12.7](rust-sandbox-development-workbreakdown.md#127-可信启动资源观察与原子登记2026-10-15)的可信资源账本；P1b7a开发基线510271b精确CI run39186957170为5 job／73 step通过，发布0dd7eb7后的精确CI 39196350609则有1 job失败。后续测试夹具修复与独立CI核对见[交付记录](node-image-clock-fixture-delivery-20261019.md)，不沿用基线成功。
 范围仅为批准OCI镜像在准确节点／运行时中的有预算准备，不创建CPU／GPU VM池，不产生用户进程、工作区或普通launch许可。
 每90分钟是触发间隔，不是开发或验证超时；先接续已有在途工作，再持续完成选中的可验证切片，不因下一次触发重复启动。
 失败保存原现场并继续闭合该切片，不能因触发次数或时间到而标记通过，也不能跳过前置门开放拉取。

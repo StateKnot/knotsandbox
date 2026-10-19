@@ -45,3 +45,7 @@ Standards两轮源审查及文档初审未发现问题；Spec原一项P2在实�
 ## 下一依赖
 
 完整 P1 仍须选定可强制部署的执行者／backend／存储组合，覆盖 resolver、下载、content ingest、differ、snapshotter、元数据及清理的真实资源所有者，证明耗尽时普通 CRI 保留量仍可用。原生 lease／content／snapshot 完整闭包、实际 pull 平台／namespace／snapshotter、丢 ACK／崩溃／GC 与安全释放还须 P1—P4 闭合。云、Kata、CSI、GPU、性能／成本收益均未在本批认证。
+
+## 发布后精确 CI 的后续事实
+
+本批44文件已同步为 `0dd7eb7d0003792e70825f296fa88172e65a3b57`，远端1142文件完整树／模式一致，公开工作区clean，四处历史ROOT差异保留。其精确CI 39196350609为4 job成功／verify失败，首个错误来自既有节点镜像指标未来时间夹具，库测试352通过／1失败／149 ignored；不能沿用本地成功称该CI通过。原始失败及确定性夹具修复另见[CI修复记录](node-image-clock-fixture-delivery-20261019.md)，本片的载荷验证范围、pre-pull关闭与完整P1未完成状态不变。后续提交的精确CI独立核对，不改写本次失败。

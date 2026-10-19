@@ -471,14 +471,97 @@ fn stale_filesystem(binding: &NodeImageMetricBinding, evaluated: i64) -> String 
 }
 fn future_original(binding: &NodeImageMetricBinding, evaluated: i64) -> String {
     let mut a = rows(binding, evaluated, "a", 1);
-    set(
-        &mut a,
-        "observed_at_seconds",
-        "value",
-        (evaluated + 6) as f64,
-    );
+    // Keep the real HTTP fixture outside the future tolerance as the decoding
+    // clock advances. The exact five-second boundary is tested with fixed time.
+    set(&mut a, "observed_at_seconds", "value", f64::MAX);
     envelope(a)
 }
+
+#[test]
+fn future_http_fixture_is_rejected_after_decode_clock_advances_one_second() -> anyhow::Result<()> {
+    let binding = binding();
+    let evaluated = 1_700_000_000;
+    let replicas = ["a".to_owned(), "b".to_owned()];
+    let metrics = decode(
+        future_original(&binding, evaluated).as_bytes(),
+        &binding,
+        "production-a",
+        &replicas,
+        evaluated,
+        evaluated as f64 + 1.0,
+    )?;
+    assert_eq!(metrics.inventory_observation_success, Some(true));
+    assert_eq!(metrics.filesystem_observation_success, Some(true));
+    assert!(metrics.inventory.is_none() && metrics.filesystem.is_none());
+    Ok(())
+}
+
+#[test]
+fn future_original_timestamps_obey_the_inclusive_five_second_boundary() -> anyhow::Result<()> {
+    let binding = binding();
+    let evaluated = 1_700_000_000;
+    let now = evaluated as f64 + 1.0;
+    let boundary = now + 5.0;
+    let replicas = ["a".to_owned(), "b".to_owned()];
+    let baseline_inventory = decode(
+        normal(&binding, evaluated).as_bytes(),
+        &binding,
+        "production-a",
+        &replicas,
+        evaluated,
+        now,
+    )?
+    .inventory;
+    assert!(baseline_inventory.is_some());
+    for metric in ["observed_at_seconds", "filesystem_reported_at_seconds"] {
+        for (timestamp, accepted) in [
+            (boundary.next_down(), true),
+            (boundary, true),
+            (boundary.next_up(), false),
+        ] {
+            let mut sample = rows(&binding, evaluated, "a", 1);
+            set(&mut sample, metric, "value", timestamp);
+            let metrics = decode(
+                envelope(sample).as_bytes(),
+                &binding,
+                "production-a",
+                &replicas,
+                evaluated,
+                now,
+            )?;
+            assert_eq!(metrics.inventory_observation_success, Some(true));
+            assert_eq!(metrics.filesystem_observation_success, Some(true));
+            assert_eq!(
+                metrics.inventory.is_some(),
+                metric == "filesystem_reported_at_seconds" || accepted,
+                "{metric} at {timestamp}"
+            );
+            assert_eq!(
+                metrics.filesystem.is_some(),
+                accepted,
+                "{metric} at {timestamp}"
+            );
+            if metric == "filesystem_reported_at_seconds" {
+                assert_eq!(metrics.inventory, baseline_inventory);
+            }
+            if let Some(inventory) = &metrics.inventory
+                && metric == "observed_at_seconds"
+            {
+                assert_eq!(inventory.observed_at_seconds, timestamp);
+            }
+            if let Some(filesystem) = &metrics.filesystem {
+                assert_eq!(filesystem.filesystems.len(), 1);
+                if metric == "filesystem_reported_at_seconds" {
+                    assert_eq!(filesystem.filesystems[0].reported_at_seconds, timestamp);
+                } else {
+                    assert_eq!(filesystem.observed_at_seconds, timestamp);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn stale_samples(binding: &NodeImageMetricBinding, evaluated: i64) -> String {
     envelope(rows(binding, evaluated, "a", 60))
 }
