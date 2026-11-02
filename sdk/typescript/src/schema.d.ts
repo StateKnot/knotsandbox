@@ -1724,7 +1724,7 @@ export interface components {
              * @description Durable operation category. Acceptance does not establish runtime, deletion or backup completion.
              * @enum {string}
              */
-            kind: "CREATE" | "START" | "STOP" | "RESTART" | "DELETE" | "RENEW" | "EXECUTE" | "DELETE_WORKSPACE" | "BACKUP" | "DIAGNOSE";
+            kind: "CREATE" | "START" | "STOP" | "RESTART" | "DELETE" | "RENEW" | "EXECUTE" | "FILE_TRANSFER" | "DELETE_WORKSPACE" | "BACKUP" | "DIAGNOSE";
             /** @enum {string} */
             status: "QUEUED" | "RUNNING" | "WAITING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
             stage: string;

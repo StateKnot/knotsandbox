@@ -40,7 +40,122 @@ def references(value):
             yield from references(item)
 
 
+def schema_validator(name):
+    return Draft202012Validator(
+        {"$ref": f"#/components/schemas/{name}", "components": DOCUMENT["components"]},
+        format_checker=FormatChecker(formats=["date-time", "uuid"]),
+    )
+
+
 class ApiContract(unittest.TestCase):
+    def test_file_transfer_operation_is_a_durable_operation_category(self):
+        validator = schema_validator("Operation")
+        identifier = "00000000-0000-4000-8000-000000000001"
+        operation = {
+            "id": identifier, "tenant_id": identifier, "project_id": identifier,
+            "instance_id": identifier, "workspace_id": identifier,
+            "kind": "FILE_TRANSFER", "status": "QUEUED", "stage": "QUEUED", "attempts": 0,
+            "error": None, "created_at": "2026-11-02T00:00:00Z", "updated_at": "2026-11-02T00:00:00Z",
+        }
+        validator.validate(operation)
+        operation["kind"] = "UNKNOWN_OPERATION"
+        self.assertTrue(list(validator.iter_errors(operation)))
+
+    def test_destructive_requests_require_explicit_typed_acknowledgements(self):
+        for name, valid, invalid in (
+            ("CancelExecution", {"hard_stop_instance": True},
+             ({}, {"hard_stop_instance": False}, {"hard_stop_instance": "true"},
+              {"hard_stop_instance": None}, {"hard_stop_instance": True, "ignore_version": True})),
+            ("DeleteWorkspace", {"confirm_workspace_id": "00000000-0000-4000-8000-000000000001"},
+             ({}, {"confirm_workspace_id": True}, {"confirm_workspace_id": None},
+              {"confirm_workspace_id": "not-a-uuid"},
+              {"confirm_workspace_id": "00000000-0000-4000-8000-000000000001", "force": True})),
+        ):
+            with self.subTest(schema=name):
+                validator = schema_validator(name)
+                validator.validate(valid)
+                for value in invalid:
+                    with self.subTest(body=value):
+                        self.assertTrue(list(validator.iter_errors(value)))
+        # Matching confirm_workspace_id to the path is an API behavior; a
+        # JSON Schema validates the UUID shape, not its relation to the URL.
+
+    def test_automation_start_default_ttl_preserves_null_and_integer_limits(self):
+        validator = schema_validator("AutomationAction")
+        validator.validate({"kind": "START"})
+        for value in (None, 60, 86400):
+            with self.subTest(ttl=value):
+                validator.validate({"kind": "START", "ttl_seconds": value})
+        for value in (59, 86401, True, "60", 60.5):
+            with self.subTest(invalid_ttl=value):
+                self.assertTrue(list(validator.iter_errors({"kind": "START", "ttl_seconds": value})))
+
+    def test_automation_nullable_response_fields_are_required_and_keep_nonnull_constraints(self):
+        identifier = "00000000-0000-4000-8000-000000000001"
+        timestamp = "2026-11-02T00:00:00Z"
+        automation = {
+            "id": identifier, "tenant_id": identifier, "project_id": identifier,
+            "instance_id": identifier, "workspace_id": identifier, "creator_principal_id": identifier,
+            "name": "finite-start", "action_kind": "START", "trigger_kind": "ONCE",
+            "scheduled_at": timestamp, "cron_expression": None, "event_type": None,
+            "event_aggregate_id": None, "next_due_at": timestamp, "status": "ACTIVE", "version": 1,
+            "run_budget": 1, "emitted_runs": 0, "minimum_interval_seconds": 60, "grace_seconds": 1,
+            "delegation_expires_at": timestamp, "delegation_revoked_at": None,
+            "created_at": timestamp, "updated_at": timestamp,
+        }
+        run = {
+            "id": identifier, "tenant_id": identifier, "project_id": identifier,
+            "automation_id": identifier, "version": 1, "automation_version": 1,
+            "scheduled_for": timestamp, "source_event_id": None, "source_event_sequence": None,
+            "skipped_through": None, "operation_kind": "START", "expected_resource_version": 1,
+            "expected_generation": 0, "status": "PENDING", "operation_id": None, "failure_code": None,
+            "deadline": timestamp, "created_at": timestamp, "updated_at": timestamp, "completed_at": None,
+        }
+        # These literals exercise the public DTOs, including all required keys.
+        # Do not strip schema constraints or derive accepted values from them:
+        # Draft 2020-12 silently ignores the old OpenAPI 3.0 nullable keyword.
+        for name, original, cases in (
+            ("Automation", automation, (
+                ("scheduled_at", timestamp, "not-a-timestamp"),
+                ("cron_expression", "0 * * * *", 1),
+                ("event_type", "INSTANCE_STOPPED", True),
+                ("event_aggregate_id", identifier, "not-a-uuid"),
+                ("next_due_at", timestamp, "not-a-timestamp"),
+                ("delegation_revoked_at", timestamp, "not-a-timestamp"),
+            )),
+            ("AutomationRun", run, (
+                ("scheduled_for", timestamp, "not-a-timestamp"),
+                ("source_event_id", identifier, "not-a-uuid"),
+                ("source_event_sequence", 1, 0),
+                ("skipped_through", timestamp, "not-a-timestamp"),
+                ("operation_id", identifier, "not-a-uuid"),
+                ("failure_code", "EXECUTION_FAILED", True),
+                ("completed_at", timestamp, "not-a-timestamp"),
+            )),
+            ("AutomationPage", {"items": [automation], "next_cursor": None, "cutoff": timestamp}, (
+                ("next_cursor", "signed-continuation", 1),
+            )),
+            ("AutomationRunPage", {"items": [run], "next_cursor": None, "cutoff": timestamp}, (
+                ("next_cursor", "signed-continuation", 1),
+            )),
+        ):
+            validator = schema_validator(name)
+            validator.validate(original)
+            for field, nonnull, invalid in cases:
+                for replacement in (None, nonnull):
+                    with self.subTest(schema=name, field=field, accepted=replacement):
+                        value = copy.deepcopy(original)
+                        value[field] = replacement
+                        validator.validate(value)
+                with self.subTest(schema=name, field=field, invalid=invalid):
+                    value = copy.deepcopy(original)
+                    value[field] = invalid
+                    self.assertTrue(list(validator.iter_errors(value)))
+                with self.subTest(schema=name, missing=field):
+                    value = copy.deepcopy(original)
+                    del value[field]
+                    self.assertTrue(list(validator.iter_errors(value)))
+
     def test_host_efficiency_metrics_preserve_units_and_missing_values(self):
         validator = Draft202012Validator(
             {"$ref": "#/components/schemas/MetricSeries", "components": DOCUMENT["components"]},

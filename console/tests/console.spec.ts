@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import type { Schema } from "../src/api.ts";
 import {
   tenant,
   project,
@@ -11,6 +12,202 @@ import {
   detail,
   security,
 } from "./browser-fixtures.ts";
+
+for (const mutation of [
+  "execution cancellation",
+  "workspace deletion",
+] as const) {
+  test(`${mutation} sends its explicit destructive acknowledgement only after confirmation and keeps 202 as acceptance`, async ({
+    page,
+  }) => {
+    const executionId = "00000000-0000-4000-8000-000000000055";
+    const operationId = "00000000-0000-4000-8000-000000000056";
+    const isExecution = mutation === "execution cancellation";
+    const path = isExecution
+      ? `/v1/executions/${executionId}/cancel`
+      : `/v1/workspaces/${resource.workspace_id}`;
+    const method = isExecution ? "POST" : "DELETE";
+    const target = isExecution ? executionId : resource.workspace_id;
+    const requiredBody = isExecution
+      ? { hard_stop_instance: true }
+      : { confirm_workspace_id: resource.workspace_id };
+    const expiry = new Date(Date.now() + 3600_000).toISOString();
+    let accepted = false;
+    const calls: { body: unknown; headers: Record<string, string> }[] = [];
+    const execution = (): Schema["Execution"] => ({
+      id: executionId,
+      tenant_id: tenant,
+      project_id: project,
+      instance_id: instance,
+      operation_id: operationId,
+      version: accepted ? 12 : 11,
+      runtime_generation: 1,
+      status: accepted ? "OUTCOME_UNKNOWN" : "RUNNING",
+      slot_held: true,
+      dispatch_attempted_at: now,
+      deadline: expiry,
+      timeout_seconds: 60,
+      termination_status: accepted ? "PENDING" : "NOT_REQUESTED",
+      exit_code: null,
+      output_status: "PENDING",
+      result_ref: null,
+      cancel_requested_at: accepted ? now : null,
+      cancel_operation_id: accepted ? operationId : null,
+      client_reference: null,
+      created_at: now,
+      updated_at: now,
+      completed_at: null,
+    });
+    const workspace: Schema["Workspace"] = {
+      id: resource.workspace_id,
+      tenant_id: tenant,
+      project_id: project,
+      size_gib: 20,
+      status: "AVAILABLE",
+      spec_version: 13,
+      active_operation_id: null,
+      retention_until: null,
+      delete_requested_at: null,
+      deleted_at: null,
+      created_at: now,
+      updated_at: now,
+    };
+    const operation: Schema["Operation"] = {
+      id: operationId,
+      tenant_id: tenant,
+      project_id: project,
+      instance_id: isExecution ? instance : null,
+      workspace_id: resource.workspace_id,
+      kind: isExecution ? "STOP" : "DELETE_WORKSPACE",
+      status: "QUEUED",
+      stage: "ACCEPTED",
+      attempts: 0,
+      error: null,
+      created_at: now,
+      updated_at: now,
+    };
+    await page.route("**/auth/session", (route) =>
+      route.fulfill({ json: session }),
+    );
+    await page.route("**/v1/**", async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      if (url.pathname === path && request.method() === method) {
+        const body: unknown = request.postDataJSON();
+        calls.push({ body, headers: request.headers() });
+        if (JSON.stringify(body) !== JSON.stringify(requiredBody)) {
+          await route.fulfill({
+            status: 422,
+            json: { code: "EXPLICIT_ACKNOWLEDGEMENT_REQUIRED" },
+          });
+          return;
+        }
+        accepted = true;
+        await route.fulfill({
+          status: 202,
+          json: {
+            resource: isExecution ? execution() : workspace,
+            operation,
+            ...(isExecution
+              ? { instance_id: instance, instance_spec_version: 8 }
+              : {}),
+            idempotency_expires_at: expiry,
+          },
+        });
+        return;
+      }
+      let body: unknown;
+      if (url.pathname === "/v1/capabilities")
+        body = {
+          ...caps,
+          api_features: { ...caps.api_features, backup_restore: true },
+        };
+      else if (url.pathname === "/v1/instances")
+        body = { items: [resource], next_after: null };
+      else if (url.pathname === `/v1/instances/${instance}/details`)
+        body = detail;
+      else if (url.pathname === `/v1/executions/${executionId}`)
+        body = execution();
+      else if (url.pathname === `/v1/workspaces/${resource.workspace_id}`)
+        body = workspace;
+      else {
+        await route.fulfill({ status: 404, json: { code: "NOT_FOUND" } });
+        return;
+      }
+      await route.fulfill({ json: body });
+    });
+    await page.goto("/");
+    await page.getByLabel("项目 ID", { exact: true }).fill(project);
+    await page.getByRole("button", { name: "进入项目", exact: true }).click();
+    await page
+      .getByRole("button", { name: resource.name, exact: true })
+      .click();
+    await page
+      .getByRole("tab", {
+        name: isExecution ? "执行与输出" : "备份",
+        exact: true,
+      })
+      .click();
+    if (isExecution) {
+      await page.getByLabel("查询执行 ID", { exact: true }).fill(executionId);
+      await page.getByRole("button", { name: "查询", exact: true }).click();
+    }
+    await page
+      .getByRole("button", {
+        name: isExecution ? "取消执行并停止实例" : "永久删除工作区",
+        exact: true,
+      })
+      .click();
+    const dialog = page.getByRole("dialog");
+    const confirm = dialog.getByRole("button", {
+      name: "确认提交",
+      exact: true,
+    });
+    await expect(confirm).toBeDisabled();
+    expect(calls).toHaveLength(0);
+    await dialog.getByRole("textbox").fill("wrong-resource");
+    await expect(confirm).toBeDisabled();
+    expect(calls).toHaveLength(0);
+    await dialog.getByRole("textbox").fill(target);
+    await confirm.click();
+    await expect.poll(() => calls.length).toBe(1);
+    expect(calls[0].body).toEqual(requiredBody);
+    expect(calls[0].headers["if-match"]).toBe(isExecution ? '"11"' : '"13"');
+    expect(calls[0].headers["idempotency-key"]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(calls[0].headers["x-csrf-token"]).toBe(session.csrf_token);
+    expect(calls[0].headers["x-tenant-id"]).toBe(tenant);
+    expect(calls[0].headers["authorization"]).toBeUndefined();
+    await expect(dialog).not.toBeVisible();
+    await expect(page.getByText(/^回执已确认 · 幂等键/)).toBeVisible();
+    if (isExecution) {
+      await page.getByLabel("查询执行 ID", { exact: true }).fill(executionId);
+      await page.getByRole("button", { name: "查询", exact: true }).click();
+      await expect(
+        page.getByText("OUTCOME_UNKNOWN", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByText("终止 PENDING · 输出 PENDING", { exact: true }),
+      ).toBeVisible();
+      await page.getByText("执行元数据", { exact: true }).click();
+      await expect(
+        page.getByRole("tabpanel").locator("pre.json"),
+      ).toContainText('"slot_held": true');
+    } else {
+      await expect(
+        page.getByText(`工作区 ${target} · 版本 13 · AVAILABLE`, {
+          exact: true,
+        }),
+      ).toBeVisible();
+    }
+    await page.getByRole("button", { name: "请求记录", exact: true }).click();
+    const receipt = page
+      .getByRole("row")
+      .filter({ hasText: calls[0].headers["idempotency-key"] });
+    await expect(receipt.getByText("ACCEPTED", { exact: true })).toBeVisible();
+    expect(calls).toHaveLength(1);
+  });
+}
+
 test("compiled browser UI displays honest unknown/disabled states and enforces confirmation plus CSRF; logout removes data", async ({
   page,
 }) => {

@@ -4427,6 +4427,7 @@ components:
           - DELETE
           - RENEW
           - EXECUTE
+          - FILE_TRANSFER
           - DELETE_WORKSPACE
           - BACKUP
           - DIAGNOSE
@@ -6990,10 +6991,11 @@ components:
             enum:
             - START
           ttl_seconds:
-            type: integer
+            type:
+            - integer
+            - 'null'
             minimum: 60
             maximum: 86400
-            nullable: true
         required:
         - kind
       - type: object
@@ -7198,23 +7200,28 @@ components:
           - CRON_UTC
           - EVENT
         scheduled_at:
-          type: string
+          type:
+          - string
+          - 'null'
           format: date-time
-          nullable: true
         cron_expression:
-          type: string
-          nullable: true
+          type:
+          - string
+          - 'null'
         event_type:
-          type: string
-          nullable: true
+          type:
+          - string
+          - 'null'
         event_aggregate_id:
-          type: string
+          type:
+          - string
+          - 'null'
           format: uuid
-          nullable: true
         next_due_at:
-          type: string
+          type:
+          - string
+          - 'null'
           format: date-time
-          nullable: true
         status:
           type: string
           enum:
@@ -7249,9 +7256,10 @@ components:
           type: string
           format: date-time
         delegation_revoked_at:
-          type: string
+          type:
+          - string
+          - 'null'
           format: date-time
-          nullable: true
         created_at:
           type: string
           format: date-time
@@ -7310,22 +7318,26 @@ components:
           format: int64
           minimum: 1
         scheduled_for:
-          type: string
+          type:
+          - string
+          - 'null'
           format: date-time
-          nullable: true
         source_event_id:
-          type: string
+          type:
+          - string
+          - 'null'
           format: uuid
-          nullable: true
         source_event_sequence:
-          type: integer
+          type:
+          - integer
+          - 'null'
           format: int64
           minimum: 1
-          nullable: true
         skipped_through:
-          type: string
+          type:
+          - string
+          - 'null'
           format: date-time
-          nullable: true
         operation_kind:
           type: string
           enum:
@@ -7357,12 +7369,14 @@ components:
           - CANCELLED
           - OUTCOME_UNKNOWN
         operation_id:
-          type: string
+          type:
+          - string
+          - 'null'
           format: uuid
-          nullable: true
         failure_code:
-          type: string
-          nullable: true
+          type:
+          - string
+          - 'null'
         deadline:
           type: string
           format: date-time
@@ -7373,9 +7387,10 @@ components:
           type: string
           format: date-time
         completed_at:
-          type: string
+          type:
+          - string
+          - 'null'
           format: date-time
-          nullable: true
       required:
       - id
       - tenant_id
@@ -7421,8 +7436,9 @@ components:
           items:
             $ref: '#/components/schemas/Automation'
         next_cursor:
-          type: string
-          nullable: true
+          type:
+          - string
+          - 'null'
         cutoff:
           type: string
           format: date-time
@@ -7439,8 +7455,9 @@ components:
           items:
             $ref: '#/components/schemas/AutomationRun'
         next_cursor:
-          type: string
-          nullable: true
+          type:
+          - string
+          - 'null'
         cutoff:
           type: string
           format: date-time

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Local immutable-image TLS checks. Public disposable fixtures; no cloud changes."""
 import argparse
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,19 @@ from render import configuration
 
 
 API_NAME = 'api.test.svc.cluster.local'
+
+
+def private_test_subnet(value):
+    message = 'network subnet must be a network-aligned RFC1918 IPv4 CIDR with prefix /24 through /28'
+    try:
+        network = ipaddress.IPv4Network(value, strict=True)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(message) from exc
+    private_ranges = ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16')
+    if (not value.partition('/')[2].isdigit() or not 24 <= network.prefixlen <= 28
+            or not any(network.subnet_of(ipaddress.IPv4Network(cidr)) for cidr in private_ranges)):
+        raise argparse.ArgumentTypeError(message)
+    return str(network)
 
 
 def openssl(args):
@@ -65,6 +79,8 @@ def main():
     p.add_argument('--docker-host')
     p.add_argument('--docker-config')
     p.add_argument('--port', type=int, default=19443)
+    p.add_argument('--network-subnet', type=private_test_subnet,
+                   help='optional unused RFC1918 IPv4 /24 through /28; Docker checks conflicts')
     a = p.parse_args()
     if not re.fullmatch(r'(?:[a-z0-9./:_-]+@)?sha256:[a-f0-9]{64}', a.image) or not 1024 <= a.port <= 65535:
         p.error('immutable image and nonprivileged local test port required')
@@ -105,7 +121,8 @@ def main():
             # Docker Desktop cannot publish ports from an internal-only bridge.
             # This unique bridge has only these fixture containers; no external
             # URLs are requested and the sole host port binds 127.0.0.1.
-            run(['network', 'create', network])
+            subnet = ['--subnet', a.network_subnet] if a.network_subnet else []
+            run(['network', 'create', *subnet, network])
             network_created = True
             run(['run', '--detach', '--name', backend, '--network', network, '--network-alias', API_NAME,
                  *base, '--volume', f'{upstream_cfg}:/etc/sandbox/nginx.conf:ro', '--volume', f'{root}:/fixture:ro',

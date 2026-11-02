@@ -1855,7 +1855,9 @@ function ExecutionPanel({
               run={() =>
                 context.perform(
                   `/v1/executions/${execution.data!.id}/cancel`,
-                  {},
+                  {
+                    hard_stop_instance: true,
+                  } satisfies Schema["CancelExecution"],
                   `"${execution.data!.version}"`,
                 )
               }
@@ -2451,7 +2453,9 @@ function BackupPanel({
               run={() =>
                 context.perform(
                   `/v1/workspaces/${instance.workspace_id}`,
-                  {},
+                  {
+                    confirm_workspace_id: instance.workspace_id,
+                  } satisfies Schema["DeleteWorkspace"],
                   `"${workspace.data!.spec_version}"`,
                   "DELETE",
                 )
