@@ -221,21 +221,16 @@ jobs:
         run: |
           npm ci --ignore-scripts --no-fund --no-audit
           npm run build
-      - name: Prepare the real console and browser for the live identity integration
+      - name: Prepare locked Python dependencies for identity and node image checks
         run: |
           python3 -m venv .local/cluster-venv
           .local/cluster-venv/bin/python -m pip install --require-hashes -r deploy/cluster/requirements.lock.txt
-          npm --prefix console ci --ignore-scripts --no-fund --no-audit
-          npm --prefix console run build
-          cd console
-          npx --no-install playwright install --with-deps chromium
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-rust-1.98.1-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-rust-dependencies-1.98.1-${{ hashFiles('Cargo.lock') }}
       - name: Formatting and lint
         run: |
           python3 scripts/verify-sqlx-postgres-patch.py
@@ -406,6 +401,46 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
+      - name: Verify metric expressions with the locked official Prometheus evaluator
+        run: |
+          cargo test --locked --lib metrics::tests::official_prometheus -- --ignored
+      - name: Stop dependencies
+        if: always()
+        run: |
+          if [[ -f .local/dev.env ]]; then scripts/dev-dependencies.sh down; fi
+  live-acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Install the locked Rust toolchain and fetch dependencies for offline acceptance
+        run: |
+          df -h .
+          rustup toolchain install 1.98.1 --profile minimal
+          cargo fetch --locked --target x86_64-unknown-linux-gnu
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: |
+            console/package-lock.json
+            sdk/typescript/package-lock.json
+      - name: Prepare the real console and browser for the live identity integration
+        run: |
+          python3 -m venv .local/cluster-venv
+          .local/cluster-venv/bin/python -m pip install --require-hashes -r deploy/cluster/requirements.lock.txt
+          npm --prefix console ci --ignore-scripts --no-fund --no-audit
+          npm --prefix console run build
+          cd console
+          npx --no-install playwright install --with-deps chromium
+      - name: Start real development dependencies
+        run: scripts/dev-dependencies.sh up
       - name: Real cross-site Keycloak login, console mutation and live authorization revocation
         shell: bash
         run: |
@@ -452,7 +487,7 @@ jobs:
           assert all(re.search(r'^' + line + r'$', output, re.M) for line in
                      (r'1\.\.30', r'# tests 30', r'# pass 30', r'# fail 0', r'# skipped 0'))
           PY
-          python3 scripts/test-console-browser.py \
+          python3 scripts/test-console-browser.py --github-hosted-ci \
             --node "$(command -v node)" --chrome "$sandbox_live_chrome" \
             --identity-python "$PWD/.local/cluster-venv/bin/python" \
             --evidence-dir "$PWD/.local/console-notifications-ci"
@@ -485,11 +520,20 @@ jobs:
           path: .local/automation-ci-evidence/evidence.json
           if-no-files-found: warn
           retention-days: 14
-      - name: Verify metric expressions with the locked official Prometheus evaluator
+      - name: Stop dependencies
+        if: always()
         run: |
-          cargo test --locked --lib metrics::tests::official_prometheus -- --ignored
+          if [[ -f .local/dev.env ]]; then scripts/dev-dependencies.sh down; fi
+  linux-images:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - name: Build and smoke-test non-root service and runner images
         run: |
+          df -h .
           docker build --pull --target runtime --tag sandbox-platform:ci .
           docker build --target runner --tag sandbox-runner:ci .
           docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges sandbox-platform:ci --version
@@ -526,6 +570,7 @@ jobs:
           receipt.write_bytes(result.stdout)
           PY
       - name: Export and verify the Linux amd64 nodeguard host binary
+        id: nodeguard-export
         shell: bash
         run: |
           docker buildx build --platform linux/amd64 --target nodeguard-export --output type=local,dest=.local/release/nodeguard-linux-amd64 .
@@ -544,7 +589,7 @@ jobs:
           sha256sum sandbox-nodeguard > SHA256SUMS
           sha256sum --check SHA256SUMS
       - name: Retain the unsigned host binary and checksum for release review
-        if: always()
+        if: steps.nodeguard-export.outcome == 'success'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sandbox-nodeguard-linux-amd64-${{ github.sha }}
@@ -555,7 +600,12 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
-      - name: Stop dependencies
-        if: always()
-        run: |
-          if [[ -f .local/dev.env ]]; then scripts/dev-dependencies.sh down; fi
+      - name: Retain credential diagnostics when the Nodeguard export fails
+        if: failure() && steps.nodeguard-export.outcome != 'success' && hashFiles('.local/nodeguard-credential-evidence/projected-trust.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sandbox-nodeguard-credential-diagnostics-${{ github.sha }}
+          path: .local/nodeguard-credential-evidence/projected-trust.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14

@@ -306,11 +306,17 @@ def main() -> int:
     parser.add_argument("--artifacts", type=Path,
                         help="JSON lines from the current ordinary Cargo build")
     parser.add_argument("--evidence-dir", type=Path)
+    parser.add_argument("--github-hosted-ci", action="store_true",
+                        help="Use the fixed disk reserve for a dedicated GitHub-hosted Linux CI job")
     parser.add_argument("--manual-demo", action="store_true",
                         help="Keep a real local console available; never produces an acceptance PASS")
     parser.add_argument("--demo-seconds", type=int, default=1800,
                         help="Explicit manual demo lifetime, 1800..7200 seconds")
     args = parser.parse_args()
+    if args.github_hosted_ci and (args.manual_demo or sys.platform != "linux"
+                                  or os.environ.get("GITHUB_ACTIONS") != "true"
+                                  or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"):
+        parser.error("--github-hosted-ci requires automated acceptance on a GitHub-hosted Linux runner")
     root = Path(__file__).resolve().parents[1]
     spec = importlib.util.spec_from_file_location(
         "lifecycle_snapshot", root / "scripts/test-service-lifecycle.py"
@@ -335,8 +341,6 @@ def main() -> int:
     for executable in executables:
         helper.require(executable.is_absolute() and executable.is_file()
                        and os.access(executable, os.X_OK), "Absolute installed executable required")
-    helper.require(shutil.disk_usage(root).free >= 50 * 1024**3,
-                   "Less than 50 GB free: assess task-owned rebuildable caches before acceptance")
     host = helper.local_docker_host(os.environ.get("RESTORE_TEST_DOCKER_HOST"))
     docker = ["docker"]
     config = os.environ.get("RESTORE_TEST_DOCKER_CONFIG")
@@ -351,10 +355,20 @@ def main() -> int:
     evidence_group = "console-manual-demo" if args.manual_demo else "console-notifications"
     evidence = args.evidence_dir or root / ".local/evidence" / evidence_group / nonce
     evidence = evidence.absolute()
-    fixture.private_directory(evidence)
     helper.require(evidence.resolve() == evidence
                    and not any(part == "target" for part in evidence.parts),
                    "Evidence must be canonical and outside build caches")
+    fixture.private_directory(evidence)
+    record_path = evidence / "record.json"
+    disk = {"available_bytes": shutil.disk_usage(root).free,
+            "required_bytes": (4 if args.github_hosted_ci else 50) * 1024**3,
+            "github_hosted_ci": args.github_hosted_ci}
+    if disk["available_bytes"] < disk["required_bytes"]:
+        helper.write_record(record_path, {"status": "FAIL", "failed_stage": "disk_preflight",
+                                          "disk_preflight": disk})
+        print(f"Insufficient disk space: {disk['available_bytes']} bytes available, "
+              f"{disk['required_bytes']} required. See {record_path}.", file=sys.stderr)
+        return 1
     snapshot = evidence / "source"
     rows, source_sha = helper.capture(root, snapshot)
     helper.write_record(evidence / "source-manifest.json", {
@@ -366,6 +380,7 @@ def main() -> int:
         "status": "PREPARED_NOT_EXECUTED", "source_sha256": source_sha,
         "snapshot": str(snapshot), "execution_root": str(root),
         "snapshot_is_evidence_copy": True, "checks": [],
+        "disk_preflight": disk,
         "scope": "Actual local Chrome/Keycloak/cookie-BFF/API/TLS PostgreSQL: original account/diagnosis/event/future-automation/stop/revocation matrix plus real coordinator FAILED source, lost ACK reply, current read/write revocation and original-key replay. Source create/manual RENEW use normal domain entries with the actual BFF-verified identity. No cloud/PKI/HA certification.",
     }
     if args.manual_demo:
@@ -373,7 +388,6 @@ def main() -> int:
                        "scope": "Interactive real local Keycloak/BFF/API/TLS PostgreSQL control-plane demo. Normal diagnosis work only; queued compute creation is not a running VM. No cloud, PKI, HA, metrics or backup certification, and no automated acceptance PASS."})
     else:
         record["screenshots_required"] = True
-    record_path = evidence / "record.json"
     helper.write_record(record_path, record)
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(("SANDBOX_", "TEST_"))}
