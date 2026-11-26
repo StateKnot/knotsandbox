@@ -443,7 +443,7 @@ async fn browser_fixture_drain_distinguishes_unobserved_query_and_observed_idle_
     observer.close().await?;
     anyhow::ensure!(
         still_usable == 1 && exists && peers == 1 && exact_idle == 1,
-        "bounded drain must retain the exact live idle owner without terminating it"
+        "bounded drain must retain the exact live idle owner without terminating it: still_usable={still_usable} exists={exists} peers={peers} exact_idle={exact_idle}"
     );
     anyhow::ensure!(
         !exists_after,
