@@ -13,11 +13,15 @@ COPY console/release-assets ./release-assets
 ARG SANDBOX_CONSOLE_FIRST_RELEASE=false
 RUN mkdir -p release-assets/npm-inventory && npm run build && node scripts/prepare-assets.mjs dist release-assets "${SANDBOX_CONSOLE_FIRST_RELEASE}"
 FROM nginxinc/nginx-unprivileged:1.30.5-alpine-slim@sha256:3af0c10d960cc2502427fe1219c52989d309e7d65596869c60a34fd2fa2406f0
-ADD --checksum=sha256:63aeea03c15a2f9018f81805cfc8aa926bdf5cd68921f22149c2fbb5d0ee9f47 https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/zlib-1.3.2-r1.apk /tmp/security/x86_64-zlib-1.3.2-r1.apk
-ADD --checksum=sha256:1f77a542ac6634761b9fe38d8bdca19b154071dcfa25432e73f2bc8a0740a33f https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/zlib-1.3.2-r1.apk /tmp/security/aarch64-zlib-1.3.2-r1.apk
+COPY deploy/console/security/x86_64-zlib-1.3.2-r1.apk /tmp/security/x86_64-zlib-1.3.2-r1.apk
+COPY deploy/console/security/aarch64-zlib-1.3.2-r1.apk /tmp/security/aarch64-zlib-1.3.2-r1.apk
 ARG TARGETARCH
 USER 0:0
-RUN --network=none case "$TARGETARCH" in \
+RUN --network=none printf '%s\n' \
+    '63aeea03c15a2f9018f81805cfc8aa926bdf5cd68921f22149c2fbb5d0ee9f47  /tmp/security/x86_64-zlib-1.3.2-r1.apk' \
+    '1f77a542ac6634761b9fe38d8bdca19b154071dcfa25432e73f2bc8a0740a33f  /tmp/security/aarch64-zlib-1.3.2-r1.apk' \
+    | sha256sum -c - \
+    && case "$TARGETARCH" in \
     amd64) apk_arch=x86_64; test -f "/etc/apk/keys/alpine-devel@lists.alpinelinux.org-6165ee59.rsa.pub" ;; \
     arm64) apk_arch=aarch64; test -f "/etc/apk/keys/alpine-devel@lists.alpinelinux.org-616ae350.rsa.pub" ;; \
     *) exit 1 ;; esac \

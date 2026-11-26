@@ -30,8 +30,13 @@ def validate_lock(lock, current=None):
 def validate_dockerfile(lock, text):
     require('\nFROM ' + lock['base_image'] + '\n' in text, 'CONSOLE_SECURITY_BASE_DRIFT')
     runtime = text.split('\nFROM ' + lock['base_image'] + '\n', 1)[1]
-    expected = {'ADD --checksum=sha256:' + p['sha256'] + ' ' + p['url'] + ' /tmp/security/' + p['file'] for p in lock['packages']}
-    require({line for line in runtime.splitlines() if line.startswith('ADD ')} == expected, 'CONSOLE_SECURITY_DOWNLOAD_DRIFT')
+    expected = {'COPY deploy/console/security/' + p['file'] + ' /tmp/security/' + p['file'] for p in lock['packages']}
+    require(not any(line.startswith('ADD ') for line in runtime.splitlines()), 'CONSOLE_SECURITY_DOWNLOAD_DRIFT')
+    require({line for line in runtime.splitlines() if line.startswith('COPY ') and '/tmp/security/' in line} == expected, 'CONSOLE_SECURITY_DOWNLOAD_DRIFT')
+    checks = "RUN --network=none printf '%s\\n' \\\n" + ''.join(
+        "    '" + p['sha256'] + '  /tmp/security/' + p['file'] + "' \\\n"
+        for p in lock['packages']) + "    | sha256sum -c - \\\n    && case "
+    require(checks in runtime, 'CONSOLE_SECURITY_DOWNLOAD_DRIFT')
     require('ARG TARGETARCH\nUSER 0:0\nRUN --network=none ' in runtime and 'apk add --no-network --repositories-file /dev/null "/tmp/security/${apk_arch}-zlib-' in runtime, 'CONSOLE_SECURITY_OFFLINE_INSTALL_MISSING')
     require('amd64) apk_arch=x86_64; test -f ' in runtime and 'arm64) apk_arch=aarch64; test -f ' in runtime and '*) exit 1 ;; esac' in runtime, 'CONSOLE_SECURITY_ARCH_MAPPING')
     require('--allow-untrusted' not in runtime and 'rm -rf /tmp/security' in runtime and '\nUSER 101:101\n' in runtime, 'CONSOLE_SECURITY_INSTALL_POLICY')

@@ -402,8 +402,16 @@ class SecurityPackageLock(unittest.TestCase):
         lock = validate_console_lock(load(ROOT/'console-security.lock.json'), FIXTURE_TIME)
         dockerfile = (ROOT.parent.parent/'deploy/console/Dockerfile').read_text()
         validate_console_dockerfile(lock, dockerfile)
-        for old, new, code in [(lock['packages'][0]['sha256'], '0'*64, 'DOWNLOAD_DRIFT'), ('RUN --network=none case', 'RUN case', 'OFFLINE_INSTALL_MISSING'), ('apk add --no-network', 'apk add --allow-untrusted --no-network', 'OFFLINE_INSTALL_MISSING'), ('zlib-1.3.2-r1" \\', 'zlib-1.3.2-r0" \\', 'INSTALLED_VERSION_UNCHECKED')]:
+        for package in lock['packages']:
+            retained = ROOT.parent.parent/'deploy/console/security'/package['file']
+            self.assertEqual(retained.stat().st_size, package['size_bytes'])
+            self.assertEqual(sha(retained), package['sha256'])
+        for old, new, code in [(lock['packages'][0]['sha256'], '0'*64, 'DOWNLOAD_DRIFT'), ('RUN --network=none printf', 'RUN printf', 'DOWNLOAD_DRIFT'), ('| sha256sum -c -', '| cat', 'DOWNLOAD_DRIFT'), ('COPY deploy/console/security/x86_64-zlib-1.3.2-r1.apk /tmp/security/x86_64-zlib-1.3.2-r1.apk', '', 'DOWNLOAD_DRIFT'), ('apk add --no-network', 'apk add --allow-untrusted --no-network', 'OFFLINE_INSTALL_MISSING'), ('zlib-1.3.2-r1" \\', 'zlib-1.3.2-r0" \\', 'INSTALLED_VERSION_UNCHECKED')]:
             with self.assertRaisesRegex(ValueError, code): validate_console_dockerfile(lock, dockerfile.replace(old, new))
+        for extra in ('ADD https://example.invalid/zlib.apk /tmp/security/extra.apk',
+                      'COPY deploy/console/security/extra.apk /tmp/security/extra.apk'):
+            with self.assertRaisesRegex(ValueError, 'DOWNLOAD_DRIFT'):
+                validate_console_dockerfile(lock, dockerfile + '\n' + extra + '\n')
         for kind in ('expired', 'url', 'hash', 'architecture', 'signature'):
             changed = copy.deepcopy(lock)
             if kind == 'expired': changed['review_expires_at'] = FIXTURE_TIME.isoformat()
@@ -581,6 +589,10 @@ class ConsoleReleaseProtocol(unittest.TestCase):
         self.assertEqual((self.directory/'staged/console/release-assets/assets/index-fixture.js').read_bytes(),b'fixture')
         self.assertEqual(len(list((self.directory/'staged/console/release-assets/npm-inventory').glob('*/package-lock.json'))),1)
         self.assertFalse((self.directory/'staged/.local').exists())
+        self.assertEqual(sha(self.directory/'staged/sdk/typescript/src/resource-observation.ts'),
+                         sha(source/'sdk/typescript/src/resource-observation.ts'))
+        for package in load(ROOT/'console-security.lock.json')['packages']:
+            self.assertEqual(sha(self.directory/'staged/deploy/console/security'/package['file']), package['sha256'])
         files['usr/share/nginx/html/assets/index-fixture.js']=b'tampered'
         with self.assertRaisesRegex(ValueError,'CONSOLE_ASSET_HASH'):stage_context(source,self.directory/'tampered-stage',files)
     def test_selected_image_links_and_traversal_are_rejected_even_with_valid_blob_hash(self):

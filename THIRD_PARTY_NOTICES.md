@@ -49,6 +49,12 @@ Upstream: [Cilium v1.20.2](https://github.com/cilium/cilium/tree/v1.20.2),
 
 ## Build and runtime dependencies
 
+`deploy/console/security/` retains the unchanged Alpine zlib 1.3.2-r1 binary
+packages for x86_64 and aarch64. Their signed package metadata declares the Zlib
+license. Original download URLs, SHA256 digests and signing keys are recorded in
+`scripts/release/console-security.lock.json`. The packages retain their upstream
+license and signatures.
+
 OCI layer payload decoding uses `flate2` 1.1.10, `crc32fast` 1.5.2,
 `miniz_oxide` 0.9.1, `adler2` 2.0.1 and `simd-adler32` 0.3.10.
 For each crate this distribution selects the upstream MIT license and retains

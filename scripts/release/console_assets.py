@@ -134,6 +134,9 @@ def stage_context(source, destination, previous=None):
     require(not destination.exists(),'FRESH_CONSOLE_CONTEXT_REQUIRED')
     destination.mkdir()
     inputs=['.dockerignore','deploy/console/Dockerfile','console/package.json','console/package-lock.json','console/index.html','console/tsconfig.json','console/vite.config.ts','console/scripts/prepare-assets.mjs','sdk/typescript/src/schema.d.ts','sdk/typescript/src/events.ts','sdk/typescript/src/event-message.ts','sdk/typescript/src/sse.ts','sdk/typescript/src/transport.ts']
+    inputs += ['sdk/typescript/src/resource-observation.ts',
+               'deploy/console/security/x86_64-zlib-1.3.2-r1.apk',
+               'deploy/console/security/aarch64-zlib-1.3.2-r1.apk']
     for name in inputs:
         original=source/name;require(original.is_file() and not original.is_symlink(),'CONSOLE_SOURCE_FILE')
         for parent in original.parents:

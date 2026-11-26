@@ -115,6 +115,10 @@ sdk/typescript/src/**
 !deploy/console/
 deploy/console/**
 !deploy/console/Dockerfile
+!deploy/console/security/
+deploy/console/security/**
+!deploy/console/security/x86_64-zlib-1.3.2-r1.apk
+!deploy/console/security/aarch64-zlib-1.3.2-r1.apk
 !console/scripts/
 console/scripts/**
 !console/scripts/prepare-assets.mjs
